@@ -1,0 +1,215 @@
+This walkthrough is deterministic: claims come from hand annotations and checks are rules. No LLM runs.
+
+=== 1. Create the book and import two synthetic scenes ===
+$ rewrite init <tmp>/book --title La puerta de Sal
+created <tmp>/book
+$ rewrite import <tmp>/book ./fixtures/demo-book/escena-01.md ./fixtures/demo-book/escena-02.md
+imported: scenes/escena-01.md, scenes/escena-02.md; unchanged: none
+
+=== 2. Register claims with provenance ===
+$ rewrite extract <tmp>/book --from ./fixtures/demo-book/annotations.json
+extractor: fixture-annotations (hand annotations, no LLM)
+created: 5; existing: 0; rejected: 0
+$ rewrite claims <tmp>/book
+C-5f032ab267  [proposed] [rumor] evidence: valid (unchanged)
+  Bruno sold the bridge key to the people of Ribera.
+  «Dicen que Bruno vendió la llave del puente a los de Ribera»
+  scenes/escena-01.md @ 7b50450913  scope: book  extractor: fixture-annotations
+  uncertainty: The guard says he did not see it; the source is tavern talk.
+
+C-5f12cf1cbd  [proposed] [narrated_fact] evidence: valid (unchanged)
+  Elena has guarded the Salt bridge for eleven years.
+  «Elena llevaba once años custodiando el puente de Sal»
+  scenes/escena-01.md @ 7b50450913  scope: book  extractor: fixture-annotations
+
+C-8ce4b63496  [proposed] [narrated_fact] evidence: valid (unchanged)
+  Elena knew nothing about the hiding place before that night.
+  «Elena, que hasta esa noche no había sabido nada del escondite»
+  scenes/escena-02.md @ 7b50450913  scope: book  extractor: fixture-annotations
+
+C-bdd14b8bb0  [proposed] [narrated_fact] evidence: valid (unchanged)
+  The key lies under the altar slab, and Clara finds it there.
+  «Clara levantó la losa del altar y encontró debajo la llave del puente»
+  scenes/escena-02.md @ 7b50450913  scope: book  extractor: fixture-annotations
+
+C-e5128a8a29  [proposed] [belief] evidence: valid (unchanged)
+  Elena states that the key lies under the altar slab.
+  «La llave está bajo la losa del altar»
+  scenes/escena-01.md @ 7b50450913  scope: book  extractor: fixture-annotations
+[ok] five claims, all starting as proposed
+[ok] every literal quote exists in its file and revision
+
+=== 3. Fixtures A and C: the reviewer accepts a fact and a rumor ===
+$ rewrite review-claim <tmp>/book C-5f12cf1cbd accept --by demo-reviewer
+recorded: C-5f12cf1cbd is accepted
+$ rewrite review-claim <tmp>/book C-5f032ab267 accept --by demo-reviewer --note It is a rumor in the book.
+recorded: C-5f032ab267 is accepted
+$ rewrite canon <tmp>/book
+C-5f12cf1cbd  [accepted] [narrated_fact] evidence: valid (unchanged)
+  Elena has guarded the Salt bridge for eleven years.
+  «Elena llevaba once años custodiando el puente de Sal»
+  scenes/escena-01.md @ 7b50450913  scope: book  extractor: fixture-annotations
+[ok] A: the accepted fact reaches canon
+[ok] C: the accepted rumor does not reach canon
+
+=== 4. Fixture B: Elena knows where the key is before she finds out ===
+$ rewrite check <tmp>/book
+F-6c2cb5e193  possible_contradiction  (heuristic rule:knowledge-order, not a verdict)
+  Elena shows this knowledge at story time 1, before learning it at story time 4.
+  «La llave está bajo la losa del altar»
+    scenes/escena-01.md @ 7b50450913  story time: 1  reading order: 3  evidence: valid
+  «Elena, que hasta esa noche no había sabido nada del escondite»
+    scenes/escena-02.md @ 7b50450913  story time: 4  reading order: 5  evidence: valid
+  Other readings:
+    - insufficient_evidence: the text may not establish when the character learned this
+    - deliberate_mystery: the author may be withholding how the character knows
+    - off_page: the character may have learned it in a moment the text does not show
+    - guess_or_lie: the character may be guessing or lying, and turn out to be right by chance
+  Human verdict: none yet
+[ok] B: possible contradiction with two verifiable quotes
+
+=== 5. Reject a proposed change: the text does not move ===
+$ rewrite show <tmp>/book P-d8ba13a3dd
+P-d8ba13a3dd  [proposed]
+rationale: First attempt: this still reveals too much.
+finding: F-6c2cb5e193
+
+--- scenes/escena-01.md @ 989910acca
++++ scenes/escena-01.md (proposed)
+@@ -8,6 +8,6 @@ El guardia escupió sobre las losas antes de hablar en voz baja.
+ 
+ Elena cerró el libro de guardia y lo miró sin parpadear.
+ 
+-—No fue Bruno —dijo Elena—. La llave está bajo la losa del altar.
++—No fue Bruno —dijo Elena—. La llave la tiene Clara.
+ 
+ El guardia no preguntó cómo lo sabía. Fuera empezaba a llover sobre el puente.
+$ rewrite review-proposal <tmp>/book P-d8ba13a3dd reject --by demo-reviewer --note It still reveals too much.
+recorded: P-d8ba13a3dd is rejected; the text was not changed
+[ok] after rejecting, the text is byte-identical
+
+=== 6. Repeat a proposal: nothing is duplicated ===
+$ rewrite propose <tmp>/book --file scenes/escena-01.md --find La llave está bajo la losa del altar --finding F-6c2cb5e193 --replace No sé quién tiene la llave --rationale Elena learns about the hiding place only in scene 2.
+already exists (proposed): P-b5c0b0aeec
+
+--- scenes/escena-01.md @ f7688b7f5e
++++ scenes/escena-01.md (proposed)
+@@ -8,6 +8,6 @@ El guardia escupió sobre las losas antes de hablar en voz baja.
+ 
+ Elena cerró el libro de guardia y lo miró sin parpadear.
+ 
+-—No fue Bruno —dijo Elena—. La llave está bajo la losa del altar.
++—No fue Bruno —dijo Elena—. No sé quién tiene la llave.
+ 
+ El guardia no preguntó cómo lo sabía. Fuera empezaba a llover sobre el puente.
+[ok] the repeated proposal did not create a new record
+
+=== 7. Accept the change: a new traceable version ===
+$ rewrite show <tmp>/book P-b5c0b0aeec
+P-b5c0b0aeec  [proposed]
+rationale: Elena learns about the hiding place only in scene 2.
+finding: F-6c2cb5e193
+
+--- scenes/escena-01.md @ f7688b7f5e
++++ scenes/escena-01.md (proposed)
+@@ -8,6 +8,6 @@ El guardia escupió sobre las losas antes de hablar en voz baja.
+ 
+ Elena cerró el libro de guardia y lo miró sin parpadear.
+ 
+-—No fue Bruno —dijo Elena—. La llave está bajo la losa del altar.
++—No fue Bruno —dijo Elena—. No sé quién tiene la llave.
+ 
+ El guardia no preguntó cómo lo sabía. Fuera empezaba a llover sobre el puente.
+$ rewrite review-proposal <tmp>/book P-b5c0b0aeec accept --by demo-reviewer
+recorded: P-b5c0b0aeec is accepted; new version 4f52ec37dfd437817c0298f0341bb4c4ac530079
+[ok] the new commit holds the accepted text
+[ok] the base revision still holds the original
+[ok] the evidence for the old sentence is now orphaned
+[ok] the finding is gone with its evidence
+
+=== 8. Fixture D: an edit invalidates evidence that canon relied on ===
+$ rewrite claims <tmp>/book
+C-5f032ab267  [accepted] [rumor] evidence: valid (relocated)
+  Bruno sold the bridge key to the people of Ribera.
+  «Dicen que Bruno vendió la llave del puente a los de Ribera»
+  scenes/escena-01.md @ 7b50450913  scope: book  extractor: fixture-annotations
+  uncertainty: The guard says he did not see it; the source is tavern talk.
+
+C-5f12cf1cbd  [accepted] [narrated_fact] evidence: orphaned (quote_not_found)
+  Elena has guarded the Salt bridge for eleven years.
+  «Elena llevaba once años custodiando el puente de Sal»
+  scenes/escena-01.md @ 7b50450913  scope: book  extractor: fixture-annotations
+
+C-8ce4b63496  [proposed] [narrated_fact] evidence: valid (unchanged)
+  Elena knew nothing about the hiding place before that night.
+  «Elena, que hasta esa noche no había sabido nada del escondite»
+  scenes/escena-02.md @ 7b50450913  scope: book  extractor: fixture-annotations
+
+C-bdd14b8bb0  [proposed] [narrated_fact] evidence: valid (unchanged)
+  The key lies under the altar slab, and Clara finds it there.
+  «Clara levantó la losa del altar y encontró debajo la llave del puente»
+  scenes/escena-02.md @ 7b50450913  scope: book  extractor: fixture-annotations
+
+C-e5128a8a29  [proposed] [belief] evidence: orphaned (quote_not_found)
+  Elena states that the key lies under the altar slab.
+  «La llave está bajo la losa del altar»
+  scenes/escena-01.md @ 7b50450913  scope: book  extractor: fixture-annotations
+[ok] D: the edited quote is orphaned, never shown as current
+[ok] D: the fact falls out of canon until someone reviews it again
+[ok] undoing the edit makes the same anchor valid again
+
+=== 9. Close and reopen: a fresh clone restores everything ===
+$ rewrite status <tmp>/clone
+{
+  "title": "La puerta de Sal",
+  "head": "4f52ec37dfd437817c0298f0341bb4c4ac530079",
+  "scenes": [
+    "scenes/escena-01.md",
+    "scenes/escena-02.md"
+  ],
+  "claims": [
+    {
+      "claim_id": "C-5f032ab267",
+      "editorial_status": "accepted",
+      "evidence_status": "valid"
+    },
+    {
+      "claim_id": "C-5f12cf1cbd",
+      "editorial_status": "accepted",
+      "evidence_status": "valid"
+    },
+    {
+      "claim_id": "C-8ce4b63496",
+      "editorial_status": "proposed",
+      "evidence_status": "valid"
+    },
+    {
+      "claim_id": "C-bdd14b8bb0",
+      "editorial_status": "proposed",
+      "evidence_status": "valid"
+    },
+    {
+      "claim_id": "C-e5128a8a29",
+      "editorial_status": "proposed",
+      "evidence_status": "orphaned"
+    }
+  ],
+  "findings": [],
+  "proposals": [
+    {
+      "proposal_id": "P-b5c0b0aeec",
+      "file": "scenes/escena-01.md",
+      "status": "accepted"
+    },
+    {
+      "proposal_id": "P-d8ba13a3dd",
+      "file": "scenes/escena-01.md",
+      "status": "rejected"
+    }
+  ]
+}
+[ok] claims restored
+[ok] proposal decisions restored
+[ok] canon restored
+
+WALKTHROUGH PASSED

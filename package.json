@@ -1,0 +1,22 @@
+{
+  "name": "rewrite",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Narrative memory with evidence and human review: synthetic vertical slice.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "rewrite": "src/cli/main.ts"
+  },
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.ts\"",
+    "demo": "node scripts/demo.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "jose": "6.2.14",
+    "zod": "4.6.7"
+  }
+}

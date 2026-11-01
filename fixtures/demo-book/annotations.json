@@ -1,0 +1,62 @@
+{
+  "extractor": "fixture-annotations",
+  "candidates": [
+    {
+      "statement": "Elena has guarded the Salt bridge for eleven years.",
+      "subject": "Elena",
+      "source_file": "scenes/escena-01.md",
+      "quote": "Elena llevaba once años custodiando el puente de Sal",
+      "scope": "book",
+      "epistemic_kind": "narrated_fact",
+      "story_time": 1,
+      "reveal_order": 1
+    },
+    {
+      "statement": "Bruno sold the bridge key to the people of Ribera.",
+      "subject": "Bruno",
+      "source_file": "scenes/escena-01.md",
+      "quote": "Dicen que Bruno vendió la llave del puente a los de Ribera",
+      "scope": "book",
+      "epistemic_kind": "rumor",
+      "asserter": "the guard",
+      "epistemic_holder": "the guard",
+      "uncertainty": "The guard says he did not see it; the source is tavern talk.",
+      "story_time": 1,
+      "reveal_order": 2
+    },
+    {
+      "statement": "Elena states that the key lies under the altar slab.",
+      "subject": "Elena",
+      "source_file": "scenes/escena-01.md",
+      "quote": "La llave está bajo la losa del altar",
+      "scope": "book",
+      "epistemic_kind": "belief",
+      "asserter": "Elena",
+      "epistemic_holder": "Elena",
+      "story_time": 1,
+      "reveal_order": 3,
+      "knowledge": { "holder": "Elena", "fact": "key-under-altar", "mode": "displays" }
+    },
+    {
+      "statement": "The key lies under the altar slab, and Clara finds it there.",
+      "subject": "Clara",
+      "source_file": "scenes/escena-02.md",
+      "quote": "Clara levantó la losa del altar y encontró debajo la llave del puente",
+      "scope": "book",
+      "epistemic_kind": "narrated_fact",
+      "story_time": 4,
+      "reveal_order": 4
+    },
+    {
+      "statement": "Elena knew nothing about the hiding place before that night.",
+      "subject": "Elena",
+      "source_file": "scenes/escena-02.md",
+      "quote": "Elena, que hasta esa noche no había sabido nada del escondite",
+      "scope": "book",
+      "epistemic_kind": "narrated_fact",
+      "story_time": 4,
+      "reveal_order": 5,
+      "knowledge": { "holder": "Elena", "fact": "key-under-altar", "mode": "acquires" }
+    }
+  ]
+}
