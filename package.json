@@ -12,6 +12,9 @@
   },
   "scripts": {
     "test": "node --test \"tests/**/*.test.ts\"",
+    "hcs:fetch": "node scripts/hcs-fetch.ts",
+    "hcs:trace": "node scripts/hcs-traceability.ts",
+    "hcs:trace:check": "node scripts/hcs-traceability.ts --check",
     "demo": "node scripts/demo.ts"
   },
   "dependencies": {
