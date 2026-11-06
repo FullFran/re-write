@@ -72,18 +72,25 @@ Extension kinds follow HCS-0001 section 3.2: `path` points inside the unpacked p
 
 Capabilities are named by contract, not by package (HCS-0002). Host built-ins are provided by RE;write itself; packages require them.
 
-| Capability | Provider | MCP tools today |
-| --- | --- | --- |
-| `com.fullfran.rewrite.book.read@1` | host | `list_books`, `list_scenes`, `read_scene` |
-| `com.fullfran.rewrite.claims.read@1` | host | `list_claims` |
-| `com.fullfran.rewrite.claims.propose@1` | host | `propose_claims` |
-| `com.fullfran.rewrite.revision.propose@1` | host | `propose_revision`, `list_proposals`, `get_proposal` |
-| `com.fullfran.rewrite.continuity.check@1` | package (`x-rewrite-check`) | `inspect_continuity` |
-| `com.fullfran.rewrite.claims.extract@1` | package (`x-rewrite-extractor`) | none yet (CLI `extract`) |
-| `com.fullfran.rewrite.entities.read@1` | host (planned, [#12](https://github.com/FullFran/re-write/issues/12)) | none yet |
-| `com.fullfran.rewrite.events.read@1` | host (planned, [#15](https://github.com/FullFran/re-write/issues/15)) | none yet |
+| Capability | Major | Provider | Contract and MCP tools today |
+| --- | --- | --- | --- |
+| `com.fullfran.rewrite.book.read@1` | 1 | host | Read books and scenes: `list_books`, `list_scenes`, `read_scene` |
+| `com.fullfran.rewrite.claims.read@1` | 1 | host | Read claims: `list_claims` |
+| `com.fullfran.rewrite.claims.propose@1` | 1 | host | Propose claims: `propose_claims` |
+| `com.fullfran.rewrite.revision.propose@1` | 1 | host | Propose revisions and inspect proposals: `propose_revision`, `list_proposals`, `get_proposal` |
+| `com.fullfran.rewrite.continuity.check@1` | 1 | package (`x-rewrite-check`) | Inspect continuity: `inspect_continuity` |
+| `com.fullfran.rewrite.claims.extract@1` | 1 | package (`x-rewrite-extractor`) | Extract claim candidates: none yet (CLI `extract`) |
+| `com.fullfran.rewrite.entities.read@1` | 1 | host (planned, [#12](https://github.com/FullFran/re-write/issues/12)) | Read entities: none yet |
+| `com.fullfran.rewrite.events.read@1` | 1 | host (planned, [#15](https://github.com/FullFran/re-write/issues/15)) | Read events: none yet |
 
-Permissions use the same prefix: `book.read`, `book.import`, `claims.propose`, `findings.propose`, `revision.propose`. There is deliberately no grantable permission for review: `review.decide` exists only on the review door and is never granted to an entry.
+| Permission | Allows | Grantable to an entry |
+| --- | --- | --- |
+| `com.fullfran.rewrite.book.read` | Read books and scenes | yes |
+| `com.fullfran.rewrite.book.import` | Import outside records as proposals | yes |
+| `com.fullfran.rewrite.claims.propose` | Propose claims | yes |
+| `com.fullfran.rewrite.findings.propose` | Propose findings | yes |
+| `com.fullfran.rewrite.revision.propose` | Propose revisions | yes |
+| `com.fullfran.rewrite.review.decide` | Accept or reject through the review door only | no |
 
 Extension members are `x-rewrite-*`. Product refusals (quote not literal, stale evidence, unknown book) are not HCS errors; they are RFC 9457 problem types under a URI RE;write owns (HCS-0006 section 3).
 
