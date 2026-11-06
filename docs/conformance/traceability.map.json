@@ -1,0 +1,37 @@
+{
+  "documents": {
+    "HCS-0000": { "status": "planned", "issue": 21 },
+    "HCS-0001": { "status": "planned", "issue": 25 },
+    "HCS-0002": { "status": "planned", "issue": 21 },
+    "HCS-0003": { "status": "planned", "issue": 27 },
+    "HCS-0004": { "status": "planned", "issue": 29 },
+    "HCS-0005": { "status": "planned", "issue": 30 },
+    "HCS-0006": { "status": "planned", "issue": 28 },
+    "HCS-0007": { "status": "planned", "issue": 32 },
+    "HCS-0008": { "status": "planned", "issue": 36 }
+  },
+  "requirements": {
+    "HCS-0000-R001": { "status": "not-applicable", "reason": "Process rule on the HCS repository, not on hosts." },
+    "HCS-0000-R002": { "status": "not-applicable", "reason": "Process rule on the HCS repository, not on hosts." },
+    "HCS-0001-R007": { "status": "planned", "issue": 26 },
+    "HCS-0001-R012": { "status": "planned", "issue": 26 },
+    "HCS-0001-R014": { "status": "planned", "issue": 24 },
+    "HCS-0003-R010": { "status": "not-applicable", "reason": "re-write declares all-or-nothing, not partial policy." },
+    "HCS-0007-R015": { "status": "planned", "issue": 33 },
+    "HCS-0007-R016": { "status": "planned", "issue": 33 },
+    "HCS-0007-R018": { "status": "planned", "issue": 33 },
+    "HCS-0007-R020": { "status": "planned", "issue": 34 },
+    "HCS-0007-R021": { "status": "planned", "issue": 43 },
+    "HCS-0008-R006": { "status": "planned", "issue": 37 },
+    "HCS-0008-R007": { "status": "planned", "issue": 37 },
+    "HCS-0008-R008": { "status": "planned", "issue": 38 },
+    "HCS-0008-R009": { "status": "planned", "issue": 38 },
+    "HCS-0008-R010": { "status": "planned", "issue": 39 },
+    "HCS-0008-R011": { "status": "planned", "issue": 39 },
+    "HCS-0008-R012": { "status": "planned", "issue": 39 },
+    "HCS-0008-R013": { "status": "planned", "issue": 41 },
+    "HCS-0008-R014": { "status": "planned", "issue": 40 },
+    "HCS-0008-R015": { "status": "planned", "issue": 41 },
+    "HCS-0008-R016": { "status": "planned", "issue": 41 }
+  }
+}
