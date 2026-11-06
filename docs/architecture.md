@@ -61,7 +61,7 @@ The rule: **what defines truth or decides is host core; what analyses, suggests 
 | Standing instructions for agents (the untrusted-text rules) | host-owned instructions, plus packages of kind `x-rewrite-instructions` that may only narrow | AGENTS.md convention; extension kind until HCS promotes it |
 | External tools an agent may use (for example a notes workspace MCP server) | package, kind `mcp-server` | MCP Registry `server.json`, secrets only from grants |
 
-Extension kinds follow HCS-0001 section 3.2: `path` points inside the unpacked package; each kind has a small contract.
+See [contribution kinds and module classification](contributions.md) for the per-module mapping, contracts and first packages. Extension kinds follow HCS-0001 section 3.2: `path` points inside the unpacked package; each kind has a small contract.
 
 - `x-rewrite-extractor`: a module or declarative file that, given a scene, returns `ClaimCandidate` objects. Requests `com.fullfran.rewrite.book.read` and `com.fullfran.rewrite.claims.propose`.
 - `x-rewrite-check`: rules that, given claims and the narrative model, return findings with alternatives. Requests `com.fullfran.rewrite.book.read` and `com.fullfran.rewrite.findings.propose`.
