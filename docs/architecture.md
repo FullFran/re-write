@@ -1,0 +1,128 @@
+# Architecture: RE;write as an HCS host
+
+Status: proposed with [ADR-0001](adr/0001-adopt-hcs.md). Work is tracked in [roadmap.md](roadmap.md).
+
+RE;write is a host in the sense of the Harness Composition Specification (HCS): it reads a catalog of packages, resolves and activates them, grants them authority, and projects them into the engines its users work with. The writing domain is the host's own core. This page says what is core, what is a package, how a package reaches an engine, and where each planned feature fits.
+
+## 1. Layers
+
+```mermaid
+flowchart TB
+  subgraph Distribution["Distribution (HCS-0007)"]
+    PUB[publish: build, sign, provenance] --> ENV[signed catalog envelope]
+  end
+  subgraph Host["RE;write host"]
+    ENV --> V[verify envelope and key set]
+    V --> CAT[catalog: HCS-0001]
+    CAT --> RES[resolution: HCS-0003]
+    RES --> AUTH[grants: HCS-0005]
+    AUTH --> LIFE[lifecycle and generations: HCS-0004]
+    LIFE --> GEN[(generation N, immutable)]
+    CORE[Domain core: scenes, claims, evidence, proposals, review, versions, entities]
+    DEC{{decision point: subject x book x entry x permission}}
+  end
+  subgraph Engines["Engines (HCS-0008)"]
+    MCP[MCP sessions of connected clients]
+    EMB[embedded engine, host-started]
+  end
+  REVIEW[Review door: people only]
+  GEN --> MCP
+  GEN --> EMB
+  MCP --> DEC --> CORE
+  EMB --> DEC
+  REVIEW --> CORE
+```
+
+| Layer | HCS documents | RE;write milestone |
+| --- | --- | --- |
+| Conventions, ids, extension namespace | HCS-0000, HCS-0002 | M1 |
+| Catalog, resolution, lifecycle, typed errors | HCS-0001, HCS-0003, HCS-0004, HCS-0006 | M2 |
+| Authority | HCS-0005 | M3 |
+| Signed distribution | HCS-0007 (DISTRO-1) | M4 |
+| Projection into engines | HCS-0008 (Provisional) | M5 |
+| Observability | HCS-0004 section 4, HCS-0007-R021 | M6 |
+| Conformance | HCS-0000 section 8, profiles CORE-0 and DISTRO-1 | M7 |
+
+## 2. Host core versus packages
+
+The rule: **what defines truth or decides is host core; what analyses, suggests or connects is a package.**
+
+| Part | Where | Why |
+| --- | --- | --- |
+| Scenes, revisions, anchors and evidence status | core | Evidence status is derived on every read and must never depend on optional code |
+| Claims, editorial and evidence states, canon query | core | Canon is a query over core state, not something a package can set |
+| Proposals and review (accept, reject, verdicts) | core, review door only | Human approval is a host-owned boundary (section 5) |
+| Manuscript versions, narrative entities, events, timeline | core | Shared model every package reads; one definition |
+| Access: people to books | core | Composed with package grants in one decision point (section 5) |
+| Claim extractors (fixture annotations today, agent-driven later) | package, kind `x-rewrite-extractor` | Several can exist; output goes through the same literal-quote check |
+| Continuity rules (knowledge order today) and craft diagnostics | package, kind `x-rewrite-check` | Heuristics that produce findings, never verdicts |
+| Importers and exporters (for example a notes workspace) | package, kind `x-rewrite-importer` | Bring outside material in as proposals only |
+| Procedures for agents (how to extract, how to propose, onboarding now in `/llms.txt`) | package, kind `skill` | Agent Skills as is |
+| Standing instructions for agents (the untrusted-text rules) | host-owned instructions, plus packages of kind `x-rewrite-instructions` that may only narrow | AGENTS.md convention; extension kind until HCS promotes it |
+| External tools an agent may use (for example a notes workspace MCP server) | package, kind `mcp-server` | MCP Registry `server.json`, secrets only from grants |
+
+Extension kinds follow HCS-0001 section 3.2: `path` points inside the unpacked package; each kind has a small contract.
+
+- `x-rewrite-extractor`: a module or declarative file that, given a scene, returns `ClaimCandidate` objects. Requests `com.fullfran.rewrite.book.read` and `com.fullfran.rewrite.claims.propose`.
+- `x-rewrite-check`: rules that, given claims and the narrative model, return findings with alternatives. Requests `com.fullfran.rewrite.book.read` and `com.fullfran.rewrite.findings.propose`.
+- `x-rewrite-importer`: maps outside records to proposals; never writes canon. Requests `com.fullfran.rewrite.book.import`.
+- `x-rewrite-instructions`: Markdown in the AGENTS.md convention; may only add restrictions.
+
+## 3. Identifiers
+
+Capabilities are named by contract, not by package (HCS-0002). Host built-ins are provided by RE;write itself; packages require them.
+
+| Capability | Provider | MCP tools today |
+| --- | --- | --- |
+| `com.fullfran.rewrite.book.read@1` | host | `list_books`, `list_scenes`, `read_scene` |
+| `com.fullfran.rewrite.claims.read@1` | host | `list_claims` |
+| `com.fullfran.rewrite.claims.propose@1` | host | `propose_claims` |
+| `com.fullfran.rewrite.revision.propose@1` | host | `propose_revision`, `list_proposals`, `get_proposal` |
+| `com.fullfran.rewrite.continuity.check@1` | package (`x-rewrite-check`) | `inspect_continuity` |
+| `com.fullfran.rewrite.claims.extract@1` | package (`x-rewrite-extractor`) | none yet (CLI `extract`) |
+| `com.fullfran.rewrite.entities.read@1` | host (planned, [#12](https://github.com/FullFran/re-write/issues/12)) | none yet |
+| `com.fullfran.rewrite.events.read@1` | host (planned, [#15](https://github.com/FullFran/re-write/issues/15)) | none yet |
+
+Permissions use the same prefix: `book.read`, `book.import`, `claims.propose`, `findings.propose`, `revision.propose`. There is deliberately no grantable permission for review: `review.decide` exists only on the review door and is never granted to an entry.
+
+Extension members are `x-rewrite-*`. Product refusals (quote not literal, stale evidence, unknown book) are not HCS errors; they are RFC 9457 problem types under a URI RE;write owns (HCS-0006 section 3).
+
+## 4. Engines and generations
+
+A **generation** is the immutable, prepared set of packages of one desired set (HCS-0008 section 2). A pointer selects the generation for new runs; it is switched as one step after the whole set is prepared.
+
+| Engine | Started by RE;write | How a generation reaches it | HCS-0008 |
+| --- | --- | --- | --- |
+| Connected MCP clients (ChatGPT, Claude Code, OpenCode, others) | no | Each MCP session's tools, prompts, instructions and skill resources are built from one generation, fixed for the session's life | by analogy: R001-R007, R017; health = first successful call. This case is a gap in HCS, reported there |
+| Embedded engine for writers without their own agent (Pi first) | yes | A per-run projection that points at the generation directory, with RE;write's MCP server as a host-owned server | applies fully, including R013-R016 |
+
+The model comes from the connected client; only the embedded engine needs one paid by the operator, chosen from a host-owned allowlist ([#5](https://github.com/FullFran/re-write/issues/5)).
+
+## 5. Authority and the review boundary
+
+An operation is allowed only when all of these hold, checked when it is dispatched (HCS-0005-R003):
+
+1. the person (subject from OAuth) may use the book;
+2. the package entry, if the operation comes from a package, holds a grant for the permission;
+3. the operation is reachable through the door it arrived on.
+
+There are two doors. The MCP door can read and propose. The review door, behind a browser session, is the only way to accept or reject. That is a host-owned setting: generation content cannot add an approve tool, remove the untrusted-text instruction or widen it (HCS-0008-R007). Per-person credentials for projected MCP servers follow [#4](https://github.com/FullFran/re-write/issues/4).
+
+## 6. Where the planned features fit
+
+| Issue | Feature | Fit |
+| --- | --- | --- |
+| [#11](https://github.com/FullFran/re-write/issues/11) | Re-anchoring and reopening decisions | core, review door only; reopening is a review action |
+| [#12](https://github.com/FullFran/re-write/issues/12) | Entities and relationships | core model; read through new `entities.read@1` capability; relationship suggestions from packages are proposals |
+| [#13](https://github.com/FullFran/re-write/issues/13) | Manuscript versions and canon | core; a manuscript version is not an HCS generation (different things, different names) |
+| [#14](https://github.com/FullFran/re-write/issues/14) | Character, reader and narrator knowledge | core model for knowledge records; detection rules ship as `x-rewrite-check` packages |
+| [#15](https://github.com/FullFran/re-write/issues/15) | Timeline and events | core model; ordering suggestions are proposals |
+| [#16](https://github.com/FullFran/re-write/issues/16) | Import and export with a notes workspace | `x-rewrite-importer` package plus optional `mcp-server`; per-person credentials ([#4](https://github.com/FullFran/re-write/issues/4)) |
+| [#17](https://github.com/FullFran/re-write/issues/17) | Writer workspace | host core UI on the review door; not a package |
+| [#18](https://github.com/FullFran/re-write/issues/18) | Evidence search and finding history | core queries exposed as MCP tools; verdict history on the review door |
+| [#19](https://github.com/FullFran/re-write/issues/19) | Scene planning and craft diagnostics | exploratory; diagnostics ship as `x-rewrite-check` packages |
+| [#1](https://github.com/FullFran/re-write/issues/1), [#2](https://github.com/FullFran/re-write/issues/2), [#3](https://github.com/FullFran/re-write/issues/3) | Backup and isolation, review end to end, extraction evaluation | operations (M3), core review (P1), extractor packages (P1) |
+
+## 7. What does not change
+
+Evidence status stays derived, never stored. Canon stays a query. Ids stay content-derived. Book state stays in the book repository. Text changes only on a human accept, in the same commit as the decision.
