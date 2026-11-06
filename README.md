@@ -60,3 +60,7 @@ rewrite review-proposal /tmp/book <proposal-id> accept --by "your name"
 | `grant <data-dir> <book> <user-id>` | Gives a person access to a book on a server |
 
 Add `--json` to any command. Exit codes: 0 for success, 1 for a refusal, 2 for a usage error.
+
+## Direction
+
+RE;write is being rebuilt as an application of the Harness Composition Specification: see [ADR-0001](docs/adr/0001-adopt-hcs.md), [architecture](docs/architecture.md) and the [roadmap](docs/roadmap.md).
