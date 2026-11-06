@@ -23,6 +23,7 @@ Each row describes the current file and, where it contains a future package, the
 | `src/domain/claim.ts` | Host core | Defines claims, editorial transitions and the canon query. |
 | `src/domain/continuity.ts` | Host core and package: `x-rewrite-check` | Finding and verdict types remain core; the knowledge-order heuristic can move to a package. Verdict decisions remain human-only. |
 | `src/domain/proposal.ts` | Host core | Proposal identity and exact text changes belong to the review flow. |
+| `src/hcs/errors.ts` | Host core | HCS error objects and the closed code set are host infrastructure (HCS-0006). |
 | `src/hcs/extensions.ts` | Host core | HCS extension handling is host infrastructure. |
 | `src/hcs/ids.ts` | Host core | Defines the host's capability and permission vocabulary. |
 | `src/server/main.ts` | Host core | Starts the host and its server. |
@@ -84,4 +85,4 @@ These are planned packages, not currently installed contributions. The fixture e
 
 ## Supported kinds
 
-The planned catalog validator ([#25](https://github.com/FullFran/re-write/issues/25)) supports exactly `skill`, `mcp-server`, `x-rewrite-extractor`, `x-rewrite-check`, `x-rewrite-importer` and `x-rewrite-instructions`. It must refuse every other contribution kind with a typed error (HCS-0001-R008); this is a planned behavior, not an implemented validator.
+The host supports exactly `skill`, `mcp-server`, `x-rewrite-extractor`, `x-rewrite-check`, `x-rewrite-importer` and `x-rewrite-instructions`. The catalog reader ([#25](https://github.com/FullFran/re-write/issues/25)) accepts any kind the grammar allows (HCS-0001-R006); resolution ([#27](https://github.com/FullFran/re-write/issues/27)) refuses to activate an entry with any other kind and reports `unsupported_contribution` (HCS-0001-R008). This is planned behavior until those issues land.
