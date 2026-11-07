@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -200,6 +202,65 @@ test('a lock left by a dead process is taken over', fixture(async ({ stateDir, s
   await applyDesiredSet(catalog(entry('a')), { stateDir, storeDir });
   assert.equal(pointer(stateDir), 1);
   assert.equal(existsSync(join(stateDir, 'lock')), false);
+}));
+
+test('two writers taking over the same stale lock: only one acquires it', fixture(async ({ stateDir, storeDir, entry, catalog }) => {
+  const dead = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' });
+  mkdirSync(stateDir, { recursive: true });
+  const lock = join(stateDir, 'lock');
+  writeFileSync(lock, JSON.stringify({ pid: Number(dead.stdout), at: new Date(0).toISOString() }));
+  // Both writers inspect the same stale lock. Just before the first one removes it, the second
+  // completes its own takeover and creates a fresh lock.
+  let second: Promise<unknown> | undefined, interleaved = false;
+  const original = { renameSync: fs.renameSync, unlinkSync: fs.unlinkSync };
+  const interleave = <T extends (...args: any[]) => any>(real: T) => ((...args: any[]) => {
+    if (args[0] === lock && !interleaved) { interleaved = true; second = applyDesiredSet(catalog(entry('b')), { stateDir, storeDir }); }
+    return real(...args);
+  }) as T;
+  fs.renameSync = interleave(original.renameSync); fs.unlinkSync = interleave(original.unlinkSync); syncBuiltinESMExports();
+  let first: Promise<unknown>;
+  try { first = applyDesiredSet(catalog(entry('a')), { stateDir, storeDir }); }
+  finally { fs.renameSync = original.renameSync; fs.unlinkSync = original.unlinkSync; syncBuiltinESMExports(); }
+  assert.ok(second, 'the second writer ran');
+  const results = await Promise.allSettled([first, second]);
+  assert.deepEqual(results.map(r => r.status === 'rejected' && r.reason instanceof HostBusyError ? 'busy' : r.status).sort(), ['busy', 'fulfilled']);
+  assert.equal(existsSync(lock), false);
+  assert.deepEqual(readdirSync(stateDir).filter(name => name.startsWith('.lock')), []);
+}));
+
+test('a lock whose pid is alive but belongs to another process start is taken over', { skip: !existsSync('/proc/self/stat') }, fixture(async ({ stateDir, storeDir, entry, catalog }) => {
+  mkdirSync(stateDir, { recursive: true });
+  // The PID is alive (this process) but the recorded start identity is not this process's: the PID was reused.
+  writeFileSync(join(stateDir, 'lock'), JSON.stringify({ pid: process.pid, start: '1', at: new Date(0).toISOString() }));
+  await applyDesiredSet(catalog(entry('a')), { stateDir, storeDir });
+  assert.equal(pointer(stateDir), 1);
+  assert.equal(existsSync(join(stateDir, 'lock')), false);
+}));
+
+test('a lock whose pid and start identity match a live process keeps the host busy', { skip: !existsSync('/proc/self/stat') }, fixture(async ({ stateDir, storeDir, entry, catalog }) => {
+  mkdirSync(stateDir, { recursive: true });
+  const start = readFileSync('/proc/self/stat', 'utf8').split(') ')[1].split(' ')[19];
+  writeFileSync(join(stateDir, 'lock'), JSON.stringify({ pid: process.pid, start, at: new Date(0).toISOString() }));
+  await assert.rejects(applyDesiredSet(catalog(entry('a')), { stateDir, storeDir }), HostBusyError);
+  assert.equal(pointer(stateDir), null);
+}));
+
+test('a step deadline aborts the package download of the authorize and prepare steps', fixture(async ({ stateDir, storeDir, entry, catalog }) => {
+  const signals: AbortSignal[] = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    signals.push(init!.signal!);
+    return new Promise<Response>(() => {});
+  }) as typeof fetch;
+  try {
+    const remote = entry('a', { contentHash: `sha256:${'1'.repeat(64)}`, locations: ['https://packages.invalid/a.tar.gz'] });
+    // Default authorization fetches the package to read its requests; then the prepare step fetches it.
+    for (const authorize of [undefined, async () => true]) {
+      await assert.rejects(applyDesiredSet(catalog(remote), { stateDir, storeDir, stepDeadlineMs: 50, authorize }), failure(e => assert.equal(e.errors[0].code, 'timeout')));
+    }
+    assert.equal(signals.length, 2);
+    assert.deepEqual(signals.map(s => s.aborted), [true, true]);
+  } finally { globalThis.fetch = original; }
 }));
 
 // A package whose root holds an HCS-0005 request document, stored where the host fetches it.

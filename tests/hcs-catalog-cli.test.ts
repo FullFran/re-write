@@ -1,10 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 
 const cli = resolve('src/cli/main.ts');
 
@@ -24,9 +23,12 @@ test('catalog CLI validates, applies, reports status and keeps the previous gene
       const built = run('package', resolve('fixtures/packages', p.name), '--out', `${p.name}.tar.gz`, '--json');
       assert.equal(built.status, 0, built.stderr);
       const meta = JSON.parse(built.stdout);
+      // The host reads packages from the content-addressed store; without --store it is <state>/store.
+      const [algorithm, digest] = meta.contentHash.split(':');
+      mkdirSync(join(temp, 'state/store', algorithm), { recursive: true });
+      copyFileSync(join(temp, meta.file), join(temp, 'state/store', algorithm, digest));
       return {
         id: `com.fullfran.rewrite.${p.name}`, version: '0.1.0', contentHash: meta.contentHash, size: meta.size, mediaType: meta.mediaType,
-        locations: [pathToFileURL(join(temp, meta.file)).href],
         contributions: [{ kind: p.kind, path: 'index.mjs', provides: [p.provides] }],
       };
     });

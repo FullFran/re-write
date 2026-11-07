@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
+import { chmodSync, closeSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { readCatalog, type CatalogEntry } from './catalog.ts';
 import { HcsFailure, hcsError, type HcsError } from './errors.ts';
@@ -22,7 +22,8 @@ export interface ApplyOptions {
   activator?: Activator;
   // Authorization hook. The default authorizes an entry only when every permission its package
   // requests is granted in `<grantsDir>/grants.json` (HCS-0005); an HcsFailure it throws is reported as is.
-  authorize?: (entry: CatalogEntry) => Promise<boolean>;
+  // The signal aborts when the step exceeds its deadline.
+  authorize?: (entry: CatalogEntry, signal: AbortSignal) => Promise<boolean>;
   // Where the default authorization reads grants; defaults to `stateDir`.
   grantsDir?: string;
   stepDeadlineMs?: number;
@@ -95,6 +96,25 @@ function alive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (error: any) { return error.code === 'EPERM'; }
 }
 
+// The start time of a process (field 22 of /proc/<pid>/stat on Linux), so a reused PID is not
+// mistaken for the writer that left a lock. Undefined where it cannot be read.
+function processStart(pid: number): string | undefined {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    // The command name (field 2) may hold spaces and parentheses; the fields after it follow the last ')'.
+    const start = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+    return start && /^[0-9]+$/.test(start) ? start : undefined;
+  } catch { return undefined; }
+}
+
+// A lock is held while its process is alive and, when both start times are known, is the same process.
+// Locks written before the start time was recorded only have `pid`.
+function held(pid: number, start: string | undefined): boolean {
+  if (!alive(pid)) return false;
+  const current = start === undefined ? undefined : processStart(pid);
+  return current === undefined || current === start;
+}
+
 // Single writer for the host's installed state (#10). A lock whose process is gone is taken over.
 function acquireLock(stateDir: string): () => void {
   mkdirSync(stateDir, { recursive: true });
@@ -105,15 +125,32 @@ function acquireLock(stateDir: string): () => void {
       if (error.code !== 'EEXIST') throw error;
       let content: string;
       try { content = readFileSync(path, 'utf8'); } catch (readError: any) { if (readError.code === 'ENOENT') continue; throw readError; }
-      let pid: number | undefined;
-      try { const value = JSON.parse(content).pid; if (Number.isSafeInteger(value) && value > 0) pid = value; } catch { /* a lock being written */ }
-      if (pid === undefined || alive(pid)) throw new HostBusyError(pid);
-      // Remove the stale lock only if it is still the one that was inspected.
-      try { if (readFileSync(path, 'utf8') === content) unlinkSync(path); } catch (staleError: any) { if (staleError.code !== 'ENOENT') throw staleError; }
+      let pid: number | undefined, start: string | undefined;
+      try {
+        const value = JSON.parse(content);
+        if (Number.isSafeInteger(value.pid) && value.pid > 0) pid = value.pid;
+        if (typeof value.start === 'string') start = value.start;
+      } catch { /* a lock being written */ }
+      if (pid === undefined || held(pid, start)) throw new HostBusyError(pid);
+      // Take the stale lock over atomically: only one process can rename it away. If the lock was
+      // replaced after it was inspected, the renamed file is another writer's: put it back without
+      // overwriting a lock created meanwhile, and inspect again.
+      const aside = join(stateDir, `.lock.${randomBytes(8).toString('hex')}.stale`);
+      try { renameSync(path, aside); } catch (renameError: any) { if (renameError.code === 'ENOENT') continue; throw renameError; }
+      try {
+        if (readFileSync(aside, 'utf8') !== content) {
+          try { linkSync(aside, path); } catch (linkError: any) { if (linkError.code !== 'EEXIST') throw linkError; }
+        }
+      } finally { rmSync(aside, { force: true }); }
       continue;
     }
-    try { writeSync(fd, JSON.stringify({ pid: process.pid, at: new Date().toISOString() })); fsyncSync(fd); } finally { closeSync(fd); }
-    return () => rmSync(path, { force: true });
+    const start = processStart(process.pid);
+    const content = JSON.stringify({ pid: process.pid, ...(start === undefined ? {} : { start }), at: new Date().toISOString() });
+    try { writeSync(fd, content); fsyncSync(fd); } finally { closeSync(fd); }
+    // Release only our own lock.
+    return () => {
+      try { if (readFileSync(path, 'utf8') === content) unlinkSync(path); } catch (error: any) { if (error.code !== 'ENOENT') throw error; }
+    };
   }
   throw new HostBusyError(undefined);
 }
@@ -222,7 +259,7 @@ async function transition(catalogBytes: Uint8Array | string, options: ApplyOptio
 
   const denied: HcsError[] = [];
   for (const e of selected) {
-    const result = await runStep(deadline, () => authorize(e));
+    const result = await runStep(deadline, signal => authorize(e, signal));
     const error = !result.ok ? (result.timeout ? stepError('authorize', e.id, result, false)
       : result.error instanceof HcsFailure ? { ...result.error.errors[0], entry: e.id }
       : hcsError('permission_denied', `Authorization failed: ${reason(result.error)}`, { entry: e.id }))
@@ -239,7 +276,7 @@ async function transition(catalogBytes: Uint8Array | string, options: ApplyOptio
   mkdirSync(join(partial, 'entries'), { recursive: true });
   try {
     for (const e of selected) {
-      const result = await runStep(deadline, () => fetchPackageBytes(e, { storeDir }));
+      const result = await runStep(deadline, signal => fetchPackageBytes(e, { storeDir, signal }));
       let error: HcsError | undefined;
       if (!result.ok) error = result.timeout ? stepError('prepare', e.id, result, false) : hcsError('integrity_mismatch', `Package content unavailable: ${reason(result.error)}`, { entry: e.id, requirement: 'HCS-0001-R007' });
       else {
