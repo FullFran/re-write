@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { crc32, deflateRawSync } from 'node:zlib';
 import { git } from './helpers.ts';
 import { reviewApi, reviewUpload, startHarness } from './server-helpers.ts';
@@ -259,20 +260,76 @@ test('writer pilot: Notion upload → MCP analysis → human review → evaluati
     assert.equal(git(dir, 'status', '--porcelain'), '');
   });
 
-  // Reproduction: accept the replacement above, then GET findings or the scene.
-  // src/domain/anchor.ts:54 returns orphaned/quote_not_found; review-page.ts:219
-  // only renders the requested stale warning for evidence_status === 'stale'.
-  await t.test('6: replaced quote is stale in findings and scene views', {
-    todo: 'Replaced literal quote reports orphaned, not stale (src/domain/anchor.ts:54); findings view misses the stale warning',
-  }, async () => {
+  await t.test('6: replaced quote is orphaned and the delivered UI warns on the card and scene', async () => {
     const view = await ok(await api(`/books/${BOOK}/findings`, '/books/:book/findings'));
     const finding = view.findings.find((f: any) => f.finding_id === findings[0].finding_id);
-    assert.equal(finding.evidence_status, 'stale');
-    assert.equal(finding.evidence[0].status, 'stale');
+    assert.equal(finding.evidence_status, 'orphaned');
+    assert.equal(finding.evidence[0].status, 'orphaned');
     assert.equal(finding.evidence[0].quote, QUOTE);
     const scene = await ok(await api(`/books/${BOOK}/scenes/${encodeURIComponent(FILE)}`, '/books/:book/scenes/:file'));
-    assert.equal(scene.findings.find((f: any) => f.finding_id === finding.finding_id).evidence_status, 'stale');
+    assert.equal(scene.findings.find((f: any) => f.finding_id === finding.finding_id).evidence_status, 'orphaned');
     assert.ok(!scene.text.includes(QUOTE));
+
+    // Execute the actual HTTP-served UI script with a minimal DOM, not a copied
+    // rendering function or a source-string assertion. No browser dependency.
+    class Element {
+      children: Element[] = [];
+      className = '';
+      style: Record<string, string> = {};
+      listeners: Record<string, (...args: any[]) => any> = {};
+      ownText = '';
+      classList = { add() {}, remove() {} };
+      get textContent(): string { return this.ownText + this.children.map(c => c.textContent).join(''); }
+      set textContent(text: string) { this.ownText = text; this.children = []; }
+      append(...nodes: Element[]) { this.children.push(...nodes); }
+      replaceChildren(...nodes: Element[]) { this.ownText = ''; this.children = nodes; }
+      setAttribute() {}
+      addEventListener(name: string, listener: (...args: any[]) => any) { this.listeners[name] = listener; }
+      scrollIntoView() { rendered?.(); }
+    }
+    let rendered: (() => void) | undefined;
+    const document = {
+      getElementById: () => new Element(),
+      createElement: () => new Element(),
+      createTextNode: (text: string) => { const node = new Element(); node.textContent = text; return node; },
+    };
+    const response = remember(await fetch(`${h.base}/review/app.js`), '/review/app.js');
+    assert.equal(response.status, 200);
+    const script = await response.text();
+    const ui = runInNewContext(`${script}\n({ narrativeFindingCard, scenesSection });`, {
+      document, window: { addEventListener() {}, Clerk: { session: { getToken: async () => session } } },
+      fetch: async (path: string) => remember(await fetch(`${h.base}${path}`, { headers: { authorization: `Bearer ${session}` } }), '/review/api/books/:book/scenes/:file'),
+    });
+    const warnings = (node: Element): Element[] => [
+      ...(node.className.includes('badge-stale') ? [node] : []),
+      ...node.children.flatMap(warnings),
+    ];
+    const cardWarning = 'Aviso: una cita de este hallazgo ya no aparece en la escena.';
+    const sceneWarning = 'Aviso: la cita ya no está en el texto de la escena.';
+    const card = ui.narrativeFindingCard(BOOK, finding, async () => {});
+    assert.ok(card.textContent.includes('la cita ya no está en el texto'));
+    assert.ok(warnings(card).some((node: Element) => node.textContent === cardWarning));
+    assert.ok(!card.textContent.includes('orphaned'));
+
+    // Per-evidence status must drive the warning even if an aggregate is valid.
+    for (const status of ['valid', 'stale', 'orphaned']) {
+      const variant = { ...finding, evidence_status: 'valid', evidence: [{ ...finding.evidence[0], status }] };
+      const renderedCard = ui.narrativeFindingCard(BOOK, variant, async () => {});
+      assert.equal(warnings(renderedCard).some((node: Element) => node.textContent.startsWith('Aviso:')), status !== 'valid');
+      if (status === 'stale') assert.ok(renderedCard.textContent.includes('La evidencia general está desactualizada'));
+    }
+    let openQuote: (...args: any[]) => void = () => assert.fail('quote callback not registered');
+    const section = ui.scenesSection(BOOK, [FILE], async () => {}, (callback: typeof openQuote) => { openQuote = callback; });
+    for (const status of ['valid', 'stale', 'orphaned']) {
+      const loaded = new Promise<void>(resolve => { rendered = resolve; });
+      openQuote(FILE, QUOTE, finding.evidence[0].anchor, status);
+      await loaded;
+      const viewer = section.children[2];
+      const alerts = viewer.children.filter((node: Element) => node.className.includes('badge-stale'));
+      assert.equal(alerts.length, status === 'valid' ? 0 : 1);
+      if (status === 'orphaned') assert.equal(alerts[0].textContent, sceneWarning);
+      if (status === 'stale') assert.ok(alerts[0].textContent.includes('El texto alrededor de la cita cambió'));
+    }
   });
 
   await t.test('7: every request has a correlated metadata-only route-template log', async () => {

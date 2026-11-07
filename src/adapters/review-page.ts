@@ -207,16 +207,18 @@ function narrativeFindingCard(book, finding, reload, openQuote) {
         openQuote(ev.file, ev.quote, ev.anchor, ev.status);
       });
     }
-    const statusText = ev.status === 'valid' ? 'válida' : (ev.status === 'stale' ? 'desactualizada' : ev.status);
+    const statusText = ev.status === 'valid' ? 'válida' : (ev.status === 'stale' ? 'desactualizada' : (ev.status === 'orphaned' ? 'la cita ya no está en el texto' : ev.status));
     let detail = ev.file + ' · evidencia: ' + statusText;
     if (ev.status === 'stale') {
       detail += ' (el texto alrededor de la cita cambió en la escena)';
     }
-    evBox.append(quoteEl, el('p', detail, 'meta' + (ev.status === 'stale' ? ' badge-stale' : '')));
+    evBox.append(quoteEl, el('p', detail, 'meta' + (ev.status === 'stale' || ev.status === 'orphaned' ? ' badge-stale' : '')));
     card.append(evBox);
   }
 
-  if (finding.evidence_status === 'stale') {
+  if (finding.evidence_status === 'orphaned' || finding.evidence.some(ev => ev.status === 'orphaned')) {
+    card.append(el('p', 'Aviso: una cita de este hallazgo ya no aparece en la escena.', 'meta badge-stale'));
+  } else if (finding.evidence_status === 'stale' || finding.evidence.some(ev => ev.status === 'stale')) {
     card.append(el('p', 'Aviso: La evidencia general está desactualizada; el texto de la escena ha cambiado.', 'meta badge-stale'));
   }
 
@@ -667,9 +669,11 @@ function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
       viewer.replaceChildren();
       viewer.append(el('h3', data.file));
 
-      if (highlight && highlight.status === 'stale') {
-        const staleAlert = el('p', 'Aviso: La evidencia está desactualizada. El texto alrededor de la cita cambió en la escena.', 'meta badge-stale');
-        viewer.append(staleAlert);
+      if (highlight && (highlight.status === 'stale' || highlight.status === 'orphaned')) {
+        const warning = highlight.status === 'orphaned'
+          ? 'Aviso: la cita ya no está en el texto de la escena.'
+          : 'Aviso: La evidencia está desactualizada. El texto alrededor de la cita cambió en la escena.';
+        viewer.append(el('p', warning, 'meta badge-stale'));
       }
 
       const pre = el('pre');
