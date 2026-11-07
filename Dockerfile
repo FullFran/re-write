@@ -10,6 +10,9 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY src ./src
 COPY fixtures ./fixtures
+# COPY keeps the build context's file modes; a checkout made under a strict umask would leave
+# files the node user cannot read.
+RUN chmod -R a+rX /app
 
 # Pre-create the data directory, so a new named volume inherits this owner.
 RUN mkdir -p /data && chown node:node /data
