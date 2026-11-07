@@ -439,3 +439,20 @@ test('by default an entry is authorized only when every permission its package r
     unseal(dir); rmSync(dir, { recursive: true, force: true });
   }
 });
+
+for (const content of ['', '{invalid']) {
+  test(`incomplete takeover content is retryable: ${JSON.stringify(content)}`, fixture(async ({ stateDir, storeDir, entry, catalog }) => {
+    mkdirSync(stateDir, { recursive: true });
+    const takeover = join(stateDir, 'lock.takeover');
+    writeFileSync(takeover, content);
+    const before = treeHash(stateDir);
+    await assert.rejects(applyDesiredSet(catalog(entry('a')), { stateDir, storeDir }), (error: unknown) => {
+      assert.ok(error instanceof HostBusyError);
+      assert.ok(!(error instanceof HostTakeoverLockError));
+      assert.ok(error.message.includes(takeover));
+      assert.doesNotMatch(error.message, /remove|by hand/);
+      return true;
+    });
+    assert.equal(treeHash(stateDir), before);
+  }));
+}
