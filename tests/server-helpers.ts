@@ -111,6 +111,25 @@ export function reviewApi(h: Harness, path: string, token?: string, body?: unkno
   });
 }
 
+/** Uploads raw binary data (e.g. ZIP archive) to the review API of the harness. */
+export function reviewUpload(
+  h: Harness,
+  path: string,
+  token?: string,
+  body?: Buffer | Uint8Array,
+  headers: Record<string, string> = {}
+): Promise<Response> {
+  return fetch(`${h.base}/review/api${path}`, {
+    method: 'POST',
+    headers: {
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      'content-type': 'application/zip',
+      ...headers,
+    },
+    body: body as any,
+  });
+}
+
 /** Creates a revision proposal through the CLI against the book in the harness. */
 export function proposeRevision(bookDir: string, file: string, find: string, replace: string, rationale = 'editorial revision'): string {
   return cli('propose', bookDir, '--file', file, '--find', find, '--replace', replace, '--rationale', rationale).json.proposal.proposal_id;

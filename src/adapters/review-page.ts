@@ -118,6 +118,28 @@ async function api(path, body) {
   return data;
 }
 
+async function apiUpload(path, file, mapping, dryRun) {
+  const token = await window.Clerk.session.getToken();
+  const headers = {
+    authorization: 'Bearer ' + token,
+    'content-type': 'application/zip',
+  };
+  if (mapping) {
+    headers['x-notion-mapping'] = encodeURIComponent(JSON.stringify(mapping));
+  }
+  if (dryRun) {
+    headers['x-dry-run'] = 'true';
+  }
+  const res = await fetch('/review/api' + path, {
+    method: 'POST',
+    headers,
+    body: file,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo completar la operación');
+  return data;
+}
+
 function button(label, className, run) {
   const node = el('button', label, className);
   node.type = 'button';
@@ -372,6 +394,250 @@ function importSection(book, onImported) {
   return box;
 }
 
+function notionImportSection(book, onImported) {
+  const box = el('section', undefined, 'card-box');
+  box.append(el('h2', 'Importar desde Notion'));
+  box.append(el('p', 'Sube una exportación de Notion en formato .zip (Markdown y CSV, hasta 50 MB) para inspeccionar y trasladar tus capítulos a RE;write sin usar la terminal.', 'meta'));
+
+  const fileRow = el('div', undefined, 'form-row');
+  const fileInput = el('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.zip';
+  fileInput.setAttribute('aria-label', 'Exportación de Notion (.zip)');
+
+  const inspectBtn = button('Inspeccionar exportación', '', async () => {
+    statusMsg.textContent = '';
+    resultBox.replaceChildren();
+    mappingBox.replaceChildren();
+    mappingBox.style.display = 'none';
+    previewBox.replaceChildren();
+
+    if (!fileInput.files || fileInput.files.length === 0) {
+      throw new Error('Selecciona un archivo .zip exportado de Notion');
+    }
+    const file = fileInput.files[0];
+    if (file.size > 50 * 1024 * 1024) {
+      throw new Error('El archivo supera el límite de 50 MB');
+    }
+
+    statusMsg.textContent = 'Inspeccionando archivo…';
+    const report = await apiUpload('/books/' + book + '/notion-inspect', file);
+    statusMsg.textContent = '';
+
+    renderInspection(file, report);
+  });
+
+  fileRow.append(fileInput, inspectBtn);
+
+  const statusMsg = el('p', undefined, 'meta');
+  const inspectSummary = el('div');
+  const mappingBox = el('div', undefined, 'card-box');
+  mappingBox.style.display = 'none';
+  const previewBox = el('div');
+  const resultBox = el('div');
+
+  box.append(fileRow, statusMsg, inspectSummary, mappingBox, previewBox, resultBox);
+
+  function renderInspection(file, report) {
+    inspectSummary.replaceChildren();
+    mappingBox.replaceChildren();
+    previewBox.replaceChildren();
+    resultBox.replaceChildren();
+
+    if (!report.databases || report.databases.length === 0) {
+      inspectSummary.append(el('p', 'No se encontraron bases de datos (CSV) en la exportación.', 'meta'));
+      return;
+    }
+
+    inspectSummary.append(el('h3', 'Estructura encontrada en la exportación'));
+    const dbList = el('ul', undefined, 'meta');
+    for (const db of report.databases) {
+      const li = el('li');
+      li.textContent = db.name + ' (' + db.rowCount + (db.rowCount === 1 ? ' fila' : ' filas') + ') · Columnas: ' + (db.columns.join(', ') || 'ninguna');
+      dbList.append(li);
+    }
+    inspectSummary.append(dbList);
+    inspectSummary.append(el('p', 'Páginas encontradas: ' + (report.pages ? report.pages.length : 0), 'meta'));
+
+    renderMappingForm(file, report);
+  }
+
+  function renderMappingForm(file, report) {
+    mappingBox.style.display = 'block';
+    mappingBox.append(el('h3', 'Configurar correspondencia (Mapping)'));
+
+    // Database picker
+    const dbRow = el('div', undefined, 'form-row');
+    dbRow.append(el('label', 'Base de datos de capítulos:'));
+    const dbSelect = el('select');
+    dbSelect.setAttribute('aria-label', 'Base de datos de capítulos');
+
+    let defaultDbIndex = 0;
+    report.databases.forEach((db, idx) => {
+      const opt = el('option', db.name);
+      opt.value = db.name;
+      const low = db.name.toLowerCase();
+      if (low.includes('_all.csv') || low.includes('capítulo') || low.includes('capitulo')) {
+        defaultDbIndex = idx;
+      }
+      dbSelect.append(opt);
+    });
+    dbSelect.selectedIndex = defaultDbIndex;
+    dbRow.append(dbSelect);
+    mappingBox.append(dbRow);
+
+    const colsContainer = el('div');
+    mappingBox.append(colsContainer);
+
+    function updateColumnSelects() {
+      colsContainer.replaceChildren();
+      const selectedDbName = dbSelect.value;
+      const currentDb = report.databases.find((d) => d.name === selectedDbName) || report.databases[0];
+      const cols = currentDb ? currentDb.columns : [];
+
+      // Title column
+      const titleRow = el('div', undefined, 'form-row');
+      titleRow.append(el('label', 'Columna de título:'));
+      const titleSelect = el('select');
+      titleSelect.setAttribute('aria-label', 'Columna de título');
+      let defaultTitleIdx = 0;
+      cols.forEach((col, idx) => {
+        const opt = el('option', col);
+        opt.value = col;
+        const low = col.toLowerCase();
+        if (low === 'título' || low === 'titulo' || low === 'title' || low === 'nombre' || low === 'capítulo') {
+          defaultTitleIdx = idx;
+        }
+        titleSelect.append(opt);
+      });
+      if (cols.length > 0) titleSelect.selectedIndex = defaultTitleIdx;
+      titleRow.append(titleSelect);
+      colsContainer.append(titleRow);
+
+      // Order column
+      const orderRow = el('div', undefined, 'form-row');
+      orderRow.append(el('label', 'Columna de orden:'));
+      const orderSelect = el('select');
+      orderSelect.setAttribute('aria-label', 'Columna de orden');
+      const tableOrderOpt = el('option', 'orden de la tabla');
+      tableOrderOpt.value = '';
+      orderSelect.append(tableOrderOpt);
+      let defaultOrderIdx = 0;
+      cols.forEach((col, idx) => {
+        const opt = el('option', col);
+        opt.value = col;
+        const low = col.toLowerCase();
+        if (low === 'orden' || low === 'order' || low === 'número' || low === 'numero') {
+          defaultOrderIdx = idx + 1;
+        }
+        orderSelect.append(opt);
+      });
+      orderSelect.selectedIndex = defaultOrderIdx;
+      orderRow.append(orderSelect);
+      colsContainer.append(orderRow);
+
+      // Filter column + value
+      const filterRow = el('div', undefined, 'form-row');
+      filterRow.append(el('label', 'Filtrar por columna (opcional):'));
+      const filterColSelect = el('select');
+      filterColSelect.setAttribute('aria-label', 'Columna de filtro');
+      const noFilterOpt = el('option', '(sin filtro)');
+      noFilterOpt.value = '';
+      filterColSelect.append(noFilterOpt);
+      cols.forEach((col) => {
+        const opt = el('option', col);
+        opt.value = col;
+        filterColSelect.append(opt);
+      });
+      filterRow.append(filterColSelect);
+
+      const filterValInput = el('input');
+      filterValInput.type = 'text';
+      filterValInput.placeholder = 'Valor del filtro (ej. nombre del libro)';
+      filterValInput.setAttribute('aria-label', 'Valor del filtro');
+      filterRow.append(filterValInput);
+      colsContainer.append(filterRow);
+
+      // Buttons row
+      const btnRow = el('div', undefined, 'form-row actions');
+
+      function buildMapping() {
+        const mapping = {
+          database: dbSelect.value,
+          titleColumn: titleSelect.value,
+        };
+        if (orderSelect.value) {
+          mapping.orderColumn = orderSelect.value;
+        }
+        if (filterColSelect.value && filterValInput.value.trim()) {
+          mapping.filter = {
+            column: filterColSelect.value,
+            value: filterValInput.value.trim(),
+          };
+        }
+        return mapping;
+      }
+
+      const previewBtn = button('Vista previa', '', async () => {
+        previewBox.replaceChildren(el('p', 'Generando vista previa…', 'meta'));
+        resultBox.replaceChildren();
+        const mapping = buildMapping();
+        const previewData = await apiUpload('/books/' + book + '/notion-import', file, mapping, true);
+
+        previewBox.replaceChildren();
+        previewBox.append(el('h3', 'Vista previa (' + (previewData.chapters ? previewData.chapters.length : 0) + ' capítulos)'));
+        if (!previewData.chapters || previewData.chapters.length === 0) {
+          previewBox.append(el('p', 'Ningún capítulo coincide con la configuración seleccionada.', 'meta'));
+          return;
+        }
+        const ul = el('ul', undefined, 'meta');
+        for (const ch of previewData.chapters) {
+          const li = el('li');
+          const pad = String(ch.order).padStart(3, '0');
+          if (ch.status === 'missing_page') {
+            li.textContent = '[' + pad + '] ' + ch.title + ' (' + ch.file + ') — Falta el archivo de página [PÁGINA NO ENCONTRADA]';
+            li.className = 'badge-stale';
+          } else {
+            li.textContent = '[' + pad + '] ' + ch.title + ' (' + ch.file + ') — ' + ch.size.toLocaleString('es') + ' bytes';
+          }
+          ul.append(li);
+        }
+        previewBox.append(ul);
+      });
+
+      const importBtn = button('Importar', 'accept', async () => {
+        resultBox.replaceChildren(el('p', 'Importando capítulos…', 'meta'));
+        previewBox.replaceChildren();
+        const mapping = buildMapping();
+        const result = await apiUpload('/books/' + book + '/notion-import', file, mapping, false);
+
+        resultBox.replaceChildren();
+        resultBox.append(el('h3', 'Resultado de la importación'));
+
+        const importedNames = result.imported.map((i) => i.file).join(', ') || 'ninguno';
+        const unchangedNames = result.unchanged.map((u) => u.file).join(', ') || 'ninguno';
+        const refusedDetails = result.refused.map((r) => r.file + ' (' + r.reason + ')').join(', ') || 'ninguno';
+
+        resultBox.append(el('p', 'Importados: ' + importedNames, result.imported.length ? 'badge' : 'meta'));
+        resultBox.append(el('p', 'Sin cambios: ' + unchangedNames, 'meta'));
+        if (result.refused.length > 0) {
+          resultBox.append(el('p', 'Rechazados: ' + refusedDetails, 'badge-stale'));
+        }
+
+        await onImported();
+      });
+
+      btnRow.append(previewBtn, importBtn);
+      colsContainer.append(btnRow);
+    }
+
+    dbSelect.addEventListener('change', updateColumnSelects);
+    updateColumnSelects();
+  }
+
+  return box;
+}
+
 function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
   const box = el('section', undefined, 'card-box');
   box.append(el('h2', 'Navegar escenas'));
@@ -525,6 +791,7 @@ async function renderApp(selectedBookId) {
 
   app.append(
     importSection(currentBook, reload),
+    notionImportSection(currentBook, reload),
     scenesBox,
     findingsBox,
     section('Cambios propuestos', data.proposals.filter((p) => p.proposal.status === 'proposed').map((p) => proposalCard(currentBook, p, reload)), 'Ningún cambio pendiente.'),

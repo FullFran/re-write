@@ -46,14 +46,25 @@ export interface LoadedNotionExport {
 }
 
 /**
- * Loads all files from either a ZIP file or an extracted directory.
+ * Loads all files from either a ZIP file buffer, a ZIP file on disk, or an extracted directory.
  */
-export function loadNotionExportFiles(sourcePath: string): NotionExportFile[] {
-  if (!existsSync(sourcePath)) {
-    throw new Error(`Notion export not found: ${sourcePath}`);
+export function loadNotionExportFiles(source: string | Buffer): NotionExportFile[] {
+  if (Buffer.isBuffer(source)) {
+    const zipEntries = readZip(source);
+    return zipEntries
+      .filter((e) => !e.isDirectory)
+      .map((e) => ({
+        name: e.name,
+        size: e.size,
+        readText: () => e.getData().toString('utf8'),
+      }));
   }
 
-  const stat = statSync(sourcePath);
+  if (!existsSync(source)) {
+    throw new Error(`Notion export not found: ${source}`);
+  }
+
+  const stat = statSync(source);
   if (stat.isDirectory()) {
     const results: NotionExportFile[] = [];
     const walk = (currentDir: string): void => {
@@ -80,7 +91,7 @@ export function loadNotionExportFiles(sourcePath: string): NotionExportFile[] {
               // ignore invalid zip in folder
             }
           } else {
-            const relName = relative(sourcePath, fullPath).replace(/\\/g, '/');
+            const relName = relative(source, fullPath).replace(/\\/g, '/');
             const size = statSync(fullPath).size;
             results.push({
               name: relName,
@@ -91,12 +102,12 @@ export function loadNotionExportFiles(sourcePath: string): NotionExportFile[] {
         }
       }
     };
-    walk(sourcePath);
+    walk(source);
     return results;
   }
 
   // ZIP archive
-  const buffer = readFileSync(sourcePath);
+  const buffer = readFileSync(source);
   const zipEntries = readZip(buffer);
   return zipEntries
     .filter((e) => !e.isDirectory)
@@ -263,8 +274,8 @@ export function stripNotionPropertyHeader(markdown: string): string {
  * Inspects a Notion export directory or ZIP safely without ever returning or printing
  * cell values or page text.
  */
-export function inspectNotion(sourcePath: string): NotionInspectionReport {
-  const files = loadNotionExportFiles(sourcePath);
+export function inspectNotion(source: string | Buffer): NotionInspectionReport {
+  const files = loadNotionExportFiles(source);
   const databases: DatabaseInspection[] = [];
   const pages: PageInspection[] = [];
 
@@ -294,7 +305,7 @@ export function inspectNotion(sourcePath: string): NotionInspectionReport {
   pages.sort((a, b) => a.name.localeCompare(b.name));
 
   return {
-    source: sourcePath,
+    source: typeof source === 'string' ? source : 'export.zip',
     databases,
     pages,
   };
@@ -450,8 +461,8 @@ export function findNotionDatabaseFile(
 /**
  * Loads chapters from a Notion export according to a declarative mapping.
  */
-export function loadNotionChapters(sourcePath: string, mapping: NotionMapping): LoadedNotionExport {
-  const files = loadNotionExportFiles(sourcePath);
+export function loadNotionChapters(source: string | Buffer, mapping: NotionMapping): LoadedNotionExport {
+  const files = loadNotionExportFiles(source);
 
   // Find the database CSV, preferring _all.csv when pairs exist
   const dbFile = findNotionDatabaseFile(mapping.database, files);

@@ -15,6 +15,8 @@ import { HcsFailure } from '../hcs/errors.ts';
 import { BOOK_CREATE, REVIEW_DECIDE } from '../hcs/ids.ts';
 import { toProblemDetails } from '../hcs/transport.ts';
 import { productProblem } from './problems.ts';
+import { inspectNotion, loadNotionChapters, type NotionMapping } from '../application/notion-export.ts';
+import { chapterFilename, convertToMarkdown, importBook } from '../application/book-import.ts';
 
 export interface ServerConfig {
   issuer: string;
@@ -25,6 +27,7 @@ export interface ServerConfig {
 
 const MAX_BODY_BYTES = 1_048_576;
 const MAX_IMPORT_BODY_BYTES = 10 * 1024 * 1024;
+const MAX_NOTION_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_SCENE_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_NOTE = 2_000;
 const READ = 'com.fullfran.rewrite.book.read';
@@ -112,6 +115,104 @@ async function readBody(req: IncomingMessage, maxBytes = MAX_BODY_BYTES): Promis
   } catch {
     throw new HttpError(400, 'body is not valid JSON');
   }
+}
+
+async function readRawBody(req: IncomingMessage, maxBytes = MAX_NOTION_UPLOAD_BYTES): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > maxBytes) throw new HttpError(413, 'body too large');
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks);
+}
+
+async function parseZipUpload(req: IncomingMessage, maxBytes = MAX_NOTION_UPLOAD_BYTES): Promise<{
+  zip: Buffer;
+  mapping?: NotionMapping;
+  dryRun: boolean;
+}> {
+  const rawBody = await readRawBody(req, maxBytes);
+  if (rawBody.length === 0) {
+    throw new HttpError(400, 'empty request body');
+  }
+
+  const contentType = req.headers['content-type'] ?? '';
+  let zipBuf: Buffer = rawBody;
+  let mapping: NotionMapping | undefined;
+  let dryRun = false;
+
+  // Check URL query parameters
+  try {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    if (url.searchParams.get('dryRun') === 'true' || url.searchParams.get('dry_run') === 'true' || url.searchParams.get('dry-run') === 'true') {
+      dryRun = true;
+    }
+    const queryMapping = url.searchParams.get('mapping');
+    if (queryMapping) {
+      mapping = JSON.parse(queryMapping);
+    }
+  } catch {
+    // ignore URL parsing error
+  }
+
+  // Check headers
+  if (req.headers['x-dry-run'] === 'true' || req.headers['x-dry-run'] === '1') {
+    dryRun = true;
+  }
+  const headerMapping = req.headers['x-notion-mapping'];
+  if (typeof headerMapping === 'string') {
+    try {
+      mapping = JSON.parse(headerMapping);
+    } catch {
+      try {
+        mapping = JSON.parse(decodeURIComponent(headerMapping));
+      } catch {
+        throw new HttpError(400, 'invalid x-notion-mapping header');
+      }
+    }
+  }
+
+  if (contentType.includes('multipart/form-data')) {
+    try {
+      const res = new Response(rawBody, { headers: { 'content-type': contentType } });
+      const formData = await res.formData();
+      let foundZip: Buffer | undefined;
+      for (const [, val] of formData.entries()) {
+        if (val instanceof Blob) {
+          foundZip = Buffer.from(await val.arrayBuffer());
+          break;
+        }
+      }
+      if (foundZip) zipBuf = foundZip;
+      const m = formData.get('mapping');
+      if (typeof m === 'string' && m.trim()) {
+        mapping = JSON.parse(m);
+      }
+      const dr = formData.get('dryRun') ?? formData.get('dry_run') ?? formData.get('dry-run');
+      if (dr === 'true' || dr === '1') {
+        dryRun = true;
+      }
+    } catch (e) {
+      if (e instanceof HttpError) throw e;
+      throw new HttpError(400, 'malformed multipart form data');
+    }
+  } else if (contentType.includes('application/json')) {
+    try {
+      const json = JSON.parse(rawBody.toString('utf8'));
+      if (json.zip) {
+        zipBuf = Buffer.from(json.zip, 'base64');
+      }
+      if (json.mapping) mapping = json.mapping;
+      if (json.dryRun || json['dry-run'] || json.dry_run) dryRun = true;
+    } catch (e) {
+      if (e instanceof HttpError) throw e;
+      throw new HttpError(400, 'malformed JSON body');
+    }
+  }
+
+  return { zip: zipBuf, mapping, dryRun };
 }
 
 function bearerOf(req: IncomingMessage): string | null {
@@ -353,6 +454,77 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
         return problem(res, 409, msg);
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
+      }
+    }
+
+    if (
+      req.method === 'POST' &&
+      ((parts.length === 3 && parts[2] === 'notion-inspect') ||
+       (parts.length === 4 && parts[2] === 'notion' && parts[3] === 'inspect'))
+    ) {
+      open(IMPORT);
+      const { zip } = await parseZipUpload(req, MAX_NOTION_UPLOAD_BYTES);
+      try {
+        const report = inspectNotion(zip);
+        return json(res, 200, report);
+      } catch (error) {
+        if (error instanceof HttpError || error instanceof HcsFailure) throw error;
+        throw new HttpError(400, (error as Error).message);
+      }
+    }
+
+    if (
+      req.method === 'POST' &&
+      ((parts.length === 3 && parts[2] === 'notion-import') ||
+       (parts.length === 4 && parts[2] === 'notion' && (parts[3] === 'import' || parts[3] === 'preview')))
+    ) {
+      const project = open(IMPORT);
+      const { zip, mapping, dryRun } = await parseZipUpload(req, MAX_NOTION_UPLOAD_BYTES);
+      if (!mapping || typeof mapping.database !== 'string' || !mapping.database.trim()) {
+        throw new HttpError(400, 'missing mapping configuration');
+      }
+      try {
+        const { chapters, missing } = loadNotionChapters(zip, mapping);
+
+        if (dryRun) {
+          const list = [
+            ...chapters.map((c) => {
+              const filename = chapterFilename(c.order, c.title);
+              const converted = convertToMarkdown(c.body, c.format ?? 'markdown');
+              return {
+                order: c.order,
+                title: c.title,
+                file: `scenes/${filename}`,
+                size: Buffer.byteLength(converted, 'utf8'),
+                status: 'would_import',
+              };
+            }),
+            ...missing.map((m) => ({
+              order: m.order,
+              title: m.title,
+              file: m.file,
+              size: 0,
+              status: 'missing_page',
+              reason: m.reason,
+            })),
+          ].sort((a, b) => a.order - b.order);
+
+          return json(res, 200, { dryRun: true, chapters: list });
+        }
+
+        const result = importBook(project, chapters);
+        for (const m of missing) {
+          result.refused.push({
+            order: m.order,
+            title: m.title,
+            file: m.file,
+            reason: m.reason,
+          });
+        }
+        return json(res, 200, result);
+      } catch (error) {
+        if (error instanceof HttpError || error instanceof HcsFailure) throw error;
+        throw new HttpError(400, (error as Error).message);
       }
     }
 
