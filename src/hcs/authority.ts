@@ -4,16 +4,24 @@ import { HCS_VERSION } from './version.ts';
 
 // HCS-0005 objects. A request asks for authority; only a grant held by the host gives it.
 export interface PermissionRequest { permission: string; reason?: string; [member: `x-${string}`]: unknown }
-export interface Grant { entry: string; permission: string }
-export interface Check { entry: string; permission: string }
+export interface Grant { entry: string; permission: string; session?: string }
+export type Denial = Grant;
+export interface Check { entry: string; permission: string; session?: string }
 export type Decision = { allow: true } | { allow: false; error: HcsError };
 
-// Allows only with a grant for exactly this entry and permission (HCS-0005-R001). It takes grants
-// alone: requests, Agent Skills `allowed-tools` and `x-` members cannot reach it (R002, R004).
-export function evaluate(check: Check, grants: readonly Grant[]): Decision {
-  if (grants.some(grant => grant.entry === check.entry && grant.permission === check.permission)) return { allow: true };
+// A grant or denial with a `session` matches only checks from that session; one without a session
+// matches every check (HCS-0005-R008).
+const matches = (check: Check) => (held: Grant) => held.entry === check.entry && held.permission === check.permission
+  && (held.session === undefined || held.session === check.session);
+
+// Allows only with a grant for exactly this entry and permission (HCS-0005-R001), and only when no
+// stored denial matches too (R007). It takes grants and denials alone: requests, Agent Skills
+// `allowed-tools` and `x-` members cannot reach it (R002, R004).
+export function evaluate(check: Check, grants: readonly Grant[], denials: readonly Denial[] = []): Decision {
+  const denied = denials.some(matches(check));
+  if (!denied && grants.some(matches(check))) return { allow: true };
   return { allow: false, error: hcsError('permission_denied', `Permission denied: ${check.permission}`, {
-    entry: check.entry, requirement: 'HCS-0005-R001',
+    entry: check.entry, requirement: denied ? 'HCS-0005-R007' : 'HCS-0005-R001',
   }) };
 }
 

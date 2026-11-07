@@ -1,13 +1,13 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { parsePin, targetPath } from '../src/hcs/pin.ts';
+import { readPin, releaseDir } from '../src/hcs/vendor.ts';
 
 export interface HcsCase { level: string; target: string; input: unknown; expect: { outcome: string; errors?: { code: string; entry?: string }[] } }
-export function loadCases(level: string, target: string | undefined): { name: string; value: HcsCase }[] | undefined {
+
+/** Cases of the vendored HCS release (vendor/hcs/<version>/conformance/cases) with this level and target. */
+export function loadCases(level: string, target: string | undefined): { name: string; value: HcsCase }[] {
   const root = resolve(import.meta.dirname, '..');
-  const pin = parsePin(readFileSync(join(root, 'hcs.pin.json'), 'utf8'));
-  const base = join(targetPath(root, pin), 'conformance', 'cases');
-  if (!existsSync(base)) return undefined;
+  const base = join(releaseDir(root, readPin(root)), 'conformance', 'cases');
   const cases: { name: string; value: HcsCase }[] = [];
   function visit(dir: string): void {
     for (const item of readdirSync(dir, { withFileTypes: true })) {

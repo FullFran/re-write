@@ -28,8 +28,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      # The private HCS checkout (.hcs/) is absent here; its conformance tests skip themselves.
+      # Includes the vendored HCS release check and its conformance cases.
       - run: npm test
+      - run: npm run hcs:trace:check
 
   image:
     name: image
