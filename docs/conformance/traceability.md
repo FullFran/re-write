@@ -65,8 +65,8 @@ Generated from HCS pin 9f40641ebdff9aae73e797b1223b54bcc43a41b7; do not edit.
 | HCS-0004-R002 | MUST | planned |  | [#29](https://github.com/FullFran/re-write/issues/29) |
 | HCS-0004-R003 | MUST | planned |  | [#29](https://github.com/FullFran/re-write/issues/29) |
 | HCS-0004-R004 | MUST | planned |  | [#29](https://github.com/FullFran/re-write/issues/29) |
-| HCS-0004-R005 | MUST | planned |  | [#29](https://github.com/FullFran/re-write/issues/29) |
-| HCS-0004-R006 | MUST NOT | planned |  | [#29](https://github.com/FullFran/re-write/issues/29) |
+| HCS-0004-R005 | MUST | partial | `src/hcs/capabilities.ts`, `src/adapters/mcp.ts`, `tests/hcs-capabilities.test.ts`, `tests/mcp.test.ts` |  |
+| HCS-0004-R006 | MUST NOT | partial | `src/hcs/capabilities.ts`, `src/adapters/mcp.ts`, `tests/hcs-capabilities.test.ts`, `tests/mcp.test.ts` |  |
 | HCS-0004-R007 | MUST | planned |  | [#29](https://github.com/FullFran/re-write/issues/29) |
 
 ## HCS-0005

@@ -35,7 +35,7 @@ export const REWRITE_CAPABILITIES = [
   { ref: 'com.fullfran.rewrite.claims.read@1', major: 1, provider: 'host', mcpTools: ['list_claims'], contract: 'Read claims.' },
   { ref: 'com.fullfran.rewrite.claims.propose@1', major: 1, provider: 'host', mcpTools: ['propose_claims'], contract: 'Propose claims.' },
   { ref: 'com.fullfran.rewrite.revision.propose@1', major: 1, provider: 'host', mcpTools: ['propose_revision', 'list_proposals', 'get_proposal'], contract: 'Propose revisions and inspect proposals.' },
-  { ref: 'com.fullfran.rewrite.continuity.check@1', major: 1, provider: 'package', mcpTools: ['inspect_continuity'], contract: 'Inspect continuity.' },
+  { ref: 'com.fullfran.rewrite.continuity.check@1', major: 1, provider: 'host', movesTo: 'com.fullfran.rewrite.knowledge-order', mcpTools: ['inspect_continuity'], contract: 'Inspect continuity.' },
   { ref: 'com.fullfran.rewrite.claims.extract@1', major: 1, provider: 'package', mcpTools: [], contract: 'Extract claim candidates through the CLI.' },
   { ref: 'com.fullfran.rewrite.entities.read@1', major: 1, provider: 'host', mcpTools: [], contract: 'Read narrative entities.', issue: 12 },
   { ref: 'com.fullfran.rewrite.events.read@1', major: 1, provider: 'host', mcpTools: [], contract: 'Read narrative events.', issue: 15 },

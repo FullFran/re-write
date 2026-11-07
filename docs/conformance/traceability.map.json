@@ -362,6 +362,18 @@
       "status": "not-applicable",
       "reason": "re-write declares all-or-nothing; resolve supports partial for conformance."
     },
+    "HCS-0004-R005": {
+      "status": "partial",
+      "reason": "MCP dispatch checks capability state; lifecycle provider lands with #29",
+      "code": ["src/hcs/capabilities.ts", "src/adapters/mcp.ts"],
+      "tests": ["tests/hcs-capabilities.test.ts", "tests/mcp.test.ts"]
+    },
+    "HCS-0004-R006": {
+      "status": "partial",
+      "reason": "MCP dispatch checks capability state; lifecycle provider lands with #29",
+      "code": ["src/hcs/capabilities.ts", "src/adapters/mcp.ts"],
+      "tests": ["tests/hcs-capabilities.test.ts", "tests/mcp.test.ts"]
+    },
     "HCS-0006-R001": {
       "status": "implemented",
       "code": [

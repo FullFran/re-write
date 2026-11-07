@@ -36,7 +36,7 @@ test('rewrite capability and permission registry is owned and covers MCP registr
   for (const permission of REWRITE_PERMISSIONS) { assert.equal(isDottedId(permission), true); assert.equal(isRewriteOwned(permission), true); }
   assert.equal(REWRITE_PERMISSIONS.includes(REVIEW_DECIDE as never), false);
   const source = readFileSync(new URL('../src/adapters/mcp.ts', import.meta.url), 'utf8');
-  const registered = [...source.matchAll(/server\.registerTool\('([^']+)'/g)].map(match => match[1]);
+  const registered = [...source.matchAll(/register\('([^']+)'/g)].map(match => match[1]);
   assert.ok(registered.length > 0);
   const listed = REWRITE_CAPABILITIES.flatMap(row => [...row.mcpTools]);
   assert.deepEqual([...listed].sort(), [...registered].sort());

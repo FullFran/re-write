@@ -1,6 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { CallToolRequestSchema, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { HcsFailure } from '../hcs/errors.ts';
+import { builtinCapabilities, dispatch, type HostCapabilities } from '../hcs/capabilities.ts';
+import { REWRITE_CAPABILITIES } from '../hcs/ids.ts';
 import { toJsonRpcError } from '../hcs/transport.ts';
 import { productProblem, rejectedCandidate } from './problems.ts';
 import { z } from 'zod';
@@ -51,16 +53,9 @@ function slice<T>(items: T[], offset = 0, limit = DEFAULT_PAGE) {
   return { items: items.slice(offset, end), total: items.length, next_offset: end < items.length ? end : null };
 }
 
-/**
- * One MCP server for one authenticated person. The review operations of the
- * application are deliberately not exposed here, so this connection can propose
- * but cannot approve.
- */
-export function buildMcpServer(library: Library, subject: string): McpServer {
-  const server = new McpServer({ name: 'rewrite', version: '0.1.0' }, { instructions: INSTRUCTIONS });
-  // The SDK converts handler exceptions to tool results. Wrap its public request
-  // handler registration so a private marker can be raised at the RPC boundary.
-  const marker = Symbol('hcs failure');
+// The SDK converts tool handler exceptions to results, so intercept its request
+// handler to restore HCS failures at the JSON-RPC boundary and annotate validation errors.
+function interceptToolRequests(server: McpServer, marker: symbol): () => void {
   const protocol = server.server;
   const setRequestHandler = protocol.setRequestHandler.bind(protocol);
   protocol.setRequestHandler = ((schema: any, handler: any) => setRequestHandler(schema, schema === CallToolRequestSchema
@@ -79,7 +74,26 @@ export function buildMcpServer(library: Library, subject: string): McpServer {
       }
       return result;
     } : handler)) as typeof protocol.setRequestHandler;
+  return () => { protocol.setRequestHandler = setRequestHandler; };
+}
 
+/** One MCP server per authenticated person, with no review operations. */
+export function buildMcpServer(library: Library, subject: string, capabilities: HostCapabilities = builtinCapabilities(), table: readonly { ref: string; mcpTools: readonly string[] }[] = REWRITE_CAPABILITIES): McpServer {
+  const source = capabilities.snapshot();
+  const snapshot = { generation: source.generation, active: new Set(source.active), draining: new Set(source.draining) };
+  const tools = new Map<string, string>();
+  for (const capability of table) for (const name of capability.mcpTools) {
+    if (tools.has(name)) throw new Error(`Duplicate MCP tool: ${name}`);
+    tools.set(name, capability.ref);
+  }
+  // The SDK installs tools/list lazily, unless the capability is declared up front.
+  const empty = ![...tools.values()].some(ref => snapshot.active.has(ref));
+  const server = new McpServer({ name: 'rewrite', version: '0.1.0' }, {
+    instructions: INSTRUCTIONS,
+    ...(empty ? { capabilities: { tools: {} } } : {}),
+  });
+  const marker = Symbol('hcs failure');
+  const restoreHandler = interceptToolRequests(server, marker);
   const reply = (run: () => unknown) => {
     try {
       return { content: [{ type: 'text' as const, text: JSON.stringify(run(), null, 2) }] };
@@ -89,23 +103,27 @@ export function buildMcpServer(library: Library, subject: string): McpServer {
       return { content: [{ type: 'text' as const, text: message }], isError: true, structuredContent: productProblem(message, 400) };
     }
   };
+  const definitions = new Map<string, { config: any; handler: any }>();
+  const register = (name: string, config: any, handler: any) => {
+    definitions.set(name, { config, handler });
+  };
   const reading = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
   const proposing = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 
-  server.registerTool('list_books', {
+  register('list_books', {
     description: 'List the books this person can open.',
     annotations: reading,
   }, () => reply(() => ({
     books: library.booksFor(subject).map((id) => ({ book_id: id, title: library.open(id, subject).title() })),
   })));
 
-  server.registerTool('list_scenes', {
+  register('list_scenes', {
     description: 'List the scene files of a book.',
     inputSchema: { book },
     annotations: reading,
   }, (args) => reply(() => ({ scenes: library.open(args.book, subject).scenes() })));
 
-  server.registerTool('read_scene', {
+  register('read_scene', {
     description: `Read a scene, in pages when it is long. ${UNTRUSTED}`,
     inputSchema: {
       book,
@@ -122,7 +140,7 @@ export function buildMcpServer(library: Library, subject: string): McpServer {
     return { file: args.file, text: scene.slice(offset, end), total: scene.length, next_offset: end < scene.length ? end : null };
   }));
 
-  server.registerTool('list_claims', {
+  register('list_claims', {
     description: `List claims with their editorial status and current evidence status. ${UNTRUSTED}`,
     inputSchema: { book, ...page },
     annotations: reading,
@@ -131,7 +149,7 @@ export function buildMcpServer(library: Library, subject: string): McpServer {
     return { claims: items, ...rest };
   }));
 
-  server.registerTool('propose_claims', {
+  register('propose_claims', {
     description: 'Propose claims from a scene. Each quote is checked literally against the committed text, and valid claims stay proposed until a person reviews them. Repeating a call creates no duplicates.',
     inputSchema: {
       book,
@@ -150,7 +168,7 @@ export function buildMcpServer(library: Library, subject: string): McpServer {
     };
   }));
 
-  server.registerTool('inspect_continuity', {
+  register('inspect_continuity', {
     description: `Look for knowledge-order problems among the claims. Results are heuristics with other possible readings, not verdicts. ${UNTRUSTED}`,
     inputSchema: { book, ...page },
     annotations: reading,
@@ -159,7 +177,7 @@ export function buildMcpServer(library: Library, subject: string): McpServer {
     return { findings: items, ...rest };
   }));
 
-  server.registerTool('propose_revision', {
+  register('propose_revision', {
     description: 'Propose replacing one exact passage in a scene. This never edits the text: a person reviews the diff. Repeating a call creates no duplicates.',
     inputSchema: {
       book,
@@ -179,7 +197,7 @@ export function buildMcpServer(library: Library, subject: string): McpServer {
     proposed_by: subject,
   })));
 
-  server.registerTool('list_proposals', {
+  register('list_proposals', {
     description: `List proposed text changes and their status. ${UNTRUSTED}`,
     inputSchema: { book, ...page },
     annotations: reading,
@@ -188,12 +206,26 @@ export function buildMcpServer(library: Library, subject: string): McpServer {
     return { proposals: items, ...rest };
   }));
 
-  server.registerTool('get_proposal', {
+  register('get_proposal', {
     description: `Show one proposal with its diff. ${UNTRUSTED}`,
     inputSchema: { book, proposal_id: z.string().max(40) },
     annotations: reading,
   }, (args) => reply(() => library.open(args.book, subject).showProposal(args.proposal_id)));
 
-  protocol.setRequestHandler = setRequestHandler;
+  // Preserve the public tool ordering while the capability table selects tools.
+  for (const [name, ref] of tools) {
+    if (!definitions.has(name)) throw new Error(`Missing MCP tool implementation: ${name}`);
+  }
+  for (const [name, definition] of definitions) {
+    const ref = tools.get(name);
+    if (!ref || !snapshot.active.has(ref)) continue;
+    server.registerTool(name, definition.config, (args: any, extra: any) => {
+      try { dispatch(snapshot, ref); } catch (error) {
+        return reply(() => { throw error; });
+      }
+      return definition.handler(args, extra);
+    });
+  }
+  restoreHandler();
   return server;
 }
