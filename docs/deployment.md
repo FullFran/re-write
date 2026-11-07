@@ -46,7 +46,25 @@ The agent does not wait for the new container to become healthy before recording
 1. Usual way: revert the bad commit on `main` (`git revert <sha>`, through a pull request with green CI). The agent deploys the revert like any other commit.
 2. Without touching `main`: the agent always deploys the head of the branch it is configured to follow, and forcing a deploy redeploys that head. To run an older commit, push a branch that points at it, point the app at that branch in the infra repository and force a deploy there. Point it back at `main` once `main` is fixed.
 
-`scripts/backup-r2.sh` encrypts the data volume with `gpg`, uploads it to an R2 bucket, then downloads that copy and compares it. It reads its settings from `~/.config/rewrite-backup/r2.env`. **Schedule it yourself, and keep the passphrase outside the server as well**: without it the copies cannot be read. To restore: `gpg --decrypt` the object, stop the container, and extract the archive into the data volume.
+`scripts/backup-r2.sh` encrypts the data volume with `gpg`, uploads it to an R2 bucket, then downloads that copy and compares it. It reads its settings from `~/.config/rewrite-backup/r2.env`. **Schedule it yourself, and keep the passphrase outside the server as well**: without it the copies cannot be read.
+
+| Question | Answer |
+| --- | --- |
+| What is copied | The whole data volume: every book repository with its `.rewrite/` state, `access.json` and `grants.json`. Host HCS state is not used in production yet; when it is, it must live in the same volume |
+| When | Once a day at a quiet hour (a cron entry on the server) |
+| How long | Set by the bucket's expiry rule (30 days) |
+| Consistency | The archive is taken while the service runs, without stopping it. Writes are rare and each one is a single JSON rename plus a git commit, so a copy taken mid-write can at worst miss that last operation; the restore drill runs `git fsck` on every book to catch a damaged repository |
+| Key recovery | The passphrase lives in the server's env file and in a second copy off the server. Check that both still match before you rely on them |
+
+**Restore drill.** `scripts/restore-drill.sh [object-name]` proves a copy can be brought back without touching production. On the server it downloads the newest copy (or the one named), decrypts it, restores it into a new volume, starts the image production runs on that volume as a separate container with no published port, and checks that:
+
+- the service becomes healthy on the restored data;
+- every restored file is byte-identical to the archive;
+- every book opens, its git history passes `git fsck`, and each person can reach exactly the books `access.json` lists for them, while an unknown person reaches none.
+
+It prints counts and verdicts only, never manuscript text, and removes the volume and container when it ends, whether it passed or failed. Run it before loading a private manuscript and after changing how data is stored.
+
+**Restoring for real:** stop the container, run the same steps as the drill into the production volume (`gpg --decrypt` the object, extract the archive into the data volume, give it to the image's `node` user), then start the container again.
 
 Clerk browser sessions last 7 days unless a paid plan changes that.
 
