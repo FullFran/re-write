@@ -2,6 +2,8 @@ import { assessAnchor, matchesRevision, type Anchor, type EvidenceStatus } from 
 import { shortHash } from './claim.ts';
 import type { Verdict } from './continuity.ts';
 
+export const NARRATIVE_VERDICTS = ['useful', 'noise'] as const;
+
 export const FINDING_QUESTIONS = ['motivation', 'consequences', 'knowledge'] as const;
 export type FindingQuestion = (typeof FINDING_QUESTIONS)[number];
 

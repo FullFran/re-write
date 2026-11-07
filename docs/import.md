@@ -150,3 +150,14 @@ imported: scenes/001-el-faro.md, scenes/002-la-niebla.md; unchanged: none; refus
 - **Stable Scene Naming**: Generates zero-padded, slugified filenames (`scenes/001-el-faro.md`).
 - **Idempotent**: Re-running the import with the same export produces zero changes (`unchanged: scenes/...`) without creating extra commits.
 - **Refuses Changed Chapters**: If a scene file already exists in RE;write with different text (e.g. edited by an author or reviewer), RE;write refuses to overwrite it, reporting it under `refused:` and keeping disk state intact.
+
+### Mapping validation and HTTP input
+
+Mappings require a non-empty `database` string. Optional `titleColumn` and
+`orderColumn` members must be strings; `filter` must contain exactly the string
+members `column` and `value`. Unknown members are refused with the member name.
+The CLI and review upload use the same validator.
+
+The review page sends mapping configuration only in the URI-encoded JSON
+`x-notion-mapping` header and previews with `x-dry-run: true`. Query parameters,
+JSON body fields, and multipart fields do not configure mapping or dry runs.

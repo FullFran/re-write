@@ -8,10 +8,10 @@ import {
   claimId, EPISTEMIC_KINDS, isCanon, nextEditorialStatus,
   type Claim, type ClaimCandidate, type ClaimView, type Decision,
 } from '../domain/claim.ts';
-import { inspectContinuity, type Finding, type Verdict, type VerdictHistoryEntry, type VerdictKind } from '../domain/continuity.ts';
+import { CONTINUITY_VERDICTS, InvalidFindingVerdictError, inspectContinuity, type Finding, type Verdict, type VerdictHistoryEntry, type VerdictKind } from '../domain/continuity.ts';
 import { applyChange, proposalId, type Proposal } from '../domain/proposal.ts';
 import {
-  findingId, viewFinding,
+  NARRATIVE_VERDICTS, findingId, viewFinding,
   type FindingCandidate, type FindingRecord, type FindingView,
 } from '../domain/finding.ts';
 
@@ -250,6 +250,10 @@ export class Project {
     const isContinuity = this.check().some((finding) => finding.finding_id === id);
     const isNarrative = this.findings.get(id) !== null;
     if (!isContinuity && !isNarrative) throw new Error(`unknown finding: ${id}`);
+    const allowed: readonly string[] = isContinuity ? CONTINUITY_VERDICTS : NARRATIVE_VERDICTS;
+    if (!allowed.includes(verdict)) {
+      throw new InvalidFindingVerdictError(isContinuity ? 'continuity' : 'narrative', allowed);
+    }
     const existing = this.verdicts.get(id);
     const history: VerdictHistoryEntry[] = existing?.history ? [...existing.history] : [];
     if (existing) {

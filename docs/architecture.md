@@ -135,7 +135,11 @@ Routes available on the review door (`/review`):
 
 Review decisions (`com.fullfran.rewrite.review.decide`) and book creation (`com.fullfran.rewrite.book.create`) are never grantable to a package, and the MCP door refuses them whatever is granted. That is a host-owned setting: generation content cannot add an approve tool, remove the untrusted-text instruction or widen it (HCS-0008-R007). Per-person credentials for projected MCP servers follow [#4](https://github.com/FullFran/re-write/issues/4).
 
-Known limitation: `POST /review/api/books` leaks the existence of an existing book slug via HTTP 409 Conflict when an authenticated subject attempts to create a book whose slug is already owned by another subject. Because sign-up is invite-only via Clerk, unauthenticated actors cannot probe slugs, but authenticated members can determine whether a slug is in use across the instance. Book contents, scene texts, and proposals remain fully isolated (returning 404).
+Book creation retains one accepted existence signal: an occupied name returns
+HTTP 409, identically for members and non-members, with only
+“Ese nombre de libro no está disponible; elige otro título.” The response never
+echoes the slug or identifies the owner. A refusal is unavoidable because book
+slugs are globally unique; it does not grant access to the existing book.
 
 ## 6. Where the planned features fit
 

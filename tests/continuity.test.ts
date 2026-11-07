@@ -122,3 +122,18 @@ test('review-finding refuses an unknown finding and an unknown verdict', () => {
   const { finding_id } = cli('check', dir).json.findings[0];
   assert.equal(cli('review-finding', dir, finding_id, 'whatever').code, 2);
 });
+
+test('continuity refuses narrative verdicts without changing stored decisions', () => {
+  const dir = extractedBook();
+  const id = cli('check', dir).json.findings[0].finding_id;
+  const before = cli('check', dir).json;
+  const head = git(dir, 'rev-parse', 'HEAD');
+  for (const verdict of ['useful', 'noise']) {
+    const result = cli('review-finding', dir, id, verdict, '--by', 'Reviewer');
+    assert.notEqual(result.code, 0);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /continuity.*confirmed, deliberate_mystery, false_positive/);
+    assert.deepEqual(cli('check', dir).json, before);
+    assert.equal(git(dir, 'rev-parse', 'HEAD'), head);
+  }
+});

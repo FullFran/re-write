@@ -151,7 +151,10 @@ function checkTakeoverMutex(takeoverPath: string): void {
       if (retryError.code === 'ENOENT') return;
     }
   }
-  if (pid !== undefined && held(pid, start)) {
+  if (pid === undefined) {
+    throw new HostBusyError(undefined, `Host lock takeover is being written: ${takeoverPath}; retry later`);
+  }
+  if (held(pid, start)) {
     throw new HostBusyError(pid);
   }
   throw new HostTakeoverLockError(takeoverPath, pid);

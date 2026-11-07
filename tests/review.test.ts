@@ -233,3 +233,19 @@ test('removing a person\'s book access closes the review door on the next reques
   assert.equal((await api('/books/breve', session)).status, 404);
   assert.deepEqual((await (await api('/books', session)).json()).books, []);
 });
+
+test('continuity review refuses narrative verdicts with invalid-input', async () => {
+  const session = await h.session('user_fran');
+  const before = cli('check', h.bookDir).json;
+  const id = before.findings[0].finding_id;
+  const head = git(h.bookDir, 'rev-parse', 'HEAD');
+  for (const verdict of ['useful', 'noise']) {
+    const res = await api(`/books/sal/findings/${id}`, session, { verdict });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.type, /invalid-input/);
+    assert.match(body.error, /continuity.*confirmed, deliberate_mystery, false_positive/);
+    assert.deepEqual(cli('check', h.bookDir).json, before);
+    assert.equal(git(h.bookDir, 'rev-parse', 'HEAD'), head);
+  }
+});

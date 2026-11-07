@@ -1,8 +1,17 @@
 import { shortHash, type ClaimView } from './claim.ts';
 
 export type Classification = 'possible_contradiction' | 'insufficient_evidence';
+export const CONTINUITY_VERDICTS = ['confirmed', 'deliberate_mystery', 'false_positive'] as const;
+// Persisted verdicts retain the complete legacy vocabulary.
 export const VERDICTS = ['confirmed', 'deliberate_mystery', 'false_positive', 'useful', 'noise'] as const;
 export type VerdictKind = (typeof VERDICTS)[number];
+
+export class InvalidFindingVerdictError extends Error {
+  constructor(family: string, allowed: readonly string[]) {
+    super(`Invalid verdict for ${family} finding; expected: ${allowed.join(', ')}`);
+    this.name = 'InvalidFindingVerdictError';
+  }
+}
 
 export interface VerdictHistoryEntry {
   verdict: VerdictKind;

@@ -162,7 +162,8 @@ async function dispatch(args: string[], values: Record<string, string | boolean 
       const source = need(rest[0], '<export.zip|dir>');
       const mappingFile = need(option('mapping'), '--mapping');
       const isDryRun = Boolean(values['dry-run']);
-      const mapping = JSON.parse(readFileSync(mappingFile, 'utf8'));
+      const { parseNotionMapping } = await import('../application/notion-export.ts');
+      const mapping = parseNotionMapping(JSON.parse(readFileSync(mappingFile, 'utf8')));
       const { loadNotionChapters } = await import('../application/notion-export.ts');
       const { importBook, chapterFilename, convertToMarkdown } = await import('../application/book-import.ts');
       const { chapters, missing } = loadNotionChapters(source, mapping);
