@@ -33,7 +33,13 @@ export class Library {
   }
 
   private isMember(book: string, subject: string): boolean {
-    return Object.hasOwn(this.access().books, book) && this.access().books[book].members.includes(subject);
+    const { books } = this.access();
+    return Object.hasOwn(books, book) && books[book].members.includes(subject);
+  }
+
+  /** Whether a person may use a book, read fresh on every call so a revocation applies to the next one. */
+  canUse(book: string, subject: string): boolean {
+    return BOOK_ID.test(book) && this.isMember(book, subject);
   }
 
   booksFor(subject: string): string[] {
@@ -43,7 +49,7 @@ export class Library {
 
   /** Opens a book for a person. Every path that reaches a book goes through here. */
   open(book: string, subject: string): Project {
-    if (!BOOK_ID.test(book) || !this.isMember(book, subject)) throw new Error('unknown book');
+    if (!this.canUse(book, subject)) throw new Error('unknown book');
     return Project.open(this.bookDir(book));
   }
 
@@ -56,6 +62,20 @@ export class Library {
     const entry = Object.hasOwn(access.books, book) ? access.books[book] : { members: [] };
     if (!entry.members.includes(subject)) entry.members.push(subject);
     access.books[book] = entry;
+    this.save(access);
+  }
+
+  /** Administrative, like grant. The person's next call to the book is refused; nothing else changes. */
+  revoke(book: string, subject: string): void {
+    if (!BOOK_ID.test(book)) throw new Error(`invalid book id: ${book}`);
+    if (!subject) throw new Error('missing user id');
+    const access = this.access();
+    if (!Object.hasOwn(access.books, book) || !access.books[book].members.includes(subject)) return;
+    access.books[book].members = access.books[book].members.filter((member) => member !== subject);
+    this.save(access);
+  }
+
+  private save(access: AccessFile): void {
     mkdirSync(this.dataDir, { recursive: true });
     const temporary = `${this.accessPath()}.tmp`;
     writeFileSync(temporary, `${JSON.stringify(access, null, 2)}\n`);

@@ -3,6 +3,7 @@ import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readFileSync, rea
 import { join } from 'node:path';
 import { readCatalog, type CatalogEntry } from './catalog.ts';
 import { HcsFailure, hcsError, type HcsError } from './errors.ts';
+import { grantAuthorizer } from './grants.ts';
 import { REWRITE_HOST, type HostProfile } from './host.ts';
 import { canTransition, type EntryState, type EntryStatus } from './lifecycle.ts';
 import { fetchPackageBytes, sealTree, unpackPackage } from './package.ts';
@@ -19,8 +20,11 @@ export interface ApplyOptions {
   storeDir?: string;
   host?: HostProfile;
   activator?: Activator;
-  // Authorization hook; #30 replaces the default with grant decisions (HCS-0005).
+  // Authorization hook. The default authorizes an entry only when every permission its package
+  // requests is granted in `<grantsDir>/grants.json` (HCS-0005); an HcsFailure it throws is reported as is.
   authorize?: (entry: CatalogEntry) => Promise<boolean>;
+  // Where the default authorization reads grants; defaults to `stateDir`.
+  grantsDir?: string;
   stepDeadlineMs?: number;
 }
 export interface ApplyResult { generation: number; status: EntryStatus[] }
@@ -184,9 +188,9 @@ export async function applyDesiredSet(catalogBytes: Uint8Array | string, options
 async function transition(catalogBytes: Uint8Array | string, options: ApplyOptions): Promise<ApplyResult> {
   const { stateDir } = options;
   const host = options.host ?? REWRITE_HOST, activator = options.activator ?? NO_CODE_ACTIVATOR;
-  const authorize = options.authorize ?? (async () => true);
   const deadline = options.stepDeadlineMs ?? DEFAULT_STEP_DEADLINE_MS;
   const storeDir = options.storeDir ?? join(stateDir, 'store');
+  const authorize = options.authorize ?? grantAuthorizer({ grantsDir: options.grantsDir ?? stateDir, storeDir });
   mkdirSync(generationsDir(stateDir), { recursive: true });
 
   const previous = readHostState(stateDir);
@@ -219,7 +223,9 @@ async function transition(catalogBytes: Uint8Array | string, options: ApplyOptio
   const denied: HcsError[] = [];
   for (const e of selected) {
     const result = await runStep(deadline, () => authorize(e));
-    const error = !result.ok ? (result.timeout ? stepError('authorize', e.id, result, false) : hcsError('permission_denied', `Authorization failed: ${reason(result.error)}`, { entry: e.id }))
+    const error = !result.ok ? (result.timeout ? stepError('authorize', e.id, result, false)
+      : result.error instanceof HcsFailure ? { ...result.error.errors[0], entry: e.id }
+      : hcsError('permission_denied', `Authorization failed: ${reason(result.error)}`, { entry: e.id }))
       : result.value ? undefined : hcsError('permission_denied', 'Entry is not authorized', { entry: e.id });
     move(statuses.get(e.id)!, error ? 'failed' : 'authorized', error);
     if (error) denied.push(error);

@@ -1,12 +1,14 @@
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Library } from '../application/library.ts';
+import { decide, enforce, ForbiddenError } from '../application/decision.ts';
 import { TokenVerifier } from './auth.ts';
 import { llmsText } from './llms.ts';
 import { buildMcpServer } from './mcp.ts';
 import { REVIEW_CSS, REVIEW_JS, reviewCsp, reviewHtml } from './review-page.ts';
 import { VERDICTS, type VerdictKind } from '../domain/continuity.ts';
 import { HcsFailure } from '../hcs/errors.ts';
+import { REVIEW_DECIDE } from '../hcs/ids.ts';
 import { toProblemDetails } from '../hcs/transport.ts';
 import { productProblem } from './problems.ts';
 
@@ -19,6 +21,7 @@ export interface ServerConfig {
 
 const MAX_BODY_BYTES = 1_048_576;
 const MAX_NOTE = 2_000;
+const READ = 'com.fullfran.rewrite.book.read';
 
 class HttpError extends Error {
   readonly status: number;
@@ -168,23 +171,28 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
       throw new HttpError(404, 'not found');
     }
     const [, book, kind, id] = parts;
-    const open = () => {
+    // Every route that touches a book asks the single decision point first, at each request.
+    const open = (permission: string) => {
       try {
+        enforce({ library, subject, book, door: 'review', permission, entry: null });
         return library.open(book, subject);
       } catch (error) {
         if (error instanceof HcsFailure) throw error;
+        if (error instanceof ForbiddenError) throw new HttpError(403, 'forbidden');
         throw new HttpError(404, 'not found');
       }
     };
     if (parts[0] !== 'books') throw new HttpError(404, 'not found');
     if (req.method === 'GET' && parts.length === 1) {
-      const books = library.booksFor(subject).map((b) => ({ book_id: b, title: library.open(b, subject).title() }));
+      const books = library.booksFor(subject)
+        .filter((b) => decide({ library, subject, book: b, door: 'review', permission: READ, entry: null }).allow)
+        .map((b) => ({ book_id: b, title: library.open(b, subject).title() }));
       return json(res, 200, { books });
     }
-    if (req.method === 'GET' && parts.length === 2) return json(res, 200, open().reviewQueue());
+    if (req.method === 'GET' && parts.length === 2) return json(res, 200, open(READ).reviewQueue());
     if (req.method !== 'POST' || parts.length !== 4) throw new HttpError(404, 'not found');
 
-    const project = open();
+    const project = open(REVIEW_DECIDE);
     const body = (await readBody(req) ?? {}) as { decision?: unknown; verdict?: unknown; note?: unknown };
     const note = typeof body.note === 'string' ? body.note.slice(0, MAX_NOTE) : undefined;
     const decision = () => {

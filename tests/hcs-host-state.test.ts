@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { buildPackage } from '../src/hcs/package.ts';
 import { validateEntryStatus } from '../src/hcs/lifecycle.ts';
 import { HcsFailure } from '../src/hcs/errors.ts';
+import { grantPermission, revokePermission } from '../src/hcs/grants.ts';
 import { applyDesiredSet, statusReport, HostBusyError, type Activator } from '../src/hcs/host-state.ts';
 
 interface Fixture {
@@ -200,3 +201,62 @@ test('a lock left by a dead process is taken over', fixture(async ({ stateDir, s
   assert.equal(pointer(stateDir), 1);
   assert.equal(existsSync(join(stateDir, 'lock')), false);
 }));
+
+// A package whose root holds an HCS-0005 request document, stored where the host fetches it.
+function requestingPackage(dir: string, storeDir: string, id: string, document: unknown) {
+  const source = mkdtempSync(join(dir, 'requests-'));
+  writeFileSync(join(source, 'data'), 'payload');
+  if (document !== undefined) writeFileSync(join(source, 'requests.json'), typeof document === 'string' ? document : JSON.stringify(document));
+  const pkg = buildPackage(source);
+  mkdirSync(join(storeDir, 'sha256'), { recursive: true });
+  writeFileSync(join(storeDir, 'sha256', pkg.contentHash.slice(7)), pkg.bytes);
+  return { id, version: '1', contentHash: pkg.contentHash, size: pkg.size, mediaType: pkg.mediaType, contributions: [{ kind: 'skill', path: 'data', provides: [`${id}.cap@1`] }] };
+}
+
+test('by default an entry is authorized only when every permission its package requests is granted (HCS-0005-R001, R002, R004)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hcs-host-grants-'));
+  try {
+    const storeDir = join(dir, 'store'), stateDir = join(dir, 'state'), grantsDir = join(dir, 'data');
+    const read = 'com.fullfran.rewrite.book.read', propose = 'com.fullfran.rewrite.claims.propose';
+    const id = 'dev.test.reader';
+    const requests = { hcsVersion: '0.1', entry: id, requests: [
+      { permission: read, reason: 'read scenes', 'x-example-autogrant': true }, { permission: propose },
+    ] };
+    const entry = requestingPackage(dir, storeDir, id, requests);
+    const apply = () => applyDesiredSet(JSON.stringify({ hcsVersion: '0.1', id: 'dev.test.catalog', version: '1', entries: [entry] }), { stateDir, storeDir, grantsDir });
+    const denied = (permission: string) => failure(e => {
+      assert.deepEqual(e.errors.map(x => [x.code, x.entry, x.requirement, x.message]), [['permission_denied', id, 'HCS-0005-R001', `Permission denied: ${permission}`]]);
+    });
+    // A request, even with an extension member, is not a grant.
+    await assert.rejects(apply(), denied(read));
+    assert.equal(pointer(stateDir), null);
+    assert.deepEqual(states(stateDir), [[id, 'failed', 'permission_denied']]);
+    grantPermission(grantsDir, id, read);
+    await assert.rejects(apply(), denied(propose));
+    grantPermission(grantsDir, id, propose);
+    assert.equal((await apply()).generation, 1);
+    assert.deepEqual(states(stateDir), [[id, 'active', null]]);
+    revokePermission(grantsDir, id, propose);
+    await assert.rejects(apply(), denied(propose));
+    assert.equal(pointer(stateDir), 1, 'a denied transition keeps the previous generation');
+
+    // A package without a request document requests nothing; a malformed or foreign document is denied.
+    const plain = requestingPackage(dir, storeDir, 'dev.test.plain', undefined);
+    const applyOne = (e: unknown) => applyDesiredSet(JSON.stringify({ hcsVersion: '0.1', id: 'dev.test.catalog', version: '2', entries: [e] }), { stateDir, storeDir, grantsDir });
+    assert.equal((await applyOne(plain)).generation, 2);
+    for (const [name, document] of [
+      ['other', { ...requests, entry: 'dev.test.other' }], ['version', { ...requests, hcsVersion: '9' }],
+      ['member', { ...requests, grants: [] }], ['permission', { ...requests, requests: [{ permission: 'Not An Id' }] }],
+      ['json', '{nope'],
+    ] as [string, unknown][]) {
+      const bad = requestingPackage(dir, storeDir, `dev.test.bad-${name}`, document);
+      await assert.rejects(applyOne(bad), failure(e => {
+        assert.equal(e.errors[0].code, 'permission_denied', name);
+        assert.equal(e.errors[0].entry, bad.id, name);
+      }));
+    }
+    assert.equal(pointer(stateDir), 2);
+  } finally {
+    unseal(dir); rmSync(dir, { recursive: true, force: true });
+  }
+});

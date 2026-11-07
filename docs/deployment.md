@@ -58,6 +58,17 @@ rewrite import /data/books/demo-book /app/fixtures/demo-book/escena-01.md /app/f
 rewrite grant /data demo-book user_xxx
 ```
 
+`rewrite revoke /data demo-book user_xxx` removes that access; the person's next call is refused, with no restart.
+
+Packages get authority the same way, one permission at a time, and nothing by default. A package's own requests never grant anything. The grantable permissions are `com.fullfran.rewrite.book.read`, `book.import`, `claims.propose`, `findings.propose` and `revision.propose` (all under `com.fullfran.rewrite.`); accepting, rejecting and verdicts stay with people on the review page and cannot be granted:
+
+```bash
+rewrite package-grant /data com.example.reader com.fullfran.rewrite.book.read
+rewrite package-revoke /data com.example.reader com.fullfran.rewrite.book.read
+```
+
+Grants live in `/data/grants.json` and are read on every call, so a revocation applies to the next operation.
+
 ## 4. Connect a client
 
 - **ChatGPT:** add a custom MCP server with the `/mcp` URL and OAuth.

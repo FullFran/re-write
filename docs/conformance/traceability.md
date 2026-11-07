@@ -73,10 +73,10 @@ Generated from HCS pin 9f40641ebdff9aae73e797b1223b54bcc43a41b7; do not edit.
 
 | Requirement | Keyword | Status | Where | Issue or reason |
 | --- | --- | --- | --- | --- |
-| HCS-0005-R001 | MUST | planned |  | [#30](https://github.com/FullFran/re-write/issues/30) |
-| HCS-0005-R002 | MUST NOT | planned |  | [#30](https://github.com/FullFran/re-write/issues/30) |
-| HCS-0005-R003 | MUST | planned |  | [#30](https://github.com/FullFran/re-write/issues/30) |
-| HCS-0005-R004 | MUST NOT | planned |  | [#30](https://github.com/FullFran/re-write/issues/30) |
+| HCS-0005-R001 | MUST | implemented | `src/hcs/authority.ts`, `src/application/decision.ts`, `tests/hcs-authority.test.ts`, `tests/hcs-conformance-authority.test.ts`, `tests/decision.test.ts`, `tests/mcp.test.ts`, `tests/hcs-host-state.test.ts` |  |
+| HCS-0005-R002 | MUST NOT | implemented | `src/hcs/authority.ts`, `src/hcs/grants.ts`, `tests/hcs-authority.test.ts`, `tests/hcs-conformance-authority.test.ts`, `tests/hcs-host-state.test.ts` |  |
+| HCS-0005-R003 | MUST | implemented | `src/hcs/grants.ts`, `src/application/decision.ts`, `src/adapters/mcp.ts`, `src/adapters/http-server.ts`, `tests/hcs-authority.test.ts`, `tests/decision.test.ts`, `tests/mcp.test.ts`, `tests/review.test.ts` |  |
+| HCS-0005-R004 | MUST NOT | implemented | `src/hcs/authority.ts`, `tests/hcs-authority.test.ts`, `tests/hcs-conformance-authority.test.ts`, `tests/hcs-host-state.test.ts` |  |
 
 ## HCS-0006
 
