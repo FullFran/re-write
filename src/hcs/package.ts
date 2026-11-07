@@ -1,7 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { HcsFailure, hcsError } from './errors.ts';
 import { readTar, writeTar, TarUnsafeNameError, type TarInput } from './tar.ts';
@@ -92,7 +91,9 @@ export function unpackPackage(bytes: Uint8Array, expected: PackageExpected, targ
     renameSync(partial, targetDir);
   } catch (error) { unsealTree(partial); rmSync(partial, { recursive: true, force: true }); throw error; }
 }
-export async function fetchPackageBytes(entry: PackageExpected & { locations?: string[] }, options: { storeDir: string }): Promise<Buffer> {
+// Package bytes come only from the content-addressed store or an `https:` location; any other
+// location (including `file:`) is refused like an unavailable one. Aborting `signal` aborts the download.
+export async function fetchPackageBytes(entry: PackageExpected & { locations?: string[] }, options: { storeDir: string; signal?: AbortSignal }): Promise<Buffer> {
   if (!hashPattern.test(entry.contentHash)) throw new Error('Invalid package content hash');
   const [algorithm, digest] = entry.contentHash.split(':');
   try { return readFileSync(join(options.storeDir, algorithm, digest)); } catch (error: any) { if (error.code !== 'ENOENT') throw error; }
@@ -100,17 +101,19 @@ export async function fetchPackageBytes(entry: PackageExpected & { locations?: s
   for (const location of entry.locations ?? []) {
     try {
       const url = new URL(location);
-      if (url.protocol === 'file:') return readFileSync(fileURLToPath(url));
       if (url.protocol !== 'https:') throw new Error('Unsupported package location');
+      options.signal?.throwIfAborted();
       const controller = new AbortController();
+      const abort = () => controller.abort(options.signal?.reason);
+      options.signal?.addEventListener('abort', abort, { once: true });
       try {
         const response = await fetch(url, { signal: controller.signal, redirect: 'error' });
         if (!response.ok || !response.body) throw new Error(`Package fetch failed: ${response.status}`);
         const chunks: Buffer[] = []; let length = 0;
         for await (const chunk of response.body) { length += chunk.length; if (length > entry.size) { controller.abort(); throw new Error('Package download exceeds expected size'); } chunks.push(Buffer.from(chunk)); }
         return Buffer.concat(chunks, length);
-      } finally { controller.abort(); }
-    } catch (error) { lastError = error; }
+      } finally { options.signal?.removeEventListener('abort', abort); controller.abort(); }
+    } catch (error) { if (options.signal?.aborted) throw error; lastError = error; }
   }
   throw lastError;
 }

@@ -1,6 +1,6 @@
 # RE;write
 
-A **vibe writing harness**: narrative memory with evidence and human review. RE;write does not supply a model: agents such as ChatGPT, OpenCode or Claude Code connect through its MCP, read scenes and propose claims and changes. Only a person can accept them.
+A **vibe writing harness**: narrative memory with evidence and human review. RE;write does not supply a model: agents such as ChatGPT, OpenCode or Claude Code connect through its MCP, read scenes and propose claims, findings and changes. Only a person can accept them.
 
 Three ways in share one core:
 
