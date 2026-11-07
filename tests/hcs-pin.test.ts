@@ -33,7 +33,7 @@ function fixture(t: import('node:test').TestContext) {
   mkdirSync(join(root, 'scripts'), { recursive: true });
   mkdirSync(join(root, 'src', 'hcs'), { recursive: true });
   mkdirSync(source);
-  for (const file of ['scripts/hcs-fetch.ts', 'src/hcs/pin.ts', 'src/hcs/version.ts']) {
+  for (const file of ['scripts/hcs-fetch.ts', 'src/hcs/pin.ts', 'src/hcs/fetch.ts', 'src/hcs/version.ts']) {
     cpSync(resolve(file), join(root, file));
   }
   const git = (...args: string[]) => {
@@ -98,4 +98,62 @@ test('fetch rejects a checkout at a different commit without writing artefacts',
   assert.equal(result.stdout, '');
   assert.equal(result.stderr, `HCS fetch failed: HCS commit mismatch: expected ${expected}, got ${revision}\n`);
   assert.equal(existsSync(join(root, '.hcs')), false);
+});
+
+
+test('fetch refuses a dirty source without creating a target', (t) => {
+  const { root, source, revision, pin, fetch } = fixture(t);
+  pin(revision);
+  writeFileSync(join(source, 'schemas', 'synthetic.txt'), 'dirty\n');
+  const result = fetch();
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /dirty/i);
+  assert.equal(result.stdout, '');
+  assert.equal(existsSync(join(root, '.hcs', revision)), false);
+});
+
+test('fetch replaces incomplete targets and removes partial copies after failure', (t) => {
+  const { root, source, revision, pin, fetch } = fixture(t);
+  pin(revision);
+  const target = join(root, '.hcs', revision);
+  mkdirSync(target, { recursive: true });
+  writeFileSync(join(target, 'stale'), 'stale');
+  rmSync(join(source, 'schemas'), { recursive: true });
+  const failed = fetch();
+  assert.equal(failed.status, 1);
+  assert.equal(existsSync(target), false);
+  assert.deepEqual(readdirSync(join(root, '.hcs')), []);
+});
+
+test('injected runner exposes bounded command stderr', async () => {
+  const { fetchHcs } = await import('../src/hcs/fetch.ts');
+  const root = mkdtempSync(join(tmpdir(), 'rewrite-fetch-runner-'));
+  try {
+    const stderr = Array.from({ length: 25 }, (_, i) => `line ${i + 1}`).join('\n');
+    assert.throws(() => fetchHcs(root, valid, { run: () => { throw Object.assign(new Error('failed'), { stderr }); } }), (error: Error) => {
+      assert.match(error.message, /line 25/);
+      assert.doesNotMatch(error.message, /line 5(?:\n|$)/);
+      return true;
+    });
+    assert.equal(existsSync(join(root, '.hcs', commit)), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test('fetch publishes a fresh replacement and cleans up a failed partial copy', async (t) => {
+  const { fetchHcs } = await import('../src/hcs/fetch.ts');
+  const { root, source, revision, pin, fetch } = fixture(t);
+  pin(revision);
+  const target = join(root, '.hcs', revision);
+  mkdirSync(target, { recursive: true });
+  writeFileSync(join(target, 'stale'), 'stale');
+  const result = fetch();
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(existsSync(join(target, 'stale')), false);
+  assert.equal(readFileSync(join(target, '.complete'), 'utf8'), `${revision}\n`);
+  rmSync(target, { recursive: true });
+  rmSync(join(source, 'conformance'), { recursive: true });
+  assert.throws(() => fetchHcs(root, { ...valid, commit: revision }, { source, run: (_cmd, args) => args.includes('rev-parse') ? revision : '' }));
+  assert.equal(existsSync(target), false);
+  assert.deepEqual(readdirSync(join(root, '.hcs')), []);
 });

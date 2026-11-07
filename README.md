@@ -63,7 +63,7 @@ Add `--json` to any command. Exit codes: 0 for success, 1 for a refusal, 2 for a
 
 ## HCS checks
 
-Until HCS is public, fetching its private artefacts, traceability checks and the reference runner run locally only. CI can validate the pin without private access. See [HCS pin and local checks](docs/hcs.md).
+Until HCS is public, fetching its private artefacts and running traceability checks are local-only. The reference runner will run in M7 ([#44](https://github.com/FullFran/re-write/issues/44)); it does not run against re-write yet. CI can validate the pin without private access. See [HCS pin and local checks](docs/hcs.md).
 
 ## Direction
 

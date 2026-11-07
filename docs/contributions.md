@@ -85,4 +85,4 @@ These are planned packages, not currently installed contributions. The fixture e
 
 ## Supported kinds
 
-The host supports exactly `skill`, `mcp-server`, `x-rewrite-extractor`, `x-rewrite-check`, `x-rewrite-importer` and `x-rewrite-instructions`. The catalog reader ([#25](https://github.com/FullFran/re-write/issues/25)) accepts any kind the grammar allows (HCS-0001-R006); resolution ([#27](https://github.com/FullFran/re-write/issues/27)) refuses to activate an entry with any other kind and reports `unsupported_contribution` (HCS-0001-R008). This is planned behavior until those issues land.
+The host will support exactly `skill`, `mcp-server`, `x-rewrite-extractor`, `x-rewrite-check`, `x-rewrite-importer` and `x-rewrite-instructions`. The catalog reader ([#25](https://github.com/FullFran/re-write/issues/25)) will accept any kind the grammar allows (HCS-0001-R006); resolution ([#27](https://github.com/FullFran/re-write/issues/27)) will refuse to activate an entry with any other kind and report `unsupported_contribution` (HCS-0001-R008). This is planned behavior until those issues land.
