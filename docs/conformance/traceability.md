@@ -61,13 +61,13 @@ Generated from HCS pin 9f40641ebdff9aae73e797b1223b54bcc43a41b7; do not edit.
 
 | Requirement | Keyword | Status | Where | Issue or reason |
 | --- | --- | --- | --- | --- |
-| HCS-0004-R001 | MUST NOT | planned |  | [#29](https://github.com/FullFran/re-write/issues/29) |
-| HCS-0004-R002 | MUST | planned |  | [#29](https://github.com/FullFran/re-write/issues/29) |
-| HCS-0004-R003 | MUST | planned |  | [#29](https://github.com/FullFran/re-write/issues/29) |
-| HCS-0004-R004 | MUST | planned |  | [#29](https://github.com/FullFran/re-write/issues/29) |
-| HCS-0004-R005 | MUST | partial | `src/hcs/capabilities.ts`, `src/adapters/mcp.ts`, `tests/hcs-capabilities.test.ts`, `tests/mcp.test.ts` |  |
-| HCS-0004-R006 | MUST NOT | partial | `src/hcs/capabilities.ts`, `src/adapters/mcp.ts`, `tests/hcs-capabilities.test.ts`, `tests/mcp.test.ts` |  |
-| HCS-0004-R007 | MUST | planned |  | [#29](https://github.com/FullFran/re-write/issues/29) |
+| HCS-0004-R001 | MUST NOT | implemented | `src/hcs/host-state.ts`, `src/hcs/package.ts`, `tests/hcs-host-state.test.ts` |  |
+| HCS-0004-R002 | MUST | implemented | `src/hcs/lifecycle.ts`, `src/hcs/host-state.ts`, `tests/hcs-lifecycle.test.ts`, `tests/hcs-conformance-lifecycle.test.ts`, `tests/hcs-host-state.test.ts` |  |
+| HCS-0004-R003 | MUST | implemented | `src/hcs/host-state.ts`, `tests/hcs-host-state.test.ts`, `tests/hcs-catalog-cli.test.ts` |  |
+| HCS-0004-R004 | MUST | implemented | `src/hcs/host-state.ts`, `tests/hcs-host-state.test.ts` |  |
+| HCS-0004-R005 | MUST | implemented | `src/hcs/capabilities.ts`, `src/hcs/registry.ts`, `src/adapters/mcp.ts`, `tests/hcs-capabilities.test.ts`, `tests/hcs-registry.test.ts`, `tests/mcp.test.ts` |  |
+| HCS-0004-R006 | MUST NOT | partial | `src/hcs/capabilities.ts`, `src/hcs/registry.ts`, `src/hcs/host-state.ts`, `src/adapters/mcp.ts`, `tests/hcs-capabilities.test.ts`, `tests/hcs-registry.test.ts`, `tests/mcp.test.ts` |  |
+| HCS-0004-R007 | MUST | implemented | `src/hcs/host-state.ts`, `tests/hcs-host-state.test.ts` |  |
 
 ## HCS-0005
 

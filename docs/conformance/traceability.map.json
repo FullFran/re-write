@@ -365,17 +365,83 @@
       "status": "not-applicable",
       "reason": "re-write declares all-or-nothing; resolve supports partial for conformance."
     },
+    "HCS-0004-R001": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/host-state.ts",
+        "src/hcs/package.ts"
+      ],
+      "tests": [
+        "tests/hcs-host-state.test.ts"
+      ]
+    },
+    "HCS-0004-R002": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/lifecycle.ts",
+        "src/hcs/host-state.ts"
+      ],
+      "tests": [
+        "tests/hcs-lifecycle.test.ts",
+        "tests/hcs-conformance-lifecycle.test.ts",
+        "tests/hcs-host-state.test.ts"
+      ]
+    },
+    "HCS-0004-R003": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/host-state.ts"
+      ],
+      "tests": [
+        "tests/hcs-host-state.test.ts",
+        "tests/hcs-catalog-cli.test.ts"
+      ]
+    },
+    "HCS-0004-R004": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/host-state.ts"
+      ],
+      "tests": [
+        "tests/hcs-host-state.test.ts"
+      ]
+    },
     "HCS-0004-R005": {
-      "status": "partial",
-      "reason": "MCP dispatch checks capability state; lifecycle provider lands with #29",
-      "code": ["src/hcs/capabilities.ts", "src/adapters/mcp.ts"],
-      "tests": ["tests/hcs-capabilities.test.ts", "tests/mcp.test.ts"]
+      "status": "implemented",
+      "code": [
+        "src/hcs/capabilities.ts",
+        "src/hcs/registry.ts",
+        "src/adapters/mcp.ts"
+      ],
+      "tests": [
+        "tests/hcs-capabilities.test.ts",
+        "tests/hcs-registry.test.ts",
+        "tests/mcp.test.ts"
+      ]
     },
     "HCS-0004-R006": {
       "status": "partial",
-      "reason": "MCP dispatch checks capability state; lifecycle provider lands with #29",
-      "code": ["src/hcs/capabilities.ts", "src/adapters/mcp.ts"],
-      "tests": ["tests/hcs-capabilities.test.ts", "tests/mcp.test.ts"]
+      "reason": "Draining entries take no new calls; in-flight calls are not tracked or drained (OQ-0004-2)",
+      "code": [
+        "src/hcs/capabilities.ts",
+        "src/hcs/registry.ts",
+        "src/hcs/host-state.ts",
+        "src/adapters/mcp.ts"
+      ],
+      "tests": [
+        "tests/hcs-capabilities.test.ts",
+        "tests/hcs-registry.test.ts",
+        "tests/mcp.test.ts"
+      ]
+    },
+    "HCS-0004-R007": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/host-state.ts"
+      ],
+      "tests": [
+        "tests/hcs-host-state.test.ts"
+      ]
     },
     "HCS-0006-R001": {
       "status": "implemented",
