@@ -8,39 +8,39 @@ Generated from HCS pin 9f40641ebdff9aae73e797b1223b54bcc43a41b7; do not edit.
 | --- | --- | --- | --- | --- |
 | HCS-0000-R001 | MUST | not-applicable |  | Process rule on the HCS repository, not on hosts. |
 | HCS-0000-R002 | MUST NOT | not-applicable |  | Process rule on the HCS repository, not on hosts. |
-| HCS-0000-R003 | MUST NOT | planned |  | [#21](https://github.com/FullFran/re-write/issues/21) |
-| HCS-0000-R004 | MUST NOT | planned |  | [#21](https://github.com/FullFran/re-write/issues/21) |
+| HCS-0000-R003 | MUST NOT | implemented | `src/hcs/extensions.ts`, `tests/hcs-extensions.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
+| HCS-0000-R004 | MUST NOT | implemented | `src/hcs/extensions.ts`, `tests/hcs-extensions.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
 
 ## HCS-0001
 
 | Requirement | Keyword | Status | Where | Issue or reason |
 | --- | --- | --- | --- | --- |
-| HCS-0001-R001 | MUST | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
-| HCS-0001-R002 | MUST | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
-| HCS-0001-R003 | MUST | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
-| HCS-0001-R004 | MUST | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
-| HCS-0001-R005 | MUST | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
-| HCS-0001-R006 | MUST | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
+| HCS-0001-R001 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
+| HCS-0001-R002 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
+| HCS-0001-R003 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
+| HCS-0001-R004 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
+| HCS-0001-R005 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
+| HCS-0001-R006 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
 | HCS-0001-R007 | MUST | planned |  | [#26](https://github.com/FullFran/re-write/issues/26) |
 | HCS-0001-R008 | MUST NOT | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
 | HCS-0001-R009 | MUST NOT | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
-| HCS-0001-R010 | MUST | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
-| HCS-0001-R011 | MUST | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
+| HCS-0001-R010 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
+| HCS-0001-R011 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
 | HCS-0001-R012 | MUST | planned |  | [#26](https://github.com/FullFran/re-write/issues/26) |
 | HCS-0001-R013 | MUST NOT | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
 | HCS-0001-R014 | SHOULD | planned |  | [#24](https://github.com/FullFran/re-write/issues/24) |
-| HCS-0001-R015 | SHOULD | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
+| HCS-0001-R015 | SHOULD | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
 | HCS-0001-R016 | MUST NOT | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
 
 ## HCS-0002
 
 | Requirement | Keyword | Status | Where | Issue or reason |
 | --- | --- | --- | --- | --- |
-| HCS-0002-R001 | MUST | planned |  | [#21](https://github.com/FullFran/re-write/issues/21) |
-| HCS-0002-R002 | MUST | planned |  | [#21](https://github.com/FullFran/re-write/issues/21) |
-| HCS-0002-R003 | MUST | planned |  | [#21](https://github.com/FullFran/re-write/issues/21) |
-| HCS-0002-R004 | SHOULD | planned |  | [#21](https://github.com/FullFran/re-write/issues/21) |
-| HCS-0002-R005 | SHOULD | planned |  | [#21](https://github.com/FullFran/re-write/issues/21) |
+| HCS-0002-R001 | MUST | implemented | `src/hcs/ids.ts`, `tests/hcs-ids.test.ts` |  |
+| HCS-0002-R002 | MUST | implemented | `src/hcs/ids.ts`, `tests/hcs-ids.test.ts` |  |
+| HCS-0002-R003 | MUST | implemented | `src/hcs/ids.ts`, `tests/hcs-ids.test.ts` |  |
+| HCS-0002-R004 | SHOULD | implemented | `src/hcs/ids.ts`, `docs/architecture.md`, `tests/hcs-ids.test.ts` |  |
+| HCS-0002-R005 | SHOULD | implemented | `src/hcs/ids.ts`, `docs/architecture.md`, `tests/hcs-ids.test.ts` |  |
 
 ## HCS-0003
 
