@@ -40,19 +40,4 @@ Authorization (HCS-0005): the default `authorize` hook of `applyDesiredSet` auth
 
 ### Try it
 
-The CLI activator runs no package code: activation only makes an entry's `provides` capabilities callable.
-
-```sh
-work=$(mktemp -d)
-node src/cli/main.ts package fixtures/packages/fixture-annotations --out "$work/annotations.tar.gz" --json
-node src/cli/main.ts package fixtures/packages/knowledge-order --out "$work/knowledge-order.tar.gz" --json
-# Write $work/catalog.json with both entries: the contentHash and size printed above, mediaType
-# application/vnd.oci.image.layer.v1.tar+gzip, locations ["file://$work/<archive>"], and one
-# contribution each (x-rewrite-extractor and x-rewrite-check, path index.mjs, with provides).
-node src/cli/main.ts catalog validate "$work/catalog.json"
-node src/cli/main.ts catalog apply "$work/catalog.json" --state "$work/state"
-# Copy the catalog to $work/bad.json and change one contentHash: the apply fails with
-# integrity_mismatch and generation 1 stays active.
-node src/cli/main.ts catalog apply "$work/bad.json" --state "$work/state"
-node src/cli/main.ts catalog status --state "$work/state"
-```
+`npm run hcs:try` (or `bash scripts/hcs-try.sh [work-dir]`) walks the host core end to end with the two fixture packages and prints each step: deterministic builds, catalog validation, an apply refused without grants (`permission_denied`), grants for what each package requests in its `requests.json`, an apply that reaches `active`, a wrong digest that fails with `integrity_mismatch` while the previous generation stays active, and a package that also provides a host built-in (`ambiguous_provider`). The CLI activator runs no package code: activation only makes an entry's `provides` capabilities callable.

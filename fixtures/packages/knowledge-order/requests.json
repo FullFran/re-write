@@ -1,0 +1,8 @@
+{
+  "hcsVersion": "0.1",
+  "entry": "com.fullfran.rewrite.knowledge-order",
+  "requests": [
+    { "permission": "com.fullfran.rewrite.book.read", "reason": "Read the claims it checks." },
+    { "permission": "com.fullfran.rewrite.findings.propose", "reason": "Propose continuity findings for human review." }
+  ]
+}
