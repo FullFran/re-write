@@ -81,6 +81,14 @@ mark { background: #ffe066; color: inherit; padding: 2px 4px; border-radius: 3px
 @media (prefers-color-scheme: dark) { mark { background: #7a6200; color: inherit; } }
 .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font: 12px/1.2 system-ui, sans-serif; border: 1px solid var(--line); margin-right: 6px; }
 .badge-stale { border-color: var(--reject); color: var(--reject); }
+.state-badge { font-size: 15px; font-weight: bold; padding: 6px 10px; }
+.visual-diff { white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); padding: 12px; }
+.diff-removed, .diff-added { display: block; padding: 4px 8px; border-left: 4px solid; }
+.diff-removed { color: var(--reject); background: color-mix(in srgb, var(--reject) 12%, var(--paper)); }
+.diff-added { color: var(--accept); background: color-mix(in srgb, var(--accept) 12%, var(--paper)); }
+.diff-label { font: bold 13px system-ui, sans-serif; margin-right: 8px; }
+.note-counter { flex-basis: 100%; }
+article:focus { outline: 2px solid var(--ink); outline-offset: 4px; }
 .clickable-quote { cursor: pointer; text-decoration: underline; text-decoration-style: dotted; }
 .clickable-quote:hover { background: var(--line); }
 `;
@@ -89,6 +97,26 @@ export const REVIEW_JS = String.raw`
 'use strict';
 
 const app = document.getElementById('app');
+const decidedProposals = new Set();
+const decidedClaims = new Set();
+const MAX_NOTE = 2000;
+let nextNoteCounter = 0;
+const STATE_LABELS = { proposed: 'Pendiente', accepted: 'Aceptada', rejected: 'Rechazada' };
+
+function stateBadge(state, stale) {
+  return el('span', stale ? 'No aplicable: la escena ha cambiado' : STATE_LABELS[state], 'badge state-badge' + (stale ? ' badge-stale' : ''));
+}
+
+async function decideCard(path, decision, remembered, key, card, reload) {
+  await api(path, { decision });
+  remembered.add(key);
+  await reload();
+  const updated = document.getElementById(card.id);
+  if (updated) {
+    updated.focus({ preventScroll: true });
+    updated.scrollIntoView({ block: 'nearest' });
+  }
+}
 
 function el(tag, text, className) {
   const node = document.createElement(tag);
@@ -163,17 +191,19 @@ function quote(text, detail) {
 
 function claimCard(book, claim, reload) {
   const card = el('article');
-  card.append(el('p', claim.statement));
+  card.id = 'claim-' + book + '-' + claim.claim_id;
+  card.tabIndex = -1;
+  card.append(stateBadge(claim.editorial_status), el('p', claim.statement));
+  const reason = outsideCanonReason(claim);
+  if (reason) card.append(el('p', 'Fuera del Canon: ' + reason, 'meta'));
   card.append(quote(claim.anchor.quote, claim.source_file + ' · ' + claim.epistemic_kind + ' · evidencia: ' + claim.evidence_status + ' · propuesto por: ' + claim.extractor));
   if (claim.uncertainty) card.append(el('p', 'Incertidumbre: ' + claim.uncertainty, 'meta'));
   if (claim.editorial_status === 'proposed') {
     const actions = el('div', undefined, 'actions');
-    const decide = (decision) => () => api('/books/' + book + '/claims/' + claim.claim_id, { decision }).then(reload);
+    const decide = (decision) => () => decideCard('/books/' + book + '/claims/' + claim.claim_id, decision, decidedClaims, book + '/' + claim.claim_id, card, reload);
     if (claim.evidence_status === 'valid') actions.append(button('Aceptar', 'accept', decide('accept')));
     actions.append(button('Rechazar', 'reject', decide('reject')));
     card.append(actions);
-  } else {
-    card.append(el('p', 'Estado: ' + claim.editorial_status, 'meta'));
   }
   return card;
 }
@@ -238,14 +268,24 @@ function narrativeFindingCard(book, finding, reload, openQuote) {
   if (finding.verdict && finding.verdict.note) {
     noteInput.value = finding.verdict.note;
   }
+  const counter = el('span', undefined, 'meta note-counter');
+  counter.id = 'note-count-' + book + '-' + finding.finding_id + '-' + nextNoteCounter++;
+  noteInput.setAttribute('aria-describedby', counter.id);
+  const updateCounter = () => {
+    counter.textContent = noteInput.value.length + ' / ' + MAX_NOTE + ' caracteres';
+    noteInput.setAttribute('aria-invalid', String(noteInput.value.length > MAX_NOTE));
+  };
+  noteInput.addEventListener('input', updateCounter);
+  updateCounter();
   const rate = (verdict) => async () => {
+    if (noteInput.value.length > MAX_NOTE) throw new Error('La nota supera el límite de ' + MAX_NOTE + ' caracteres.');
     const note = noteInput.value.trim() || undefined;
     await api('/books/' + book + '/findings/' + finding.finding_id, { verdict, note });
     await reload();
   };
   const usefulBtn = button('Me ayuda', finding.verdict?.verdict === 'useful' ? 'active' : '', rate('useful'));
   const noiseBtn = button('Ruido', finding.verdict?.verdict === 'noise' ? 'active' : '', rate('noise'));
-  ratingRow.append(noteInput, usefulBtn, noiseBtn);
+  ratingRow.append(noteInput, counter, usefulBtn, noiseBtn);
   card.append(ratingRow);
 
   return card;
@@ -318,16 +358,50 @@ function findingCard(book, finding, reload) {
   return card;
 }
 
+function visualDiff(diff) {
+  const box = el('div', undefined, 'visual-diff');
+  box.setAttribute('aria-label', 'Cambios respecto a la versión base de la propuesta');
+  let inHunk = false;
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('@@')) { inHunk = true; continue; }
+    if (!inHunk) continue;
+    if (line.startsWith('-') || line.startsWith('+')) {
+      const removed = line.startsWith('-');
+      const row = el('div', undefined, removed ? 'diff-removed' : 'diff-added');
+      row.append(el('span', removed ? '− Eliminado:' : '+ Añadido:', 'diff-label'), el(removed ? 'del' : 'ins', line.slice(1)));
+      box.append(row);
+    } else if (line.startsWith(' ')) {
+      box.append(el('div', line.slice(1)));
+    }
+  }
+  const plain = el('details');
+  plain.append(el('summary', 'Ver diff unificado (texto)'), el('pre', diff));
+  const result = el('div');
+  result.append(box, plain);
+  return result;
+}
+
+function outsideCanonReason(claim) {
+  if (claim.editorial_status === 'proposed') return 'pendiente de revisión humana';
+  if (claim.editorial_status === 'rejected') return 'rechazada en la revisión humana';
+  const reasons = [];
+  if (claim.epistemic_kind !== 'narrated_fact') reasons.push('no es un hecho narrado (rumor, creencia u otra interpretación)');
+  if (claim.evidence_status !== 'valid') reasons.push('evidencia ' + (claim.evidence_status === 'stale' ? 'desactualizada' : 'no válida: la cita ya no está en el texto'));
+  return reasons.join('; ');
+}
+
 function proposalCard(book, { proposal, diff, applicable }, reload) {
   const card = el('article');
-  card.append(el('p', proposal.rationale));
-  card.append(el('pre', diff));
+  card.id = 'proposal-' + book + '-' + proposal.proposal_id;
+  card.tabIndex = -1;
+  card.append(stateBadge(proposal.status, proposal.status === 'proposed' && !applicable));
+  card.append(el('p', proposal.rationale), visualDiff(diff));
   if (proposal.status !== 'proposed') {
-    card.append(el('p', 'Estado: ' + proposal.status + (proposal.result_commit ? ' · versión ' + proposal.result_commit.slice(0, 10) : ''), 'meta'));
+    if (proposal.result_commit) card.append(el('p', 'Cambio aprobado del manuscrito · versión ' + proposal.result_commit.slice(0, 10), 'meta'));
     return card;
   }
   const actions = el('div', undefined, 'actions');
-  const decide = (decision) => () => api('/books/' + book + '/proposals/' + proposal.proposal_id, { decision }).then(reload);
+  const decide = (decision) => () => decideCard('/books/' + book + '/proposals/' + proposal.proposal_id, decision, decidedProposals, book + '/' + proposal.proposal_id, card, reload);
   if (applicable) actions.append(button('Aceptar cambio', 'accept', decide('accept')));
   else card.append(el('p', 'La escena ha cambiado desde esta propuesta: ya no se puede aplicar.', 'meta'));
   actions.append(button('Rechazar', 'reject', decide('reject')));
@@ -335,10 +409,14 @@ function proposalCard(book, { proposal, diff, applicable }, reload) {
   return card;
 }
 
-function section(title, cards, empty) {
+function section(title, cards, empty, explanation) {
   const box = el('section');
   box.append(el('h2', title));
+  if (explanation) box.append(el('p', explanation, 'meta'));
   if (!cards.length) box.append(el('p', empty, 'meta'));
+  for (const card of cards) {
+    if (card.id) card.id = encodeURIComponent(title) + '-' + card.id;
+  }
   box.append(...cards);
   return box;
 }
@@ -707,8 +785,7 @@ function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
       citingBox.append(el('h3', 'Hallazgos que citan esta escena'));
       if (data.findings && data.findings.length > 0) {
         const reloadScene = async () => {
-          await loadScene(canonical, highlight);
-          await reloadBook();
+          await reloadBook(canonical, highlight);
         };
         for (const f of data.findings) {
           citingBox.append(narrativeFindingCard(book, f, reloadScene, (fFile, fQuote, fAnchor, fStatus) => loadScene(fFile, { quote: fQuote, anchor: fAnchor, status: fStatus })));
@@ -722,8 +799,7 @@ function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
       propBox.append(el('h3', 'Propuestas para esta escena'));
       if (data.proposals && data.proposals.length > 0) {
         const reloadScene = async () => {
-          await loadScene(canonical, highlight);
-          await reloadBook();
+          await reloadBook(canonical, highlight);
         };
         for (const p of data.proposals) {
           propBox.append(proposalCard(book, p, reloadScene));
@@ -740,7 +816,7 @@ function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
 
   if (registerOpenQuote) {
     registerOpenQuote((file, quote, anchor, status) => {
-      loadScene(file, { quote, anchor, status });
+      return loadScene(file, { quote, anchor, status });
     });
   }
 
@@ -752,7 +828,7 @@ function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
   return box;
 }
 
-async function renderApp(selectedBookId) {
+async function renderApp(selectedBookId, selectedScene, highlight) {
   const { books } = await api('/books');
   app.replaceChildren();
 
@@ -783,7 +859,7 @@ async function renderApp(selectedBookId) {
   toolbar.append(toggleBtn);
   app.append(toolbar, createBox);
 
-  const reload = () => renderApp(currentBook);
+  const reload = (scene, highlight) => renderApp(currentBook, scene, highlight);
   const data = await api('/books/' + currentBook);
   const pending = (c) => c.editorial_status === 'proposed';
 
@@ -798,12 +874,17 @@ async function renderApp(selectedBookId) {
     notionImportSection(currentBook, reload),
     scenesBox,
     findingsBox,
-    section('Cambios propuestos', data.proposals.filter((p) => p.proposal.status === 'proposed').map((p) => proposalCard(currentBook, p, reload)), 'Ningún cambio pendiente.'),
+    section('Cambios propuestos', data.proposals.filter((p) => p.proposal.status === 'proposed' || decidedProposals.has(currentBook + '/' + p.proposal.proposal_id)).map((p) => proposalCard(currentBook, p, reload)), 'Ningún cambio pendiente.', 'Las decisiones de esta sesión permanecen aquí para confirmar su estado.'),
     section('Posibles problemas', data.findings.map((f) => findingCard(currentBook, f, reload)), 'Sin hallazgos, lo que no demuestra que no haya problemas.'),
-    section('Afirmaciones por revisar', data.claims.filter(pending).map((c) => claimCard(currentBook, c, reload)), 'Ninguna pendiente.'),
-    section('Canon', data.canon.map((c) => claimCard(currentBook, c, reload)), 'El canon está vacío.'),
-    section('Historial de cambios', data.proposals.filter((p) => p.proposal.status !== 'proposed').map((p) => proposalCard(currentBook, p, reload)), 'Sin decisiones todavía.'),
+    section('Afirmaciones por revisar', data.claims.filter((c) => pending(c) || decidedClaims.has(currentBook + '/' + c.claim_id)).map((c) => claimCard(currentBook, c, reload)), 'Ninguna pendiente.', 'Las decisiones de esta sesión permanecen aquí para confirmar su estado.'),
+    section('Canon', data.canon.map((c) => claimCard(currentBook, c, reload)), 'El canon está vacío.', 'Solo hechos narrados aceptados por una persona y con evidencia válida. Aceptar un cambio de texto no aprueba sus afirmaciones.'),
+    section('Afirmaciones fuera del Canon', data.claims.filter((c) => c.editorial_status === 'accepted' && !data.canon.some((canonical) => canonical.claim_id === c.claim_id)).map((c) => claimCard(currentBook, c, reload)), 'Ninguna afirmación aceptada fuera del Canon.', 'Una afirmación aceptada puede seguir fuera del Canon por su tipo o por su evidencia.'),
+    section('Afirmaciones rechazadas', data.claims.filter((c) => c.editorial_status === 'rejected').map((c) => claimCard(currentBook, c, reload)), 'Ninguna afirmación rechazada.', 'Las afirmaciones rechazadas no forman parte del Canon.'),
+    section('Historial de cambios del manuscrito', data.proposals.filter((p) => p.proposal.status !== 'proposed').map((p) => proposalCard(currentBook, p, reload)), 'Sin decisiones todavía.', 'Aceptar una propuesta cambia el manuscrito, pero no convierte sus afirmaciones en Canon. Las propuestas rechazadas no cambian el texto.'),
   );
+  if (selectedScene && openQuoteHandler) {
+    await openQuoteHandler(selectedScene, highlight?.quote, highlight?.anchor, highlight?.status);
+  }
 }
 
 window.addEventListener('load', async () => {

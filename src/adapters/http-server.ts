@@ -510,7 +510,10 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
 
     const project = open(REVIEW_DECIDE);
     const body = (await readBody(req) ?? {}) as { decision?: unknown; verdict?: unknown; note?: unknown };
-    const note = typeof body.note === 'string' ? body.note.slice(0, MAX_NOTE) : undefined;
+    const note = typeof body.note === 'string' ? body.note : undefined;
+    if (note !== undefined && note.length > MAX_NOTE) {
+      throw new HttpError(400, `La nota supera el límite de ${MAX_NOTE} caracteres.`);
+    }
     const decision = () => {
       if (body.decision !== 'accept' && body.decision !== 'reject') throw new HttpError(400, 'decision must be accept or reject');
       return body.decision;
