@@ -1,0 +1,138 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { createHmac, randomUUID } from 'node:crypto';
+import type { RequestListener } from 'node:http';
+import { isHcsErrorCode } from '../hcs/errors.ts';
+import { PRODUCT_PROBLEMS } from './problems.ts';
+
+const PROBLEM_BASE = 'https://github.com/FullFran/re-write/blob/main/docs/problems.md#';
+const problemTypes = new Set(Object.keys(PRODUCT_PROBLEMS).map(kind => `${PROBLEM_BASE}${kind}`));
+const methods = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'CONNECT', 'TRACE']);
+const rpcMethods = new Set(['initialize', 'ping', 'tools/list', 'tools/call', 'resources/list', 'resources/read', 'resources/templates/list', 'prompts/list', 'prompts/get', 'logging/setLevel', 'completion/complete', 'sampling/createMessage', 'roots/list']);
+
+interface Context {
+  request_id: string;
+  door: 'mcp' | 'review' | 'public';
+  subject: string;
+  hash: (value: string) => string;
+}
+const requests = new AsyncLocalStorage<Context>();
+
+export function recordSubject(subject: string): void {
+  const context = requests.getStore();
+  if (context) context.subject = context.hash(subject);
+}
+
+function write(context: Context, event: string, start: number, fields: object): void {
+  // Only callers' explicit metadata fields reach stdout; never spread transport objects.
+  console.log(JSON.stringify({ event, timestamp: new Date().toISOString(), request_id: context.request_id,
+    door: context.door, subject: context.subject, duration_ms: Math.round((performance.now() - start) * 100) / 100, ...fields }));
+}
+
+function problemCode(value: any): string | undefined {
+  if (isHcsErrorCode(value?.hcsError?.code)) return value.hcsError.code;
+  return problemTypes.has(value?.type) ? value.type : undefined;
+}
+
+function routeOf(path: string, resourcePath: string): { route: string; book?: string } {
+  if (path === resourcePath) return { route: resourcePath };
+  const publicRoutes = ['/', '/health', '/llms.txt', '/review', '/review/app.js', '/review/app.css',
+    '/.well-known/oauth-protected-resource', `/.well-known/oauth-protected-resource${resourcePath.replace(/\/$/, '')}`];
+  if (publicRoutes.includes(path)) return { route: path };
+  if (path === '/review/api/books') return { route: path };
+  const match = /^\/review\/api\/books\/([^/]+)(.*)$/.exec(path);
+  if (!match) return { route: 'unmatched' };
+  let book: string;
+  try { book = decodeURIComponent(match[1]); } catch { return { route: 'unmatched' }; }
+  const suffix = match[2];
+  const fixed = ['', '/findings', '/export', '/findings/export', '/scenes', '/import', '/notion-inspect', '/notion-import', '/notion/inspect', '/notion/import', '/notion/preview'];
+  if (fixed.includes(suffix)) return { route: `/review/api/books/:book${suffix}`, book };
+  if (/^\/scenes\/.+/.test(suffix)) return { route: '/review/api/books/:book/scenes/:file', book };
+  const review = /^\/(claims|proposals|findings)\/[^/]+$/.exec(suffix);
+  if (review) return { route: `/review/api/books/:book/${review[1]}/:id`, book };
+  return { route: 'unmatched', book };
+}
+
+/** One logger per server startup. Missing salt never falls back to an unkeyed hash. */
+export function withRequestLog(resource: string, handler: RequestListener, salt = process.env.REWRITE_LOG_SALT): RequestListener {
+  if (!salt) console.warn('REWRITE_LOG_SALT is unset; authenticated subject and book hashes are unset');
+  const hash = (value: string) => salt ? createHmac('sha256', salt).update(value).digest('hex').slice(0, 16) : 'unset';
+  const resourcePath = new URL(resource).pathname;
+  return (req, res) => {
+    let path = '';
+    try { path = new URL(req.url ?? '/', 'http://localhost').pathname; } catch { /* unmatched */ }
+    const { route, book } = routeOf(path, resourcePath);
+    const context: Context = { request_id: randomUUID(), door: path === resourcePath ? 'mcp' : path.startsWith('/review') ? 'review' : 'public', subject: 'anon', hash };
+    const start = performance.now();
+    res.setHeader('x-request-id', context.request_id);
+    let error: string | undefined;
+    const end = res.end;
+    // Inspect only problem envelopes, never normal responses or manuscript streams.
+    res.end = function (...args: any[]) {
+      if (String(res.getHeader('content-type')).startsWith('application/problem+json')) {
+        try { error = problemCode(JSON.parse(String(args[0]))); } catch { /* no free-text fallback */ }
+      }
+      return (end as any).apply(this, args);
+    } as typeof res.end;
+    let emitted = false;
+    const complete = () => {
+      if (emitted) return;
+      emitted = true;
+      const status = res.writableFinished ? res.statusCode : 499;
+      write(context, 'http.request', start, { method: methods.has(req.method ?? '') ? req.method : 'unknown', route, status,
+        ...(book !== undefined ? { book: hash(book) } : {}), ...(status >= 400 ? { error: error ?? 'error' } : {}) });
+    };
+    res.once('finish', complete);
+    res.once('close', complete);
+    requests.run(context, () => handler(req, res));
+  };
+}
+
+/** Observe JSON-RPC envelopes at the transport boundary, including SDK-owned calls and errors. */
+export function observeMcpTransport(transport: {
+  onmessage?: (...args: any[]) => void;
+  send: (...args: any[]) => Promise<void>;
+  onclose?: () => void;
+}, toolNames: ReadonlySet<string>): void {
+  const context = requests.getStore();
+  if (!context) return;
+  const pending = new Map<unknown, { start: number; method: string; tool?: string; book?: string }>();
+  const onmessage = transport.onmessage;
+  transport.onmessage = (message, ...rest) => {
+    if (message && typeof message.method === 'string' && message.id !== undefined) {
+      const method = rpcMethods.has(message.method) ? message.method : 'unknown';
+      const tool = method === 'tools/call' ? (toolNames.has(message.params?.name) ? message.params.name : 'unknown') : undefined;
+      const book = method === 'tools/call' && typeof message.params?.arguments?.book === 'string' ? context.hash(message.params.arguments.book) : undefined;
+      pending.set(message.id, { start: performance.now(), method, ...(tool ? { tool } : {}), ...(book ? { book } : {}) });
+    }
+    onmessage?.(message, ...rest);
+  };
+  const send = transport.send.bind(transport);
+  transport.send = async (message, ...rest) => {
+    const call = pending.get(message?.id);
+    if (call && !message?.method) {
+      pending.delete(message.id);
+      let result = message.error ? problemCode(message.error.data) ?? 'error' : 'ok';
+      if (message.result?.isError) result = problemCode(message.result.structuredContent) ?? 'error';
+      // Batch claim proposals may succeed while refusing individual candidates.
+      if (!message.result?.isError && message.result?.content) {
+        for (const item of message.result.content) {
+          if (item.type !== 'text') continue;
+          try {
+            const body = JSON.parse(item.text);
+            const refusal = body.rejected?.find((r: any) => problemCode(r.problem));
+            if (refusal) result = problemCode(refusal.problem)!;
+          } catch { /* text is never a logging fallback */ }
+        }
+      }
+      const { start, ...fields } = call;
+      write(context, 'mcp.call', start, { ...fields, result });
+    }
+    await send(message, ...rest);
+  };
+  const onclose = transport.onclose;
+  transport.onclose = () => {
+    for (const { start, ...fields } of pending.values()) write(context, 'mcp.call', start, { ...fields, result: 'error' });
+    pending.clear();
+    onclose?.();
+  };
+}
