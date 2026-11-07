@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path';
 import { parsePin, targetPath } from '../src/hcs/pin.ts';
 
 export interface HcsCase { level: string; target: string; input: unknown; expect: { outcome: string; errors?: { code: string; entry?: string }[] } }
-export function loadCases(level: string, target: string): { name: string; value: HcsCase }[] | undefined {
+export function loadCases(level: string, target: string | undefined): { name: string; value: HcsCase }[] | undefined {
   const root = resolve(import.meta.dirname, '..');
   const pin = parsePin(readFileSync(join(root, 'hcs.pin.json'), 'utf8'));
   const base = join(targetPath(root, pin), 'conformance', 'cases');

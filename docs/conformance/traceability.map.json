@@ -130,6 +130,28 @@
       "status": "planned",
       "issue": 26
     },
+    "HCS-0001-R008": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/host.ts",
+        "src/hcs/resolve.ts"
+      ],
+      "tests": [
+        "tests/hcs-resolve.test.ts",
+        "tests/hcs-conformance-resolution.test.ts"
+      ]
+    },
+    "HCS-0001-R009": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/host.ts",
+        "src/hcs/resolve.ts"
+      ],
+      "tests": [
+        "tests/hcs-resolve.test.ts",
+        "tests/hcs-conformance-resolution.test.ts"
+      ]
+    },
     "HCS-0001-R010": {
       "status": "implemented",
       "code": [
@@ -154,6 +176,17 @@
       "status": "planned",
       "issue": 26
     },
+    "HCS-0001-R013": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/host.ts",
+        "src/hcs/resolve.ts"
+      ],
+      "tests": [
+        "tests/hcs-resolve.test.ts",
+        "tests/hcs-conformance-resolution.test.ts"
+      ]
+    },
     "HCS-0001-R014": {
       "status": "planned",
       "issue": 24
@@ -166,6 +199,17 @@
       "tests": [
         "tests/hcs-catalog.test.ts",
         "tests/hcs-conformance-document.test.ts"
+      ]
+    },
+    "HCS-0001-R016": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/host.ts",
+        "src/hcs/resolve.ts"
+      ],
+      "tests": [
+        "tests/hcs-resolve.test.ts",
+        "tests/hcs-conformance-resolution.test.ts"
       ]
     },
     "HCS-0002-R001": {
@@ -215,9 +259,108 @@
         "tests/hcs-ids.test.ts"
       ]
     },
+    "HCS-0003-R001": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/host.ts",
+        "src/hcs/resolve.ts"
+      ],
+      "tests": [
+        "tests/hcs-resolve.test.ts",
+        "tests/hcs-conformance-resolution.test.ts"
+      ]
+    },
+    "HCS-0003-R002": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/host.ts",
+        "src/hcs/resolve.ts"
+      ],
+      "tests": [
+        "tests/hcs-resolve.test.ts",
+        "tests/hcs-conformance-resolution.test.ts"
+      ]
+    },
+    "HCS-0003-R003": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/host.ts",
+        "src/hcs/resolve.ts"
+      ],
+      "tests": [
+        "tests/hcs-resolve.test.ts",
+        "tests/hcs-conformance-resolution.test.ts"
+      ]
+    },
+    "HCS-0003-R004": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/host.ts",
+        "src/hcs/resolve.ts"
+      ],
+      "tests": [
+        "tests/hcs-resolve.test.ts",
+        "tests/hcs-conformance-resolution.test.ts"
+      ]
+    },
+    "HCS-0003-R005": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/host.ts",
+        "src/hcs/resolve.ts"
+      ],
+      "tests": [
+        "tests/hcs-resolve.test.ts",
+        "tests/hcs-conformance-resolution.test.ts"
+      ]
+    },
+    "HCS-0003-R006": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/host.ts",
+        "src/hcs/resolve.ts"
+      ],
+      "tests": [
+        "tests/hcs-resolve.test.ts",
+        "tests/hcs-conformance-resolution.test.ts"
+      ]
+    },
+    "HCS-0003-R007": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/host.ts",
+        "src/hcs/resolve.ts"
+      ],
+      "tests": [
+        "tests/hcs-resolve.test.ts",
+        "tests/hcs-conformance-resolution.test.ts"
+      ]
+    },
+    "HCS-0003-R008": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/host.ts",
+        "src/hcs/resolve.ts"
+      ],
+      "tests": [
+        "tests/hcs-resolve.test.ts",
+        "tests/hcs-conformance-resolution.test.ts"
+      ]
+    },
+    "HCS-0003-R009": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/host.ts",
+        "src/hcs/resolve.ts"
+      ],
+      "tests": [
+        "tests/hcs-resolve.test.ts",
+        "tests/hcs-conformance-resolution.test.ts"
+      ]
+    },
     "HCS-0003-R010": {
       "status": "not-applicable",
-      "reason": "re-write declares all-or-nothing, not partial policy."
+      "reason": "re-write declares all-or-nothing; resolve supports partial for conformance."
     },
     "HCS-0007-R015": {
       "status": "planned",
