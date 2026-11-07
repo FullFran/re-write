@@ -1,5 +1,15 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { basename, resolve } from 'node:path';
+import { buildPackage } from '../hcs/package.ts';
+import { fileURLToPath } from 'node:url';
+import { HcsFailure } from '../hcs/errors.ts';
+import { readCatalog } from '../hcs/catalog.ts';
+import { activeGeneration, applyDesiredSet, statusReport } from '../hcs/host-state.ts';
+import { grantPermission, revokePermission } from '../hcs/grants.ts';
+import type { EntryStatus } from '../hcs/lifecycle.ts';
+import { productProblem, rejectedCandidate } from '../adapters/problems.ts';
 import { ANNOTATION_EXTRACTOR, loadAnnotations } from '../adapters/annotation-extractor.ts';
 import { Library } from '../application/library.ts';
 import { Project, reviewer } from '../application/project.ts';
@@ -8,6 +18,12 @@ import { VERDICTS, type Finding, type VerdictKind } from '../domain/continuity.t
 
 const USAGE = `RE;write: narrative memory with evidence and human review.
 
+  rewrite package <dir> [--out <file>] [--json]  build a deterministic package archive
+  rewrite catalog validate <catalog.json>    check a catalog document
+  rewrite catalog apply <catalog.json> --state <dir> [--store <dir>] [--grants <data-dir>]
+                                             install a catalog as a new generation (runs no package code);
+                                             each entry needs a grant for every permission it requests
+  rewrite catalog status --state <dir>       show the active generation and entry states
   rewrite init <dir> [--title <title>]       create or open a book repository
   rewrite import <dir> <scene.md>...         copy scenes in and commit them
   rewrite read <dir> <scenes/file.md>        print a scene
@@ -22,8 +38,13 @@ const USAGE = `RE;write: narrative memory with evidence and human review.
   rewrite review-proposal <dir> <id> accept|reject [--by <name>] [--note <text>]
   rewrite status <dir>                       show the restored project state
   rewrite grant <data-dir> <book> <user-id>  give a person access to a book on a server
+  rewrite revoke <data-dir> <book> <user-id> remove a person's access to a book; applies to their next call
+  rewrite package-grant <data-dir> <entry> <permission>
+                                             grant a permission to a package entry (never review decisions)
+  rewrite package-revoke <data-dir> <entry> <permission>
+                                             revoke it; applies to the next operation
 
-Add --json to any command for machine-readable output.`;
+Add --json to any command for machine-readable output. Failures are JSON on stderr.`;
 
 class UsageError extends Error {}
 
@@ -74,15 +95,50 @@ function statusOf(project: Project): object {
   };
 }
 
+function lifecycleOutput(generation: number | null, entries: EntryStatus[]): Output {
+  const lines = entries.map(e => `  ${e.entry} ${e.version} ${e.state}${e.error ? ` (${e.error.code}: ${e.error.message})` : ''}`);
+  return { json: { generation, entries }, text: [`generation ${generation ?? 'none'}`, ...lines].join('\n') };
+}
+
+async function catalogCommand(sub: string | undefined, rest: string[], option: (name: string) => string | undefined): Promise<Output> {
+  if (sub === 'status') {
+    if (rest.length) throw new UsageError('unexpected catalog status arguments');
+    const stateDir = need(option('state'), '--state');
+    return lifecycleOutput(activeGeneration(stateDir), statusReport(stateDir));
+  }
+  if (sub !== 'validate' && sub !== 'apply') throw new UsageError(sub ? `unknown catalog command: ${sub}` : 'missing catalog command');
+  const file = need(rest[0], '<catalog.json>');
+  if (rest.length > 1) throw new UsageError(`unexpected catalog ${sub} arguments`);
+  if (sub === 'apply') {
+    const stateDir = need(option('state'), '--state');
+    const result = await applyDesiredSet(readFileSync(file), { stateDir, storeDir: option('store'), grantsDir: option('grants') });
+    return lifecycleOutput(result.generation, result.status);
+  }
+  const read = readCatalog(readFileSync(file));
+  if (!read.ok) throw new HcsFailure(read.errors);
+  const { id, version, entries } = read.catalog;
+  return { json: { valid: true, id, version, entries: entries.length }, text: `valid: ${id} ${version} (${entries.length} entries)` };
+}
+
 interface Output {
   json: unknown;
   text: string;
 }
 
-function dispatch(args: string[], values: Record<string, string | boolean | undefined>): Output {
+async function dispatch(args: string[], values: Record<string, string | boolean | undefined>): Promise<Output> {
   const [command, dir, ...rest] = args;
   const option = (name: string) => values[name] as string | undefined;
   switch (command) {
+    case 'package': {
+      const source = need(dir, '<dir>');
+      if (rest.length) throw new UsageError('unexpected package arguments');
+      const file = option('out') ?? `${basename(resolve(source))}.tar.gz`;
+      const { bytes, contentHash, size, mediaType } = buildPackage(source);
+      writeFileSync(file, bytes);
+      return { json: { contentHash, size, mediaType, file }, text: `${contentHash} ${size}` };
+    }
+    case 'catalog':
+      return catalogCommand(dir, rest, option);
     case 'init': {
       const { project, created } = Project.init(need(dir, '<dir>'), option('title') ?? 'Untitled book');
       return { json: { dir: project.dir, created }, text: `${created ? 'created' : 'opened'} ${project.dir}` };
@@ -103,7 +159,7 @@ function dispatch(args: string[], values: Record<string, string | boolean | unde
       const result = Project.open(need(dir, '<dir>')).extractClaims(extraction);
       const rejected = result.rejected.map((r) => `\n  rejected: ${r.statement} (${r.reason})`).join('');
       return {
-        json: { extractor: extraction.extractor, ...result },
+        json: { extractor: extraction.extractor, ...result, rejected: result.rejected.map(rejectedCandidate) },
         text: `extractor: ${extraction.extractor}${extraction.extractor === ANNOTATION_EXTRACTOR ? ' (hand annotations, no LLM)' : ''}\ncreated: ${result.created.length}; existing: ${result.existing.length}; rejected: ${result.rejected.length}${rejected}`,
       };
     }
@@ -173,6 +229,18 @@ function dispatch(args: string[], values: Record<string, string | boolean | unde
       new Library(need(dir, '<data-dir>')).grant(need(book, '<book>'), need(subject, '<user-id>'));
       return { json: { book, subject }, text: `granted ${subject} access to ${book}` };
     }
+    case 'revoke': {
+      const [book, subject] = rest;
+      new Library(need(dir, '<data-dir>')).revoke(need(book, '<book>'), need(subject, '<user-id>'));
+      return { json: { book, subject }, text: `revoked ${subject} access to ${book}` };
+    }
+    case 'package-grant':
+    case 'package-revoke': {
+      const [entry, permission] = rest;
+      const data = need(dir, '<data-dir>');
+      (command === 'package-grant' ? grantPermission : revokePermission)(data, need(entry, '<entry>'), need(permission, '<permission>'));
+      return { json: { entry, permission }, text: `${command === 'package-grant' ? 'granted' : 'revoked'} ${permission} ${command === 'package-grant' ? 'to' : 'from'} ${entry}` };
+    }
     case 'status': {
       const status = statusOf(Project.open(need(dir, '<dir>')));
       return { json: status, text: JSON.stringify(status, null, 2) };
@@ -182,33 +250,41 @@ function dispatch(args: string[], values: Record<string, string | boolean | unde
   }
 }
 
-function main(): number {
+export function renderFailure(error: unknown, json: boolean, usage = false): { code: number; text: string } {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = usage || error instanceof UsageError ? 2 : 1;
+  if (json) return { code, text: JSON.stringify(error instanceof HcsFailure ? error.errors[0] : productProblem(message, code === 2 ? 400 : 409), null, 2) };
+  return { code, text: code === 2 ? `usage error: ${message}\n\n${USAGE}` : `error: ${message}` };
+}
+
+async function main(): Promise<number> {
   let parsed;
   try {
     parsed = parseArgs({
       allowPositionals: true,
       options: {
-        json: { type: 'boolean' }, title: { type: 'string' }, from: { type: 'string' },
+        json: { type: 'boolean' }, out: { type: 'string' }, title: { type: 'string' }, from: { type: 'string' },
         by: { type: 'string' }, note: { type: 'string' }, file: { type: 'string' }, find: { type: 'string' },
         replace: { type: 'string' }, rationale: { type: 'string' }, finding: { type: 'string' },
+        state: { type: 'string' }, store: { type: 'string' }, grants: { type: 'string' },
       },
     });
   } catch (error) {
-    console.error(`usage error: ${(error as Error).message}\n\n${USAGE}`);
-    return 2;
+    const failure = renderFailure(error, process.argv.includes('--json'), true);
+    console.error(failure.text);
+    return failure.code;
   }
   try {
-    const output = dispatch(parsed.positionals, parsed.values);
+    const output = await dispatch(parsed.positionals, parsed.values);
     console.log(parsed.values.json ? JSON.stringify(output.json, null, 2) : output.text);
     return 0;
   } catch (error) {
-    if (error instanceof UsageError) {
-      console.error(`usage error: ${error.message}\n\n${USAGE}`);
-      return 2;
-    }
-    console.error(`error: ${(error as Error).message}`);
-    return 1;
+    const failure = renderFailure(error, Boolean(parsed.values.json));
+    console.error(failure.text);
+    return failure.code;
   }
 }
 
-process.exitCode = main();
+// Run only as the entry point, also when invoked through a symlink such as node_modules/.bin/rewrite.
+const entry = process.argv[1] ? realpathSync(process.argv[1]) : '';
+if (entry === realpathSync(fileURLToPath(import.meta.url))) process.exitCode = await main();

@@ -44,6 +44,7 @@ rewrite review-proposal /tmp/book <proposal-id> accept --by "your name"
 
 | Command | What it does |
 | --- | --- |
+| `package <dir> [--out <file>] [--json]` | Builds a deterministic package archive; defaults to `<dir-basename>.tar.gz` in the current directory |
 | `init <dir> [--title]` | Creates a book repository, or opens an existing one |
 | `import <dir> <scene.md>...` | Copies scenes in and commits them; refuses to overwrite different text |
 | `read <dir> <scenes/file.md>` | Prints a scene |
@@ -57,9 +58,19 @@ rewrite review-proposal /tmp/book <proposal-id> accept --by "your name"
 | `show <dir> <proposal-id>` | Shows a proposal and its diff |
 | `review-proposal <dir> <id> accept\|reject [--by] [--note]` | The only command that changes a scene, and only on accept |
 | `status <dir>` | Shows the restored project state |
+| `catalog validate <catalog.json>` | Checks an HCS catalog document |
+| `catalog apply <catalog.json> --state <dir> [--store <dir>] [--grants <data-dir>]` | Installs a catalog as a new generation; runs no package code; each entry needs a grant for every permission its package requests |
+| `catalog status --state <dir>` | Shows the active generation and entry states |
 | `grant <data-dir> <book> <user-id>` | Gives a person access to a book on a server |
+| `revoke <data-dir> <book> <user-id>` | Removes that access; it applies to the person's next call |
+| `package-grant <data-dir> <entry> <permission>` | Grants a package entry one permission; review decisions are never grantable |
+| `package-revoke <data-dir> <entry> <permission>` | Revokes it; it applies to the next operation |
 
 Add `--json` to any command. Exit codes: 0 for success, 1 for a refusal, 2 for a usage error.
+
+## HCS checks
+
+Until HCS is public, fetching its private artefacts and running traceability checks are local-only. The reference runner will run in M7 ([#44](https://github.com/FullFran/re-write/issues/44)); it does not run against re-write yet. CI can validate the pin without private access. See [HCS pin and local checks](docs/hcs.md).
 
 ## Direction
 

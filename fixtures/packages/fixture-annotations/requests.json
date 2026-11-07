@@ -1,0 +1,8 @@
+{
+  "hcsVersion": "0.1",
+  "entry": "com.fullfran.rewrite.fixture-annotations",
+  "requests": [
+    { "permission": "com.fullfran.rewrite.book.read", "reason": "Read the scene it extracts claims from." },
+    { "permission": "com.fullfran.rewrite.claims.propose", "reason": "Propose the extracted claims for human review." }
+  ]
+}

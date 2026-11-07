@@ -61,7 +61,7 @@ The rule: **what defines truth or decides is host core; what analyses, suggests 
 | Standing instructions for agents (the untrusted-text rules) | host-owned instructions, plus packages of kind `x-rewrite-instructions` that may only narrow | AGENTS.md convention; extension kind until HCS promotes it |
 | External tools an agent may use (for example a notes workspace MCP server) | package, kind `mcp-server` | MCP Registry `server.json`, secrets only from grants |
 
-Extension kinds follow HCS-0001 section 3.2: `path` points inside the unpacked package; each kind has a small contract.
+See [contribution kinds and module classification](contributions.md) for the per-module mapping, contracts and first packages. Extension kinds follow HCS-0001 section 3.2: `path` points inside the unpacked package; each kind has a small contract.
 
 - `x-rewrite-extractor`: a module or declarative file that, given a scene, returns `ClaimCandidate` objects. Requests `com.fullfran.rewrite.book.read` and `com.fullfran.rewrite.claims.propose`.
 - `x-rewrite-check`: rules that, given claims and the narrative model, return findings with alternatives. Requests `com.fullfran.rewrite.book.read` and `com.fullfran.rewrite.findings.propose`.
@@ -72,18 +72,25 @@ Extension kinds follow HCS-0001 section 3.2: `path` points inside the unpacked p
 
 Capabilities are named by contract, not by package (HCS-0002). Host built-ins are provided by RE;write itself; packages require them.
 
-| Capability | Provider | MCP tools today |
-| --- | --- | --- |
-| `com.fullfran.rewrite.book.read@1` | host | `list_books`, `list_scenes`, `read_scene` |
-| `com.fullfran.rewrite.claims.read@1` | host | `list_claims` |
-| `com.fullfran.rewrite.claims.propose@1` | host | `propose_claims` |
-| `com.fullfran.rewrite.revision.propose@1` | host | `propose_revision`, `list_proposals`, `get_proposal` |
-| `com.fullfran.rewrite.continuity.check@1` | package (`x-rewrite-check`) | `inspect_continuity` |
-| `com.fullfran.rewrite.claims.extract@1` | package (`x-rewrite-extractor`) | none yet (CLI `extract`) |
-| `com.fullfran.rewrite.entities.read@1` | host (planned, [#12](https://github.com/FullFran/re-write/issues/12)) | none yet |
-| `com.fullfran.rewrite.events.read@1` | host (planned, [#15](https://github.com/FullFran/re-write/issues/15)) | none yet |
+| Capability | Major | Provider | Contract and MCP tools today |
+| --- | --- | --- | --- |
+| `com.fullfran.rewrite.book.read@1` | 1 | host | Read books and scenes: `list_books`, `list_scenes`, `read_scene` |
+| `com.fullfran.rewrite.claims.read@1` | 1 | host | Read claims: `list_claims` |
+| `com.fullfran.rewrite.claims.propose@1` | 1 | host | Propose claims: `propose_claims` |
+| `com.fullfran.rewrite.revision.propose@1` | 1 | host | Propose revisions and inspect proposals: `propose_revision`, `list_proposals`, `get_proposal` |
+| `com.fullfran.rewrite.continuity.check@1` | 1 | host, until extraction to `com.fullfran.rewrite.knowledge-order` | Inspect continuity: `inspect_continuity` |
+| `com.fullfran.rewrite.claims.extract@1` | 1 | package (`x-rewrite-extractor`) | Extract claim candidates: none yet (CLI `extract`) |
+| `com.fullfran.rewrite.entities.read@1` | 1 | host (planned, [#12](https://github.com/FullFran/re-write/issues/12)) | Read entities: none yet |
+| `com.fullfran.rewrite.events.read@1` | 1 | host (planned, [#15](https://github.com/FullFran/re-write/issues/15)) | Read events: none yet |
 
-Permissions use the same prefix: `book.read`, `book.import`, `claims.propose`, `findings.propose`, `revision.propose`. There is deliberately no grantable permission for review: `review.decide` exists only on the review door and is never granted to an entry.
+| Permission | Allows | Grantable to an entry |
+| --- | --- | --- |
+| `com.fullfran.rewrite.book.read` | Read books and scenes | yes |
+| `com.fullfran.rewrite.book.import` | Import outside records as proposals | yes |
+| `com.fullfran.rewrite.claims.propose` | Propose claims | yes |
+| `com.fullfran.rewrite.findings.propose` | Propose findings | yes |
+| `com.fullfran.rewrite.revision.propose` | Propose revisions | yes |
+| `com.fullfran.rewrite.review.decide` | Accept or reject through the review door only | no |
 
 Extension members are `x-rewrite-*`. Product refusals (quote not literal, stale evidence, unknown book) are not HCS errors; they are RFC 9457 problem types under a URI RE;write owns (HCS-0006 section 3).
 
@@ -96,6 +103,8 @@ A **generation** is the immutable, prepared set of packages of one desired set (
 | Connected MCP clients (ChatGPT, Claude Code, OpenCode, others) | no | Each MCP session's tools, prompts, instructions and skill resources are built from one generation, fixed for the session's life | by analogy: R001-R007, R017; health = first successful call. This case is a gap in HCS, reported there |
 | Embedded engine for writers without their own agent (Pi first) | yes | A per-run projection that points at the generation directory, with RE;write's MCP server as a host-owned server | applies fully, including R013-R016 |
 
+MCP sessions currently expose host built-ins from one capability snapshot pinned when the server is built, and check capability state on dispatch. Package projection into sessions awaits M5.
+
 The model comes from the connected client; only the embedded engine needs one paid by the operator, chosen from a host-owned allowlist ([#5](https://github.com/FullFran/re-write/issues/5)).
 
 ## 5. Authority and the review boundary
@@ -106,7 +115,9 @@ An operation is allowed only when all of these hold, checked when it is dispatch
 2. the package entry, if the operation comes from a package, holds a grant for the permission;
 3. the operation is reachable through the door it arrived on.
 
-There are two doors. The MCP door can read and propose. The review door, behind a browser session, is the only way to accept or reject. That is a host-owned setting: generation content cannot add an approve tool, remove the untrusted-text instruction or widen it (HCS-0008-R007). Per-person credentials for projected MCP servers follow [#4](https://github.com/FullFran/re-write/issues/4).
+One function decides this: `decide({ subject, book, door, permission, entry })` in `src/application/decision.ts`. Every MCP tool and every review route that touches a book calls it before doing any work, and it reads people's book access (`access.json`) and package grants (`grants.json`) from disk on every call, so `rewrite revoke` and `rewrite package-revoke` apply to the next call without a restart. A person without access to a book gets the same refusal as for a missing book; a package without a grant gets `permission_denied` (HCS-0005-R001); a permission the door does not offer is `forbidden`. Requests and contribution metadata such as Agent Skills `allowed-tools` never count as grants (HCS-0005-R002, R004).
+
+There are two doors. The MCP door can read and propose. The review door, behind a browser session, is the only way to accept or reject. Review decisions (`com.fullfran.rewrite.review.decide`) are never grantable to a package, and the MCP door refuses them whatever is granted. That is a host-owned setting: generation content cannot add an approve tool, remove the untrusted-text instruction or widen it (HCS-0008-R007). Per-person credentials for projected MCP servers follow [#4](https://github.com/FullFran/re-write/issues/4).
 
 ## 6. Where the planned features fit
 

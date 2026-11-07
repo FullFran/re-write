@@ -12,7 +12,11 @@
   },
   "scripts": {
     "test": "node --test \"tests/**/*.test.ts\"",
-    "demo": "node scripts/demo.ts"
+    "hcs:fetch": "node scripts/hcs-fetch.ts",
+    "hcs:trace": "node scripts/hcs-traceability.ts",
+    "hcs:trace:check": "node scripts/hcs-traceability.ts --check",
+    "demo": "node scripts/demo.ts",
+    "hcs:try": "bash scripts/hcs-try.sh"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
