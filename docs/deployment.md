@@ -35,15 +35,18 @@ The server refuses to start if a setting is missing or the URLs are not HTTPS. I
 
 ## Updating and backups
 
-Build a new image tag from a commit and point the service at it:
+Production follows `main`. A deploy agent on the server, configured in the infra repository, checks `main` every two minutes. When it finds a new commit it checks it out into its own directory, builds the image from this `Dockerfile` on the server and recreates the single container with the same volume and settings. Nothing is pushed to the server and no image registry is involved: **merging to `main` is deploying.**
 
-```bash
-SHA=$(git rev-parse --short HEAD)
-git archive HEAD | ssh your-server "docker build -q -t rewrite:$SHA -"
-ssh your-server "docker service update --image rewrite:$SHA rewrite"
-```
+The agent does not wait for the new container to become healthy before recording the commit as deployed, and the old container is already gone by then. So a broken image takes production down until the next commit lands. That is why **CI must be green before merging**: the `CI` workflow runs the tests and builds the image from a checkout whose files are readable only by their owner (as the server's checkout is), then starts it and waits until its healthcheck reports healthy.
 
-`scripts/backup-r2.sh` encrypts the data volume with `gpg`, uploads it to an R2 bucket, then downloads that copy and compares it. It reads its settings from `~/.config/rewrite-backup/r2.env`. **Schedule it yourself, and keep the passphrase outside the server as well**: without it the copies cannot be read. To restore: `gpg --decrypt` the object, stop the service, and extract the archive into the data volume.
+**What is deployed.** The agent records, per app, the last commit it deployed and a history of deploys and failed builds. Read them on the infra side; this repository has no endpoint that reports the commit.
+
+**Rolling back.**
+
+1. Usual way: revert the bad commit on `main` (`git revert <sha>`, through a pull request with green CI). The agent deploys the revert like any other commit.
+2. Without touching `main`: the agent always deploys the head of the branch it is configured to follow, and forcing a deploy redeploys that head. To run an older commit, push a branch that points at it, point the app at that branch in the infra repository and force a deploy there. Point it back at `main` once `main` is fixed.
+
+`scripts/backup-r2.sh` encrypts the data volume with `gpg`, uploads it to an R2 bucket, then downloads that copy and compares it. It reads its settings from `~/.config/rewrite-backup/r2.env`. **Schedule it yourself, and keep the passphrase outside the server as well**: without it the copies cannot be read. To restore: `gpg --decrypt` the object, stop the container, and extract the archive into the data volume.
 
 Clerk browser sessions last 7 days unless a paid plan changes that.
 

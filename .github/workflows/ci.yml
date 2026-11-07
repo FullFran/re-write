@@ -1,0 +1,75 @@
+name: CI
+
+# Production builds the image from a checkout made under umask 0077 and recreates the single
+# container on every new commit of main, so a broken image must fail here, before the merge.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # The private HCS checkout (.hcs/) is absent here; its conformance tests skip themselves.
+      - run: npm test
+
+  image:
+    name: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      IMAGE: rewrite:ci
+      CONTAINER: rewrite-ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Mimic the server's checkout: files 0600 and directories 0700, owned by the builder.
+      - name: Strip group and other permissions
+        run: chmod -R go-rwx .
+      - name: Build image
+        run: docker build -t "$IMAGE" .
+      - name: Start container and wait until healthy
+        run: |
+          docker run -d --name "$CONTAINER" \
+            --health-interval=1s --health-timeout=3s --health-retries=5 --health-start-period=5s \
+            -e MCP_OAUTH_ISSUER=https://issuer.invalid \
+            -e MCP_OAUTH_RESOURCE=https://rewrite.invalid/mcp \
+            -e CLERK_PUBLISHABLE_KEY=pk_test_ci \
+            "$IMAGE"
+          deadline=$((SECONDS + 60))
+          while :; do
+            running=$(docker inspect -f '{{.State.Running}}' "$CONTAINER")
+            health=$(docker inspect -f '{{.State.Health.Status}}' "$CONTAINER")
+            echo "running=$running health=$health"
+            if [ "$health" = healthy ]; then
+              break
+            fi
+            if [ "$running" != true ] || [ "$health" = unhealthy ] || [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::container did not become healthy (running=$running health=$health)"
+              docker logs "$CONTAINER"
+              exit 1
+            fi
+            sleep 1
+          done
+      - name: Remove container
+        if: always()
+        run: docker rm -f "$CONTAINER" || true
