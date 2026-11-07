@@ -1,0 +1,3 @@
+# Vendored HCS release (scripts/hcs-sync.ts): bytes as published, without line-ending normalization, because
+# tests/hcs-vendor.test.ts compares them with the release's SHA256SUMS.
+vendor/hcs/** -text linguist-vendored=true

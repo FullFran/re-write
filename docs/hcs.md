@@ -1,10 +1,25 @@
 # HCS pin and local checks
 
-RE;write adopts the Harness Composition Specification as described in [ADR-0001](adr/0001-adopt-hcs.md). The contract version is `0.1`, pinned in `hcs.pin.json` to commit `9f40641ebdff9aae73e797b1223b54bcc43a41b7` of `FullFran/hcs`. Private HCS content must not be committed to this repository.
+RE;write adopts the Harness Composition Specification as described in [ADR-0001](adr/0001-adopt-hcs.md). The contract version is `0.1` (`HCS_VERSION` in `src/hcs/version.ts`). [FullFran/hcs](https://github.com/FullFran/hcs) is public under Apache 2.0, and RE;write consumes it the way its README recommends ("How to pin HCS"): it pins one release tag and vendors that release's artefact.
 
-To update the pin, change `hcs.pin.json` (and the supported version constant if the contract version changes), run `npm run hcs:fetch`, and regenerate the traceability matrix with `npm run hcs:trace`. Fetch requires an authenticated `gh` with access to HCS, or `HCS_SOURCE_DIR` pointing to a checkout at the pinned commit. The fetched schemas, requirements and conformance materials live in ignored `.hcs/<commit>/`.
+- `vendor/hcs/PIN.json` records the release `version`, the `sha256` of its tarball and its `url`.
+- `vendor/hcs/<version>/` is the release as published: `spec/`, `schemas/`, `requirements/requirements.json`, `conformance/`, `index.json`, `LICENSE` and `SHA256SUMS`. Never edit anything under it: `tests/hcs-vendor.test.ts` checks every file against `SHA256SUMS` and fails on one changed byte, one extra file, or a second vendored version. `.gitattributes` marks it `-text` so git keeps the bytes.
 
-Until HCS is public, CI can run the pin-format test in `npm test` without private access. Fetching, the traceability drift check (`npm run hcs:trace:check`) and the reference runner run locally only. `docs/conformance/traceability.md` is generated from the pinned `requirements.json` and `docs/conformance/traceability.map.json`; edit the map, never the matrix.
+`npm test` runs the vendored conformance cases (`tests/hcs-conformance-*.test.ts`) and the vendor check, so CI runs them too. CI also runs the traceability drift check (`npm run hcs:trace:check`). `docs/conformance/traceability.md` is generated from the vendored `requirements.json` and `docs/conformance/traceability.map.json`; edit the map, never the matrix.
+
+## Updating to a new HCS release
+
+One pull request per HCS release:
+
+1. Copy the version and the tarball `sha256` from the release notes (`gh release view v<version> -R FullFran/hcs`).
+2. `npm run hcs:sync -- <version> <sha256>`. It downloads `https://github.com/FullFran/hcs/releases/download/v<version>/hcs-<version>.tar.gz`, refuses it unless its digest is the one you gave, unpacks it in memory (regular files and folders only: no links, special files, absolute paths or `..`), checks every file against the release's `SHA256SUMS`, writes `vendor/hcs/<version>/` through a staging folder and then `vendor/hcs/PIN.json`. A refused release leaves the previous tree and pin untouched. Nothing from the release is executed. Exit codes: 0 vendored, 1 refused, 2 usage error.
+3. Remove the previous version with `git rm -r vendor/hcs/<previous>`; the script only replaces its own folder.
+4. Read the release notes (`-draft` releases may change things incompatibly), run `npm test`, and fix in the same pull request what the new cases reject.
+5. Regenerate the matrix with `npm run hcs:trace` and map any new requirement in `docs/conformance/traceability.map.json`.
+
+A release of another contract version (for example `0.2.x`) is refused until `HCS_VERSION` is changed, because instance documents carry `hcsVersion`.
+
+The reference runner (`vendor/hcs/<version>/conformance/runner/run.py`) will run against re-write in M7 ([#44](https://github.com/FullFran/re-write/issues/44)).
 
 ## Package archives
 

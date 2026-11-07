@@ -4,8 +4,7 @@ import { validateEntryStatus } from '../src/hcs/lifecycle.ts';
 import { loadCases } from './hcs-cases.ts';
 
 const cases = loadCases('document', 'urn:hcs:schema:hcs-0004:lifecycle:0.1');
-test('pinned HCS lifecycle document cases', { skip: cases ? false : 'HCS cases are not fetched' }, async t => {
-  assert.ok(cases);
+test('pinned HCS lifecycle document cases', async t => {
   assert.ok(cases.length > 0, 'targeted lifecycle cases are present');
   t.diagnostic(`Lifecycle document cases: ${cases.length}`);
   for (const { name, value } of cases) await t.test(name, () => {

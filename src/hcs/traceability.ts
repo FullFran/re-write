@@ -5,7 +5,7 @@ export interface TraceabilityMap { documents: Record<string, Mapping>; requireme
 
 const cell = (value: string) => value.replaceAll('|', '\\|').replace(/[\r\n]+/g, ' ');
 
-export function generateTraceability(requirements: Requirement[], input: unknown, commit: string): { markdown: string; errors: string[] } {
+export function generateTraceability(requirements: Requirement[], input: unknown, release: string): { markdown: string; errors: string[] } {
   const errors: string[] = [];
   const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
   if (!object(input) || !object(input.documents) || !object(input.requirements)) {
@@ -31,7 +31,7 @@ export function generateTraceability(requirements: Requirement[], input: unknown
   const documents = new Set(requirements.map((r) => r.document));
   for (const id of Object.keys(map.requirements)) if (!ids.has(id)) errors.push(`unknown requirement map id: ${id}`);
   for (const id of Object.keys(map.documents)) if (!documents.has(id)) errors.push(`unknown document map id: ${id}`);
-  const lines = ['# HCS requirement traceability', '', `Generated from HCS pin ${commit}; do not edit.`, ''];
+  const lines = ['# HCS requirement traceability', '', `Generated from HCS release ${release} (vendor/hcs/PIN.json); do not edit.`, ''];
   for (const document of [...documents].sort()) {
     lines.push(`## ${cell(document)}`, '', '| Requirement | Keyword | Status | Where | Issue or reason |', '| --- | --- | --- | --- | --- |');
     for (const requirement of requirements.filter((r) => r.document === document).sort((a, b) => a.id.localeCompare(b.id))) {

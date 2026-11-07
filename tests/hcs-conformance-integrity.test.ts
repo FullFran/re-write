@@ -5,8 +5,7 @@ import { HcsFailure } from '../src/hcs/errors.ts';
 import { verifyPackage, type PackageExpected } from '../src/hcs/package.ts';
 
 const cases = loadCases('integrity', undefined);
-test('pinned HCS integrity cases', { skip: cases ? false : 'HCS cases are not fetched' }, async t => {
-  assert.ok(cases);
+test('pinned HCS integrity cases', async t => {
   assert.ok(cases.length > 0, 'No integrity cases found');
   t.diagnostic(`Integrity cases: ${cases.length}`);
   for (const { name, value } of cases) await t.test(name, () => {

@@ -1,6 +1,6 @@
 # HCS requirement traceability
 
-Generated from HCS pin 9f40641ebdff9aae73e797b1223b54bcc43a41b7; do not edit.
+Generated from HCS release 0.1.0-draft.2 (vendor/hcs/PIN.json); do not edit.
 
 ## HCS-0000
 
@@ -77,6 +77,17 @@ Generated from HCS pin 9f40641ebdff9aae73e797b1223b54bcc43a41b7; do not edit.
 | HCS-0005-R002 | MUST NOT | implemented | `src/hcs/authority.ts`, `src/hcs/grants.ts`, `tests/hcs-authority.test.ts`, `tests/hcs-conformance-authority.test.ts`, `tests/hcs-host-state.test.ts` |  |
 | HCS-0005-R003 | MUST | implemented | `src/hcs/grants.ts`, `src/application/decision.ts`, `src/adapters/mcp.ts`, `src/adapters/http-server.ts`, `tests/hcs-authority.test.ts`, `tests/decision.test.ts`, `tests/mcp.test.ts`, `tests/review.test.ts` |  |
 | HCS-0005-R004 | MUST NOT | implemented | `src/hcs/authority.ts`, `tests/hcs-authority.test.ts`, `tests/hcs-conformance-authority.test.ts`, `tests/hcs-host-state.test.ts` |  |
+| HCS-0005-R005 | MUST | planned |  | [#30](https://github.com/FullFran/re-write/issues/30) |
+| HCS-0005-R006 | MUST | planned |  | [#30](https://github.com/FullFran/re-write/issues/30) |
+| HCS-0005-R007 | MUST | planned |  | [#30](https://github.com/FullFran/re-write/issues/30) |
+| HCS-0005-R008 | MUST NOT | planned |  | [#30](https://github.com/FullFran/re-write/issues/30) |
+| HCS-0005-R009 | MUST NOT | planned |  | [#30](https://github.com/FullFran/re-write/issues/30) |
+| HCS-0005-R010 | MUST | planned |  | [#30](https://github.com/FullFran/re-write/issues/30) |
+| HCS-0005-R011 | MUST | planned |  | [#30](https://github.com/FullFran/re-write/issues/30) |
+| HCS-0005-R012 | MUST | planned |  | [#30](https://github.com/FullFran/re-write/issues/30) |
+| HCS-0005-R013 | SHOULD | planned |  | [#30](https://github.com/FullFran/re-write/issues/30) |
+| HCS-0005-R014 | MUST NOT | planned |  | [#30](https://github.com/FullFran/re-write/issues/30) |
+| HCS-0005-R015 | MUST | planned |  | [#30](https://github.com/FullFran/re-write/issues/30) |
 
 ## HCS-0006
 
@@ -87,6 +98,7 @@ Generated from HCS pin 9f40641ebdff9aae73e797b1223b54bcc43a41b7; do not edit.
 | HCS-0006-R003 | MUST | implemented | `src/hcs/transport.ts`, `src/adapters/mcp.ts`, `tests/hcs-transport.test.ts`, `tests/mcp.test.ts` |  |
 | HCS-0006-R004 | MUST | implemented | `src/hcs/transport.ts`, `src/adapters/http-server.ts`, `tests/hcs-transport.test.ts`, `tests/auth.test.ts` |  |
 | HCS-0006-R005 | MUST | implemented | `src/hcs/transport.ts`, `src/adapters/http-server.ts`, `tests/hcs-transport.test.ts`, `tests/auth.test.ts` |  |
+| HCS-0006-R006 | MUST | planned |  | [#28](https://github.com/FullFran/re-write/issues/28) |
 
 ## HCS-0007
 
@@ -136,3 +148,5 @@ Generated from HCS pin 9f40641ebdff9aae73e797b1223b54bcc43a41b7; do not edit.
 | HCS-0008-R016 | MUST | planned |  | [#41](https://github.com/FullFran/re-write/issues/41) |
 | HCS-0008-R017 | MUST NOT | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
 | HCS-0008-R018 | SHOULD | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
+| HCS-0008-R019 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
+| HCS-0008-R020 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |

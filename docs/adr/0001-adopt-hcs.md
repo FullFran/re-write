@@ -25,6 +25,7 @@ The Harness Composition Specification (HCS) collects those answers. It reuses wi
 - The work is planned as milestones that follow HCS layers: foundation, core (CORE-0), authority, signed distribution (DISTRO-1), host adapter, observability and conformance, with product milestones on top. See [roadmap.md](../roadmap.md).
 - RE;write's existing guarantees map onto HCS terms without changing behaviour: the two doors become a host-owned setting, content-derived ids keep retries harmless, and the single-process write path becomes the serialized writer of installed state.
 - HCS is private today. Until it is published, the conformance job runs only where HCS is reachable, and this repository cites it without quoting it.
+  - Update (2026-11-07): HCS is public under Apache 2.0. RE;write now vendors one pinned release in `vendor/hcs/` and runs its conformance cases in CI; see [HCS pin and local checks](../hcs.md).
 - HCS-0008 covers engines the host starts. Connected MCP clients are not started by RE;write, so their projection is a RE;write rule by analogy until HCS defines one; that gap is reported to HCS.
 - Some HCS requirements do not apply to a server-only writing harness (for example multi-platform packages). The traceability matrix lists them with the reason.
 

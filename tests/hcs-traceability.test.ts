@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { generateTraceability } from '../src/hcs/traceability.ts';
 
-const pin = 'a'.repeat(40);
+const pin = '0.1.0-draft.9';
 const requirements = [
   { id: 'HCS-9999-R001', document: 'HCS-9999', keyword: 'MUST', text: 'SYNTHETIC PRIVATE TEXT' },
   { id: 'HCS-9999-R002', document: 'HCS-9999', keyword: 'SHOULD' },
@@ -49,7 +49,7 @@ test('partial and implemented require code and test paths', () => {
 function cliFixture(t: import('node:test').TestContext) {
   const root = mkdtempSync(join(tmpdir(), 'rewrite-trace-test-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  for (const file of ['scripts/hcs-traceability.ts', 'src/hcs/traceability.ts', 'src/hcs/pin.ts', 'src/hcs/version.ts']) {
+  for (const file of ['scripts/hcs-traceability.ts', 'src/hcs/traceability.ts', 'src/hcs/vendor.ts', 'src/hcs/tar.ts', 'src/hcs/version.ts']) {
     mkdirSync(dirname(join(root, file)), { recursive: true });
     cpSync(resolve(file), join(root, file));
   }
@@ -57,12 +57,12 @@ function cliFixture(t: import('node:test').TestContext) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), contents);
   };
-  put('hcs.pin.json', JSON.stringify({ hcsVersion: '0.1', repository: 'synthetic/example', commit: pin }));
+  const writePin = () => put('vendor/hcs/PIN.json', JSON.stringify({ version: pin, sha256: 'b'.repeat(64), url: `https://github.com/FullFran/hcs/releases/download/v${pin}/hcs-${pin}.tar.gz` }));
   put('docs/conformance/traceability.map.json', JSON.stringify({ documents: { 'HCS-9999': { status: 'planned', issue: 25 } }, requirements: {} }));
   put('docs/conformance/traceability.md', 'original synthetic matrix\n');
-  const input = `.hcs/${pin}/requirements/requirements.json`;
+  const input = `vendor/hcs/${pin}/requirements/requirements.json`;
   const fetched = () => {
-    put(`.hcs/${pin}/.complete`, `${pin}\n`);
+    writePin();
     put(input, JSON.stringify({ requirements: [requirements[0]] }));
   };
   const run = (check: boolean) => spawnSync(process.execPath, [join(root, 'scripts/hcs-traceability.ts'), ...(check ? ['--check'] : [])], { cwd: root, encoding: 'utf8' });
@@ -78,7 +78,7 @@ function cliFixture(t: import('node:test').TestContext) {
     visit(root);
     return files;
   };
-  return { put, input, fetched, run, snapshot };
+  return { put, input, writePin, fetched, run, snapshot };
 }
 
 function rejected(result: ReturnType<ReturnType<typeof cliFixture>['run']>, stderr: string) {
@@ -87,13 +87,17 @@ function rejected(result: ReturnType<ReturnType<typeof cliFixture>['run']>, stde
   assert.equal(result.stderr, stderr);
 }
 
-test('CLI rejects missing fetch marker or requirements without changing files', (t) => {
+test('CLI rejects a missing pin or unvendored requirements without changing files', (t) => {
   const fixture = cliFixture(t);
-  for (const setup of [() => {}, () => fixture.put(`.hcs/${pin}/.complete`, `${pin}\n`)]) {
+  const cases = [
+    [() => {}, 'HCS traceability failed: HCS pin is missing or unreadable: vendor/hcs/PIN.json\n'],
+    [fixture.writePin, `HCS traceability failed: HCS requirements are not vendored: vendor/hcs/${pin}/requirements/requirements.json; run npm run hcs:sync\n`],
+  ] as const;
+  for (const [setup, stderr] of cases) {
     setup();
     for (const check of [false, true]) {
       const before = fixture.snapshot();
-      rejected(fixture.run(check), 'HCS traceability failed: HCS requirements not fetched; run npm run hcs:fetch\n');
+      rejected(fixture.run(check), stderr);
       assert.deepEqual(fixture.snapshot(), before);
     }
   }

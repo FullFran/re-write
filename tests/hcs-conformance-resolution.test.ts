@@ -6,8 +6,7 @@ import type { CatalogManifest } from '../src/hcs/catalog.ts';
 import type { HostProfile } from '../src/hcs/host.ts';
 
 const cases = loadCases('resolution', undefined);
-test('pinned HCS resolution cases', { skip: cases ? false : 'HCS cases are not fetched' }, async t => {
-  assert.ok(cases);
+test('pinned HCS resolution cases', async t => {
   t.diagnostic(`Resolution cases: ${cases.length}`);
   for (const { name, value } of cases) await t.test(name, () => {
     const { catalog, host } = value.input as { catalog: CatalogManifest; host: HostProfile };
