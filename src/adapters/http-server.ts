@@ -15,7 +15,7 @@ import { HcsFailure } from '../hcs/errors.ts';
 import { BOOK_CREATE, REVIEW_DECIDE } from '../hcs/ids.ts';
 import { toProblemDetails } from '../hcs/transport.ts';
 import { productProblem } from './problems.ts';
-import { inspectNotion, loadNotionChapters, type NotionMapping } from '../application/notion-export.ts';
+import { inspectNotion, loadNotionChapters, parseNotionMapping, type NotionMapping } from '../application/notion-export.ts';
 import { chapterFilename, convertToMarkdown, importBook } from '../application/book-import.ts';
 
 export interface ServerConfig {
@@ -143,20 +143,6 @@ async function parseZipUpload(req: IncomingMessage, maxBytes = MAX_NOTION_UPLOAD
   let mapping: NotionMapping | undefined;
   let dryRun = false;
 
-  // Check URL query parameters
-  try {
-    const url = new URL(req.url ?? '/', 'http://localhost');
-    if (url.searchParams.get('dryRun') === 'true' || url.searchParams.get('dry_run') === 'true' || url.searchParams.get('dry-run') === 'true') {
-      dryRun = true;
-    }
-    const queryMapping = url.searchParams.get('mapping');
-    if (queryMapping) {
-      mapping = JSON.parse(queryMapping);
-    }
-  } catch {
-    // ignore URL parsing error
-  }
-
   // Check headers
   if (req.headers['x-dry-run'] === 'true' || req.headers['x-dry-run'] === '1') {
     dryRun = true;
@@ -164,13 +150,10 @@ async function parseZipUpload(req: IncomingMessage, maxBytes = MAX_NOTION_UPLOAD
   const headerMapping = req.headers['x-notion-mapping'];
   if (typeof headerMapping === 'string') {
     try {
-      mapping = JSON.parse(headerMapping);
-    } catch {
-      try {
-        mapping = JSON.parse(decodeURIComponent(headerMapping));
-      } catch {
-        throw new HttpError(400, 'invalid x-notion-mapping header');
-      }
+      mapping = parseNotionMapping(JSON.parse(decodeURIComponent(headerMapping)));
+    } catch (error) {
+      throw new HttpError(400, error instanceof SyntaxError || error instanceof URIError
+        ? 'invalid x-notion-mapping header' : (error as Error).message);
     }
   }
 
@@ -186,14 +169,6 @@ async function parseZipUpload(req: IncomingMessage, maxBytes = MAX_NOTION_UPLOAD
         }
       }
       if (foundZip) zipBuf = foundZip;
-      const m = formData.get('mapping');
-      if (typeof m === 'string' && m.trim()) {
-        mapping = JSON.parse(m);
-      }
-      const dr = formData.get('dryRun') ?? formData.get('dry_run') ?? formData.get('dry-run');
-      if (dr === 'true' || dr === '1') {
-        dryRun = true;
-      }
     } catch (e) {
       if (e instanceof HttpError) throw e;
       throw new HttpError(400, 'malformed multipart form data');
@@ -204,8 +179,6 @@ async function parseZipUpload(req: IncomingMessage, maxBytes = MAX_NOTION_UPLOAD
       if (json.zip) {
         zipBuf = Buffer.from(json.zip, 'base64');
       }
-      if (json.mapping) mapping = json.mapping;
-      if (json.dryRun || json['dry-run'] || json.dry_run) dryRun = true;
     } catch (e) {
       if (e instanceof HttpError) throw e;
       throw new HttpError(400, 'malformed JSON body');

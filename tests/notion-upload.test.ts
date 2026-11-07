@@ -154,10 +154,10 @@ test('dry run writes nothing', async () => {
 
     const res = await reviewUpload(
       h,
-      '/books/sal/notion-import?dryRun=true',
+      '/books/sal/notion-import',
       token,
       zip,
-      { 'x-notion-mapping': encodeURIComponent(JSON.stringify(standardMapping)) }
+      { 'x-notion-mapping': encodeURIComponent(JSON.stringify(standardMapping)), 'x-dry-run': 'true' }
     );
     assert.equal(res.status, 200);
 
@@ -432,12 +432,12 @@ test('multipart upload and alternative routes work, reporting missing page in re
     // 2. Dry run via /books/sal/notion/preview using multipart
     const fdDry = new FormData();
     fdDry.append('file', new Blob([zip]), 'export.zip');
-    fdDry.append('mapping', JSON.stringify({ database: 'Capitulos.csv' }));
-    fdDry.append('dryRun', 'true');
     const resDry = await fetch(`${h.base}/review/api/books/sal/notion/preview`, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${token}`,
+        'x-notion-mapping': encodeURIComponent(JSON.stringify({ database: 'Capitulos.csv' })),
+        'x-dry-run': 'true',
       },
       body: fdDry,
     });
@@ -451,11 +451,11 @@ test('multipart upload and alternative routes work, reporting missing page in re
     // 3. Import via /books/sal/notion/import using multipart
     const fdImport = new FormData();
     fdImport.append('file', new Blob([zip]), 'export.zip');
-    fdImport.append('mapping', JSON.stringify({ database: 'Capitulos.csv' }));
     const resImport = await fetch(`${h.base}/review/api/books/sal/notion/import`, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${token}`,
+        'x-notion-mapping': encodeURIComponent(JSON.stringify({ database: 'Capitulos.csv' })),
       },
       body: fdImport,
     });
@@ -470,3 +470,28 @@ test('multipart upload and alternative routes work, reporting missing page in re
     h.close();
   }
 });
+
+for (const [mapping, member] of [
+  [null, 'mapping'], [{ database: ' ' }, 'database'],
+  [{ database: 4 }, 'database'], [{ database: 'Capitulos', titleColumn: 1 }, 'titleColumn'],
+  [{ database: 'Capitulos', orderColumn: false }, 'orderColumn'],
+  [{ database: 'Capitulos', extra: true }, 'extra'],
+  [{ database: 'Capitulos', filter: [] }, 'filter'],
+  [{ database: 'Capitulos', filter: { column: 1, value: '' } }, 'filter.column'],
+  [{ database: 'Capitulos', filter: { column: 'Libro' } }, 'filter.value'],
+  [{ database: 'Capitulos', filter: { column: 'Libro', value: '', extra: '' } }, 'filter.extra'],
+] as const) {
+  test(`invalid Notion mapping names ${member}: ${JSON.stringify(mapping)}`, async () => {
+    const h = await startHarness();
+    try {
+      const token = await h.session('user_fran');
+      const before = await (await reviewApi(h, '/books/sal', token)).json();
+      const res = await reviewUpload(h, '/books/sal/notion-import', token,
+        buildSyntheticZip(createSyntheticNotionFiles()),
+        { 'x-notion-mapping': encodeURIComponent(JSON.stringify(mapping)) });
+      assert.equal(res.status, 400);
+      assert.ok((await res.json()).error.includes(member));
+      assert.deepEqual(await (await reviewApi(h, '/books/sal', token)).json(), before);
+    } finally { h.close(); }
+  });
+}

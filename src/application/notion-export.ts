@@ -16,7 +16,34 @@ export interface NotionMapping {
   filter?: {
     column: string;
     value: string;
-  } | Record<string, string>;
+  };
+}
+
+/** Validates untrusted CLI and review-upload mapping configuration. */
+export function parseNotionMapping(value: unknown): NotionMapping {
+  const fail = (member: string): never => { throw new Error(`Invalid Notion mapping member: ${member}`); };
+  const object = (input: unknown, member: string): Record<string, unknown> => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return fail(member);
+    return input as Record<string, unknown>;
+  };
+  const mapping = object(value, 'mapping');
+  for (const key of Object.keys(mapping)) {
+    if (!['database', 'titleColumn', 'orderColumn', 'filter'].includes(key)) fail(key);
+  }
+  if (typeof mapping.database !== 'string' || !mapping.database.trim()) fail('database');
+  for (const key of ['titleColumn', 'orderColumn']) {
+    if (Object.hasOwn(mapping, key) && typeof mapping[key] !== 'string') fail(key);
+  }
+  if (Object.hasOwn(mapping, 'filter')) {
+    const filter = object(mapping.filter, 'filter');
+    for (const key of Object.keys(filter)) {
+      if (!['column', 'value'].includes(key)) fail(`filter.${key}`);
+    }
+    for (const key of ['column', 'value']) {
+      if (typeof filter[key] !== 'string') fail(`filter.${key}`);
+    }
+  }
+  return mapping as unknown as NotionMapping;
 }
 
 export interface DatabaseInspection {
@@ -507,18 +534,7 @@ export function loadNotionChapters(source: string | Buffer, mapping: NotionMappi
 
     // Apply filter if specified
     if (mapping.filter) {
-      let filterCol: string | undefined;
-      let filterVal: string | undefined;
-      if ('column' in mapping.filter && 'value' in mapping.filter) {
-        filterCol = mapping.filter.column;
-        filterVal = mapping.filter.value;
-      } else {
-        const entries = Object.entries(mapping.filter);
-        if (entries.length > 0) {
-          filterCol = entries[0][0];
-          filterVal = entries[0][1];
-        }
-      }
+      const { column: filterCol, value: filterVal } = mapping.filter;
 
       if (filterCol && filterVal !== undefined) {
         // Find row field case-insensitively
