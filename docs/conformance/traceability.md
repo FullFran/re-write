@@ -1,6 +1,6 @@
 # HCS requirement traceability
 
-Generated from HCS release 0.1.0-draft.2 (vendor/hcs/PIN.json); do not edit.
+Generated from HCS release 0.1.0-draft.3 (vendor/hcs/PIN.json); do not edit.
 
 ## HCS-0000
 
@@ -150,3 +150,13 @@ Generated from HCS release 0.1.0-draft.2 (vendor/hcs/PIN.json); do not edit.
 | HCS-0008-R018 | SHOULD | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
 | HCS-0008-R019 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
 | HCS-0008-R020 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
+| HCS-0008-R021 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
+| HCS-0008-R022 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
+| HCS-0008-R023 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
+| HCS-0008-R024 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
+| HCS-0008-R025 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
+| HCS-0008-R026 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
+| HCS-0008-R027 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
+| HCS-0008-R028 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
+| HCS-0008-R029 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
+| HCS-0008-R030 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
