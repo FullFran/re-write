@@ -98,3 +98,21 @@ export async function startHarness(): Promise<Harness> {
     },
   };
 }
+
+/** Makes an HTTP request to the review API of the harness. */
+export function reviewApi(h: Harness, path: string, token?: string, body?: unknown): Promise<Response> {
+  return fetch(`${h.base}/review/api${path}`, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: {
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+/** Creates a revision proposal through the CLI against the book in the harness. */
+export function proposeRevision(bookDir: string, file: string, find: string, replace: string, rationale = 'editorial revision'): string {
+  return cli('propose', bookDir, '--file', file, '--find', find, '--replace', replace, '--rationale', rationale).json.proposal.proposal_id;
+}
+
