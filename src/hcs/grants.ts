@@ -73,11 +73,12 @@ export function packageRequests(bytes: Uint8Array, entry: CatalogEntry): Permiss
 }
 
 // The lifecycle's default authorization: an entry is authorized only when every permission its
-// package requests is granted. A package that requests nothing needs no grant.
-export function grantAuthorizer(options: { grantsDir: string; storeDir: string }): (entry: CatalogEntry) => Promise<boolean> {
-  return async entry => {
+// package requests is granted. A package that requests nothing needs no grant. Aborting `signal`
+// aborts the package download.
+export function grantAuthorizer(options: { grantsDir: string; storeDir: string }): (entry: CatalogEntry, signal?: AbortSignal) => Promise<boolean> {
+  return async (entry, signal) => {
     let bytes: Uint8Array;
-    try { bytes = await fetchPackageBytes(entry, { storeDir: options.storeDir }); } catch (error) {
+    try { bytes = await fetchPackageBytes(entry, { storeDir: options.storeDir, signal }); } catch (error) {
       const reason = error instanceof Error && error.message ? error.message : String(error);
       throw new HcsFailure([hcsError('integrity_mismatch', `Package content unavailable: ${reason}`, { entry: entry.id, requirement: 'HCS-0001-R007' })]);
     }

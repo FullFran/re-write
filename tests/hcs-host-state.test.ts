@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,7 +11,7 @@ import { buildPackage } from '../src/hcs/package.ts';
 import { validateEntryStatus } from '../src/hcs/lifecycle.ts';
 import { HcsFailure } from '../src/hcs/errors.ts';
 import { grantPermission, revokePermission } from '../src/hcs/grants.ts';
-import { applyDesiredSet, statusReport, HostBusyError, type Activator } from '../src/hcs/host-state.ts';
+import { applyDesiredSet, statusReport, HostBusyError, HostTakeoverLockError, type Activator } from '../src/hcs/host-state.ts';
 
 interface Fixture {
   stateDir: string; storeDir: string; badHash: string;
@@ -200,6 +202,183 @@ test('a lock left by a dead process is taken over', fixture(async ({ stateDir, s
   await applyDesiredSet(catalog(entry('a')), { stateDir, storeDir });
   assert.equal(pointer(stateDir), 1);
   assert.equal(existsSync(join(stateDir, 'lock')), false);
+  assert.equal(existsSync(join(stateDir, 'lock.takeover')), false);
+  assert.deepEqual(readdirSync(stateDir).filter(name => name.startsWith('.lock')), []);
+}));
+
+test('two writers taking over the same stale lock: only one acquires it', fixture(async ({ stateDir, storeDir, entry, catalog }) => {
+  const dead = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' });
+  mkdirSync(stateDir, { recursive: true });
+  const lock = join(stateDir, 'lock');
+  writeFileSync(lock, JSON.stringify({ pid: Number(dead.stdout), at: new Date(0).toISOString() }));
+  // Both writers inspect the same stale lock. Just before the first one removes it, the second
+  // completes its own takeover and creates a fresh lock.
+  let second: Promise<unknown> | undefined, interleaved = false;
+  const original = { renameSync: fs.renameSync, unlinkSync: fs.unlinkSync };
+  const interleave = <T extends (...args: any[]) => any>(real: T) => ((...args: any[]) => {
+    if (args[0] === lock && !interleaved) { interleaved = true; second = applyDesiredSet(catalog(entry('b')), { stateDir, storeDir }); }
+    return real(...args);
+  }) as T;
+  fs.renameSync = interleave(original.renameSync); fs.unlinkSync = interleave(original.unlinkSync); syncBuiltinESMExports();
+  let first: Promise<unknown>;
+  try { first = applyDesiredSet(catalog(entry('a')), { stateDir, storeDir }); }
+  finally { fs.renameSync = original.renameSync; fs.unlinkSync = original.unlinkSync; syncBuiltinESMExports(); }
+  assert.ok(second, 'the second writer ran');
+  const results = await Promise.allSettled([first, second]);
+  assert.deepEqual(results.map(r => r.status === 'rejected' && r.reason instanceof HostBusyError ? 'busy' : r.status).sort(), ['busy', 'fulfilled']);
+  assert.equal(existsSync(lock), false);
+  assert.equal(existsSync(join(stateDir, 'lock.takeover')), false);
+  assert.deepEqual(readdirSync(stateDir).filter(name => name.startsWith('.lock')), []);
+}));
+
+test('a stale lock taken over by exactly one of N concurrent processes', fixture(async ({ stateDir, storeDir, entry, catalog }) => {
+  const dead = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' });
+  mkdirSync(stateDir, { recursive: true });
+  const lock = join(stateDir, 'lock');
+  writeFileSync(lock, JSON.stringify({ pid: Number(dead.stdout), at: new Date(0).toISOString() }));
+  const N = 5;
+  const runs = Array.from({ length: N }, (_, i) => applyDesiredSet(catalog(entry(`writer${i}`)), { stateDir, storeDir }));
+  const results = await Promise.allSettled(runs);
+  const statuses = results.map(r => r.status === 'rejected' && r.reason instanceof HostBusyError ? 'busy' : r.status).sort();
+  assert.deepEqual(statuses, [...Array(N - 1).fill('busy'), 'fulfilled']);
+  assert.equal(existsSync(lock), false);
+  assert.equal(existsSync(join(stateDir, 'lock.takeover')), false);
+  assert.deepEqual(readdirSync(stateDir).filter(name => name.startsWith('.lock')), []);
+}));
+
+test('a dead takeover-mutex holder refused with the manual-removal message', fixture(async ({ stateDir, storeDir, entry, catalog }) => {
+  const dead = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' });
+  mkdirSync(stateDir, { recursive: true });
+  const takeover = join(stateDir, 'lock.takeover');
+  writeFileSync(takeover, JSON.stringify({ pid: Number(dead.stdout), at: new Date(0).toISOString() }));
+  await assert.rejects(
+    applyDesiredSet(catalog(entry('a')), { stateDir, storeDir }),
+    (err: any) => {
+      assert.ok(err instanceof HostBusyError, 'must be HostBusyError-derived');
+      assert.match(err.message, /lock\.takeover/);
+      assert.match(err.message, /remove .* by hand/i);
+      return true;
+    }
+  );
+  assert.equal(pointer(stateDir), null);
+  assert.equal(existsSync(takeover), true);
+  // Manual removal of the abandoned takeover mutex unblocks writers:
+  fs.unlinkSync(takeover);
+  await applyDesiredSet(catalog(entry('a')), { stateDir, storeDir });
+  assert.equal(pointer(stateDir), 1);
+  assert.equal(existsSync(join(stateDir, 'lock')), false);
+  assert.equal(existsSync(takeover), false);
+  assert.deepEqual(readdirSync(stateDir).filter(name => name.startsWith('.lock')), []);
+}));
+
+test('blocker 1.1: takeover never moves another lock aside, preventing concurrent writers', fixture(async ({ stateDir, storeDir, entry, catalog }) => {
+  const dead = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' });
+  mkdirSync(stateDir, { recursive: true });
+  const lock = join(stateDir, 'lock');
+  const takeover = join(stateDir, 'lock.takeover');
+  writeFileSync(lock, JSON.stringify({ pid: Number(dead.stdout), at: new Date(0).toISOString() }));
+
+  let aActive = false, cActive = false, concurrentWriters = false;
+  let finishA!: () => void;
+  const aWait = new Promise<void>(r => { finishA = r; });
+  let aEntered!: () => void;
+  const aStarted = new Promise<void>(r => { aEntered = r; });
+
+  const activatorA = {
+    activate: async () => {
+      aActive = true;
+      aEntered();
+      if (cActive) concurrentWriters = true;
+      await aWait;
+      aActive = false;
+    },
+    stop: async () => {}
+  };
+
+  const activatorC = {
+    activate: async () => {
+      cActive = true;
+      if (aActive) concurrentWriters = true;
+      cActive = false;
+    },
+    stop: async () => {}
+  };
+
+  // Writer A takes over the stale lock and becomes active:
+  const first = applyDesiredSet(catalog(entry('a')), { stateDir, storeDir, activator: activatorA });
+  await aStarted;
+  assert.equal(aActive, true);
+
+  // Writer B attempts takeover and Writer C attempts apply; both must be refused:
+  await assert.rejects(applyDesiredSet(catalog(entry('b')), { stateDir, storeDir }), HostBusyError);
+  await assert.rejects(applyDesiredSet(catalog(entry('c')), { stateDir, storeDir, activator: activatorC }), HostBusyError);
+
+  assert.equal(concurrentWriters, false);
+  assert.equal(cActive, false);
+
+  finishA();
+  await first;
+  assert.equal(existsSync(lock), false);
+  assert.equal(existsSync(takeover), false);
+  assert.deepEqual(readdirSync(stateDir).filter(name => name.startsWith('.lock')), []);
+}));
+
+test('blocker 1.2: takeover never resurrects a ghost lock after release', fixture(async ({ stateDir, storeDir, entry, catalog }) => {
+  const dead = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' });
+  mkdirSync(stateDir, { recursive: true });
+  const lock = join(stateDir, 'lock');
+  const takeover = join(stateDir, 'lock.takeover');
+  writeFileSync(lock, JSON.stringify({ pid: Number(dead.stdout), at: new Date(0).toISOString() }));
+
+  // Writer A takes over stale lock and completes transition + release:
+  await applyDesiredSet(catalog(entry('a')), { stateDir, storeDir });
+  assert.equal(existsSync(lock), false, 'Writer A lock must be unlinked on release');
+
+  // Writer C applies: no ghost lock remains on disk to block it:
+  await applyDesiredSet(catalog(entry('c')), { stateDir, storeDir });
+  assert.equal(pointer(stateDir), 2);
+  assert.equal(existsSync(lock), false);
+  assert.equal(existsSync(takeover), false);
+  assert.deepEqual(readdirSync(stateDir).filter(name => name.startsWith('.lock')), []);
+}));
+
+test('a lock whose pid is alive but belongs to another process start is taken over', { skip: !existsSync('/proc/self/stat') }, fixture(async ({ stateDir, storeDir, entry, catalog }) => {
+  mkdirSync(stateDir, { recursive: true });
+  // The PID is alive (this process) but the recorded start identity is not this process's: the PID was reused.
+  writeFileSync(join(stateDir, 'lock'), JSON.stringify({ pid: process.pid, start: '1', at: new Date(0).toISOString() }));
+  await applyDesiredSet(catalog(entry('a')), { stateDir, storeDir });
+  assert.equal(pointer(stateDir), 1);
+  assert.equal(existsSync(join(stateDir, 'lock')), false);
+  assert.equal(existsSync(join(stateDir, 'lock.takeover')), false);
+  assert.deepEqual(readdirSync(stateDir).filter(name => name.startsWith('.lock')), []);
+}));
+
+test('a lock whose pid and start identity match a live process keeps the host busy', { skip: !existsSync('/proc/self/stat') }, fixture(async ({ stateDir, storeDir, entry, catalog }) => {
+  mkdirSync(stateDir, { recursive: true });
+  const start = readFileSync('/proc/self/stat', 'utf8').split(') ')[1].split(' ')[19];
+  writeFileSync(join(stateDir, 'lock'), JSON.stringify({ pid: process.pid, start, at: new Date(0).toISOString() }));
+  await assert.rejects(applyDesiredSet(catalog(entry('a')), { stateDir, storeDir }), HostBusyError);
+  assert.equal(pointer(stateDir), null);
+  assert.equal(existsSync(join(stateDir, 'lock.takeover')), false);
+  assert.deepEqual(readdirSync(stateDir).filter(name => name.startsWith('.lock')), []);
+}));
+
+test('a step deadline aborts the package download of the authorize and prepare steps', fixture(async ({ stateDir, storeDir, entry, catalog }) => {
+  const signals: AbortSignal[] = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    signals.push(init!.signal!);
+    return new Promise<Response>(() => {});
+  }) as typeof fetch;
+  try {
+    const remote = entry('a', { contentHash: `sha256:${'1'.repeat(64)}`, locations: ['https://packages.invalid/a.tar.gz'] });
+    // Default authorization fetches the package to read its requests; then the prepare step fetches it.
+    for (const authorize of [undefined, async () => true]) {
+      await assert.rejects(applyDesiredSet(catalog(remote), { stateDir, storeDir, stepDeadlineMs: 50, authorize }), failure(e => assert.equal(e.errors[0].code, 'timeout')));
+    }
+    assert.equal(signals.length, 2);
+    assert.deepEqual(signals.map(s => s.aborted), [true, true]);
+  } finally { globalThis.fetch = original; }
 }));
 
 // A package whose root holds an HCS-0005 request document, stored where the host fetches it.

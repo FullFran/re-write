@@ -83,10 +83,45 @@ test('unpack enforces limits, seals files and directories, and requires a fresh 
   assert.throws(() => unpackPackage(bytes, expected(bytes), target));
 }));
 
-test('fetch prefers local content store then file locations in order', scratch(async dir => {
+// Replaces global fetch while `fn` runs; `handler` sees each requested URL and its abort signal.
+async function withFetch(handler: (url: string, signal: AbortSignal) => Promise<Response>, fn: () => Promise<void>) {
+  const original = globalThis.fetch;
+  globalThis.fetch = ((url: URL | string, init?: RequestInit) => handler(String(url), init!.signal!)) as typeof fetch;
+  try { await fn(); } finally { globalThis.fetch = original; }
+}
+
+test('fetch prefers the local content store, then tries https locations in order', scratch(async dir => {
   const store = join(dir, 'store'), local = join(store, 'sha256'); mkdirSync(local, { recursive: true });
-  const first = join(dir, 'first'), second = join(dir, 'second'); writeFileSync(first, 'first'); writeFileSync(second, 'second');
-  const entry = { ...expected(Buffer.from('stored')), locations: [pathToFileURL(first).href, pathToFileURL(second).href] };
+  const entry = { ...expected(Buffer.from('stored')), locations: ['https://packages.invalid/first', 'https://packages.invalid/second'] };
   writeFileSync(join(local, entry.contentHash.slice(7)), 'stored'); assert.equal((await fetchPackageBytes(entry, { storeDir: store })).toString(), 'stored');
-  assert.equal((await fetchPackageBytes({ ...entry, contentHash: expected(Buffer.from('missing')).contentHash, locations: [pathToFileURL(join(dir, 'missing')).href, ...entry.locations] }, { storeDir: store })).toString(), 'first');
+  const requested: string[] = [];
+  await withFetch(async url => { requested.push(url); return url.endsWith('/missing') ? new Response('', { status: 404 }) : new Response(url.endsWith('/first') ? 'first' : 'second'); }, async () => {
+    const missing = { ...entry, contentHash: expected(Buffer.from('missing')).contentHash, locations: ['https://packages.invalid/missing', ...entry.locations] };
+    assert.equal((await fetchPackageBytes(missing, { storeDir: store })).toString(), 'first');
+  });
+  assert.deepEqual(requested, ['https://packages.invalid/missing', 'https://packages.invalid/first']);
+}));
+
+test('fetch refuses file: locations like any other unsupported location', scratch(async dir => {
+  const outside = join(dir, 'outside'); writeFileSync(outside, 'secret');
+  const entry = { ...expected(Buffer.from('secret')), locations: [pathToFileURL(outside).href] };
+  await assert.rejects(fetchPackageBytes(entry, { storeDir: join(dir, 'store') }), /Unsupported package location/);
+  // A refused location does not stop the next one from being tried.
+  await withFetch(async () => new Response('secret'), async () => {
+    assert.equal((await fetchPackageBytes({ ...entry, locations: [...entry.locations, 'https://packages.invalid/p'] }, { storeDir: join(dir, 'store') })).toString(), 'secret');
+  });
+}));
+
+test('fetch aborts the download when the caller signal aborts', scratch(async dir => {
+  let downloadSignal: AbortSignal | undefined;
+  await withFetch((_url, signal) => { downloadSignal = signal; return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason))); }, async () => {
+    const controller = new AbortController();
+    const entry = { ...expected(Buffer.from('remote')), locations: ['https://packages.invalid/p'] };
+    const pending = fetchPackageBytes(entry, { storeDir: join(dir, 'store'), signal: controller.signal });
+    const outcome = pending.then(() => 'resolved', () => 'rejected');
+    await new Promise(r => setTimeout(r, 10));
+    controller.abort(new Error('deadline'));
+    assert.equal(await Promise.race([outcome, new Promise(r => setTimeout(() => r('pending'), 200))]), 'rejected');
+    assert.equal(downloadSignal?.aborted, true);
+  });
 }));
