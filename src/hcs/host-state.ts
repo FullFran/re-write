@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { chmodSync, closeSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
+import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { readCatalog, type CatalogEntry } from './catalog.ts';
 import { HcsFailure, hcsError, type HcsError } from './errors.ts';
@@ -40,10 +40,21 @@ export const DEFAULT_STEP_DEADLINE_MS = 30_000;
 export class HostBusyError extends Error {
   readonly code = 'host_busy';
   readonly holder: number | undefined;
-  constructor(holder: number | undefined) {
-    super(holder === undefined ? 'Host state is locked by another writer' : `Host state is locked by process ${holder}`);
+  constructor(holder: number | undefined, message?: string) {
+    super(message ?? (holder === undefined ? 'Host state is locked by another writer' : `Host state is locked by process ${holder}`));
     this.name = 'HostBusyError';
     this.holder = holder;
+  }
+}
+
+// When a takeover mutex was left by a process that is no longer alive, it must be removed by hand.
+export class HostTakeoverLockError extends HostBusyError {
+  readonly takeoverPath: string;
+  constructor(takeoverPath: string, holder: number | undefined) {
+    const holderMsg = holder === undefined ? 'dead process' : `process ${holder}`;
+    super(holder, `Host lock takeover was abandoned by ${holderMsg}; remove ${takeoverPath} by hand`);
+    this.name = 'HostTakeoverLockError';
+    this.takeoverPath = takeoverPath;
   }
 }
 
@@ -115,11 +126,44 @@ function held(pid: number, start: string | undefined): boolean {
   return current === undefined || current === start;
 }
 
+function checkTakeoverMutex(takeoverPath: string): void {
+  let content: string;
+  try {
+    content = readFileSync(takeoverPath, 'utf8');
+  } catch (error: any) {
+    if (error.code === 'ENOENT') return;
+    throw error;
+  }
+  let pid: number | undefined, start: string | undefined;
+  try {
+    const value = JSON.parse(content);
+    if (Number.isSafeInteger(value.pid) && value.pid > 0) pid = value.pid;
+    if (typeof value.start === 'string') start = value.start;
+  } catch { /* being written */ }
+  if (pid === undefined) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    try {
+      content = readFileSync(takeoverPath, 'utf8');
+      const value = JSON.parse(content);
+      if (Number.isSafeInteger(value.pid) && value.pid > 0) pid = value.pid;
+      if (typeof value.start === 'string') start = value.start;
+    } catch (retryError: any) {
+      if (retryError.code === 'ENOENT') return;
+    }
+  }
+  if (pid !== undefined && held(pid, start)) {
+    throw new HostBusyError(pid);
+  }
+  throw new HostTakeoverLockError(takeoverPath, pid);
+}
+
 // Single writer for the host's installed state (#10). A lock whose process is gone is taken over.
 function acquireLock(stateDir: string): () => void {
   mkdirSync(stateDir, { recursive: true });
   const path = join(stateDir, 'lock');
+  const takeoverPath = join(stateDir, 'lock.takeover');
   for (let attempt = 0; attempt < 3; attempt++) {
+    checkTakeoverMutex(takeoverPath);
     let fd: number;
     try { fd = openSync(path, 'wx', 0o644); } catch (error: any) {
       if (error.code !== 'EEXIST') throw error;
@@ -132,16 +176,33 @@ function acquireLock(stateDir: string): () => void {
         if (typeof value.start === 'string') start = value.start;
       } catch { /* a lock being written */ }
       if (pid === undefined || held(pid, start)) throw new HostBusyError(pid);
-      // Take the stale lock over atomically: only one process can rename it away. If the lock was
-      // replaced after it was inspected, the renamed file is another writer's: put it back without
-      // overwriting a lock created meanwhile, and inspect again.
-      const aside = join(stateDir, `.lock.${randomBytes(8).toString('hex')}.stale`);
-      try { renameSync(path, aside); } catch (renameError: any) { if (renameError.code === 'ENOENT') continue; throw renameError; }
+      // To remove a stale lock, a process must first hold the takeover mutex.
+      let takeoverFd: number;
       try {
-        if (readFileSync(aside, 'utf8') !== content) {
-          try { linkSync(aside, path); } catch (linkError: any) { if (linkError.code !== 'EEXIST') throw linkError; }
+        takeoverFd = openSync(takeoverPath, 'wx', 0o644);
+      } catch (takeoverError: any) {
+        if (takeoverError.code !== 'EEXIST') throw takeoverError;
+        checkTakeoverMutex(takeoverPath);
+        continue;
+      }
+      const myStart = processStart(process.pid);
+      const takeoverContent = JSON.stringify({ pid: process.pid, ...(myStart === undefined ? {} : { start: myStart }), at: new Date().toISOString() });
+      try { writeSync(takeoverFd, takeoverContent); fsyncSync(takeoverFd); } finally { closeSync(takeoverFd); }
+      try {
+        let currentLock: string | undefined;
+        try { currentLock = readFileSync(path, 'utf8'); } catch (readErr: any) { if (readErr.code !== 'ENOENT') throw readErr; }
+        if (currentLock === content && !held(pid, start)) {
+          unlinkSync(path);
         }
-      } finally { rmSync(aside, { force: true }); }
+      } finally {
+        try {
+          if (readFileSync(takeoverPath, 'utf8') === takeoverContent) {
+            unlinkSync(takeoverPath);
+          }
+        } catch (unlinkErr: any) {
+          if (unlinkErr.code !== 'ENOENT') throw unlinkErr;
+        }
+      }
       continue;
     }
     const start = processStart(process.pid);
