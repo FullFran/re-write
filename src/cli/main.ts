@@ -26,9 +26,9 @@ const USAGE = `RE;write: narrative memory with evidence and human review.
   rewrite catalog status --state <dir>       show the active generation and entry states
   rewrite init <dir> [--title <title>]       create or open a book repository
   rewrite import <dir> <scene.md>...         copy scenes in and commit them
-  rewrite inspect-sqlite <file.db>           inspect tables and columns safely without printing text
-  rewrite import-sqlite <dir> <file.db> --mapping <mapping.json> [--dry-run]
-                                             import chapters from SQLite via mapping
+  rewrite notion-inspect <export.zip|dir>    inspect Notion export databases and pages safely
+  rewrite import-notion <dir> <export.zip|dir> --mapping <mapping.json> [--dry-run]
+                                             import chapters from a Notion export via mapping
   rewrite read <dir> <scenes/file.md>        print a scene
   rewrite extract <dir> --from <file.json>   load candidate claims and verify their quotes
   rewrite claims <dir>                       list claims and their evidence
@@ -151,37 +151,47 @@ async function dispatch(args: string[], values: Record<string, string | boolean 
       const result = Project.open(need(dir, '<dir>')).importScenes(rest);
       return { json: result, text: `imported: ${result.imported.join(', ') || 'none'}; unchanged: ${result.unchanged.join(', ') || 'none'}` };
     }
-    case 'inspect-sqlite': {
-      const file = need(dir, '<file.db>');
-      const { inspectSqlite, formatInspection } = await import('../application/sqlite-source.ts');
-      const report = inspectSqlite(file);
-      return { json: report, text: formatInspection(report) };
+    case 'notion-inspect': {
+      const source = need(dir, '<export.zip|dir>');
+      const { inspectNotion, formatNotionInspection } = await import('../application/notion-export.ts');
+      const report = inspectNotion(source);
+      return { json: report, text: formatNotionInspection(report) };
     }
-    case 'import-sqlite': {
+    case 'import-notion': {
       const bookDir = need(dir, '<book-dir>');
-      const file = need(rest[0], '<file.db>');
+      const source = need(rest[0], '<export.zip|dir>');
       const mappingFile = need(option('mapping'), '--mapping');
       const isDryRun = Boolean(values['dry-run']);
       const mapping = JSON.parse(readFileSync(mappingFile, 'utf8'));
-      const { readSqliteSource } = await import('../application/sqlite-source.ts');
+      const { loadNotionChapters } = await import('../application/notion-export.ts');
       const { importBook, chapterFilename, convertToMarkdown } = await import('../application/book-import.ts');
-      const chapters = readSqliteSource(file, mapping);
+      const { chapters, missing } = loadNotionChapters(source, mapping);
 
       if (isDryRun) {
-        const list = chapters.map((c) => {
-          const filename = chapterFilename(c.order, c.title);
-          const converted = convertToMarkdown(c.body, c.format ?? 'markdown');
-          return {
-            order: c.order,
-            title: c.title,
-            file: `scenes/${filename}`,
-            size: Buffer.byteLength(converted, 'utf8'),
-            format: c.format ?? 'markdown',
-          };
-        });
+        const list = [
+          ...chapters.map((c) => {
+            const filename = chapterFilename(c.order, c.title);
+            const converted = convertToMarkdown(c.body, c.format ?? 'markdown');
+            return {
+              order: c.order,
+              title: c.title,
+              file: `scenes/${filename}`,
+              size: Buffer.byteLength(converted, 'utf8'),
+              status: 'would_import',
+            };
+          }),
+          ...missing.map((m) => ({
+            order: m.order,
+            title: m.title,
+            file: m.file,
+            size: 0,
+            status: 'missing_page',
+          })),
+        ].sort((a, b) => a.order - b.order);
+
         const lines = [
-          `dry run: ${chapters.length} chapter${chapters.length === 1 ? '' : 's'} in ${file}`,
-          ...list.map((c) => `  [${String(c.order).padStart(3, '0')}] ${c.title} (${c.file}) - ${c.size} bytes (${c.format})`),
+          `dry run: ${chapters.length} chapter${chapters.length === 1 ? '' : 's'} in ${source}`,
+          ...list.map((c) => `  [${String(c.order).padStart(3, '0')}] ${c.title} (${c.file}) - ${c.size} bytes${c.status === 'missing_page' ? ' [MISSING PAGE]' : ''}`),
         ];
         return {
           json: { dryRun: true, chapters: list },
@@ -191,6 +201,14 @@ async function dispatch(args: string[], values: Record<string, string | boolean 
 
       const project = Project.open(bookDir);
       const result = importBook(project, chapters);
+      for (const m of missing) {
+        result.refused.push({
+          order: m.order,
+          title: m.title,
+          file: m.file,
+          reason: m.reason,
+        });
+      }
       const importedStr = result.imported.map((i) => i.file).join(', ') || 'none';
       const unchangedStr = result.unchanged.map((u) => u.file).join(', ') || 'none';
       const refusedStr = result.refused.map((r) => `${r.file} (${r.reason})`).join(', ') || 'none';

@@ -1,149 +1,122 @@
-# Importing Books from SQLite
+# Importing Books from Notion Exports
 
-This guide explains how to import whole books into RE;write from a SQLite database file (for example, from desktop novel-writing or note-taking applications).
+This guide explains how to import novels and manuscripts into RE;write from a Notion workspace export.
 
-It has two sections:
-1. **For writers (like Andrés)**: How to safely share the structure of your database without sharing your book's text or story.
-2. **For technical operators (like Fran)**: How to write a declarative mapping, test with `--dry-run`, and run the import.
+> **Note:** Live Notion API synchronization is **not** part of this tool. This import works entirely offline using Notion's built-in **"Export -> Markdown & CSV"** zip files or extracted folders.
 
 ---
 
-## 1. For Writers: Inspecting Your Database Safely
+## 1. For Writers (e.g. Andrés): Exporting and Inspecting
 
-If your writing tool saves your novel in a SQLite database, RE;write needs to know how the tables and columns are organized (its schema) in order to import it.
+Non-programmers can export their books from Notion in seconds without sharing their prose before a mapping is configured.
 
-### Your Words Stay Private
+### Step 1: Export from Notion
 
-You do **not** need to send your manuscript. The `inspect-sqlite` command:
-- **Never prints your text**: It inspects only structural metadata: table names, column names, column data types, row counts, and character length ranges (min/avg/max).
-- **Checks formatting without revealing content**: It checks whether text looks like HTML, RTF, Markdown, or plain text, without printing any words or sentences.
-- **Opens the database strictly read-only**: It cannot modify, corrupt, or alter your file in any way.
+1. In Notion, navigate to the top-level page or database containing your book (e.g. your "Libros" or "Capítulos" database).
+2. Click the `...` menu icon in the top right corner.
+3. Select **Export**.
+4. In the dialog:
+   - **Export format**: `Markdown & CSV`
+   - **Include content**: `Everything` (or default)
+   - **Include subpages**: Enabled
+5. Click **Export**. Notion will generate and download a `.zip` file (e.g. `Export-xxxxxxxx.zip`).
 
-### How to Run the Inspection
+### Step 2: Inspect the Export Safely
 
-Run:
-
-```bash
-rewrite inspect-sqlite /path/to/tu-novela.sqlite
-```
-
-You can save the output to a file or copy and paste it:
+Before sending anything, you can safely inspect what databases and pages are inside:
 
 ```bash
-rewrite inspect-sqlite /path/to/tu-novela.sqlite > inspeccion.txt
+rewrite notion-inspect /path/to/Export.zip
 ```
 
-Or for machine-readable JSON:
+*(You can also run this against an unzipped folder).*
 
-```bash
-rewrite inspect-sqlite /path/to/tu-novela.sqlite --json > inspeccion.json
-```
+#### Your Manuscript Stays Private
+- The inspection **never prints your text, story, or cell values**.
+- It only prints database CSV filenames, column headers, row counts, and page filenames with byte sizes.
+- The zip reader is strictly read-only and validates file paths safely.
 
-### What the Output Looks Like
+Sample output:
 
 ```text
-database: /path/to/tu-novela.sqlite
-tables:
-  chapters (12 rows)
-    chapter_num INTEGER (primary key)
-    book_id INTEGER
-    title TEXT: length min 7, avg 15, max 32; format: plain text
-    content TEXT: length min 1200, avg 4350, max 9800; format: HTML
-    format TEXT: length min 4, avg 4, max 4; format: plain text
-  metadata (2 rows)
-    key TEXT (primary key): length min 6, avg 6, max 7; format: plain text
-    value TEXT: length min 3, avg 4, max 6; format: plain text
+Notion export: /path/to/Export.zip
+Databases (1):
+  Capítulos.csv (12 rows)
+    Columns: Título, Orden, Libro, Estado, Notas
+Pages (12):
+  El Faro 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d.md (4,320 bytes)
+  La Niebla 9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c.md (5,180 bytes)
+  ...
 ```
 
-Notice that not a single word of your story appears in this output. Send `inspeccion.txt` or `inspeccion.json` to Fran.
+Notice that not a single sentence of your novel appears. Send this inspection summary (or output of `--json`) to Fran so the mapping can be created.
 
 ---
 
-## 2. For Technical Operators: Writing a Mapping and Importing
+## 2. For Operators (e.g. Fran): Writing a Mapping and Importing
 
-Once you receive the schema inspection, create a declarative JSON mapping file that tells RE;write which table and columns contain the book's chapters.
+### Declarative Mapping
 
-### Mapping Schema
-
-An example mapping is stored in [`tests/fixtures/import/example-mapping.json`](../tests/fixtures/import/example-mapping.json):
+A mapping tells RE;write which database CSV defines the chapters and which columns to use. Example ([`tests/fixtures/import/example-mapping.json`](../tests/fixtures/import/example-mapping.json)):
 
 ```json
 {
-  "table": "chapters",
-  "columns": {
-    "order": "chapter_num",
-    "title": "title",
-    "body": "content",
-    "format": "format"
-  },
-  "filter": "book_id = 1",
-  "orderBy": "chapter_num ASC",
-  "defaultFormat": "markdown"
+  "database": "Capítulos.csv",
+  "titleColumn": "Título",
+  "orderColumn": "Orden",
+  "filter": {
+    "column": "Libro",
+    "value": "El Mar del Norte"
+  }
 }
 ```
 
-#### Fields
+#### Mapping Fields
 
-- `table`: The name of the table or view containing the chapters.
-- `columns`:
-  - `order`: Column containing the sequence number of the chapter (e.g. `1`, `2`, `3`). RE;write zero-pads this for file naming (`001`, `002`).
-  - `title`: Column containing the chapter title (e.g. `"El Faro"`). Slugs are generated automatically (`001-el-faro.md`).
-  - `body`: Column containing the text content of the chapter.
-  - `format`: *(Optional)* Column containing the format of the body: `"markdown"`, `"plain"`, or `"html"`.
-- `defaultFormat`: *(Optional)* Fallback format if `format` column is omitted or null in a row (`"markdown"`, `"plain"`, or `"html"`). Defaults to `"markdown"`.
-- `filter`: *(Optional)* SQL `WHERE` clause condition (e.g. `"book_id = 1"`).
-- `orderBy`: *(Optional)* SQL `ORDER BY` clause (e.g. `"chapter_num ASC"`).
-- `query`: *(Optional alternative)* A complete `SELECT` query if complex joins or expressions are needed. When `query` is used, `table`, `filter`, and `orderBy` are omitted.
+- `database`: Name of the CSV file in the export (e.g. `"Capítulos.csv"` or `"Capítulos"`).
+- `titleColumn`: *(Optional)* Column containing the chapter title (e.g. `"Título"`, `"Title"`). If omitted, RE;write looks for common title names or falls back to the first column.
+- `orderColumn`: *(Optional)* Column containing chapter sequence numbers. If omitted or blank, falls back to the 1-based CSV row order.
+- `filter`: *(Optional)* Filter by another column (e.g. if one database holds chapters for multiple books: `{ "column": "Libro", "value": "El Mar del Norte" }`).
 
-### Supported and Unsupported Formats
+### Notion Page File Matching & Header Stripping
 
-- **Markdown (`markdown`)**: Kept as-is, with line endings normalized.
-- **Plain text (`plain`)**: Normalizes line breaks and paragraph spacing.
-- **HTML (`html`)**: Converted conservatively to Markdown:
-  - Headings (`<h1>`..`<h6>`) become `#`..`######`.
-  - Paragraphs (`<p>`) and line breaks (`<br>`) are preserved as Markdown paragraphs and breaks.
-  - Emphasis (`<strong>`, `<b>`, `<em>`, `<i>`) becomes `**` and `*`.
-  - HTML entities (`&laquo;`, `&mdash;`, `&aacute;`, numeric entities) are decoded.
-  - Scripts (`<script>`), styles (`<style>`), and unknown tags are stripped. Scripts are **never executed or retained**.
-- **RTF and other formats**:
-  > **Important:** RTF (Rich Text Format) and proprietary formats (DOCX, EPUB) are **not converted yet** and will fail with a clear error:
-  > `unsupported format: "rtf". Only markdown, plain, and html are supported.`
-  > If the inspection reports RTF format in the body column, an RTF conversion adapter must be added before importing.
+- Notion names exported Markdown files using `<Title> <32-hex-id>.md` (for example, `El Faro 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d.md`). RE;write matches pages by title and ID.
+- Notion adds property tables or metadata blocks at the top of page exports (e.g. `Orden: 1`, `Estado: Listo`). RE;write strips these export artefacts cleanly while keeping the `# Title` heading and the story prose.
+- If a chapter row in the CSV has no matching Markdown file in the export, it is reported under `refused` as a missing page, without interrupting the other chapters.
 
-### Step 1: Dry Run
+### Step 3: Dry Run
 
-Always run a dry run first. The database is opened read-only and no files or git commits are created in the book repository:
+Always run a dry run first to verify titles, order, and sizes without modifying the book repository:
 
 ```bash
-rewrite import-sqlite /path/to/book /path/to/novel.sqlite --mapping mapping.json --dry-run
+rewrite import-notion /path/to/book /path/to/Export.zip --mapping mapping.json --dry-run
 ```
 
 Output:
 
 ```text
-dry run: 3 chapters in /path/to/novel.sqlite
-  [001] El Faro (scenes/001-el-faro.md) - 1420 bytes (html)
-  [002] La Niebla (scenes/002-la-niebla.md) - 2350 bytes (plain)
-  [003] El Regreso (scenes/003-el-regreso.md) - 980 bytes (markdown)
+dry run: 2 chapters in /path/to/Export.zip
+  [001] El Faro (scenes/001-el-faro.md) - 3,950 bytes
+  [002] La Niebla (scenes/002-la-niebla.md) - 4,820 bytes
 ```
 
-### Step 2: Running the Import
+### Step 4: Import
 
-When the dry run looks correct, run the import without `--dry-run`:
+Run the import without `--dry-run`:
 
 ```bash
-rewrite import-sqlite /path/to/book /path/to/novel.sqlite --mapping mapping.json
+rewrite import-notion /path/to/book /path/to/Export.zip --mapping mapping.json
 ```
 
 Output:
 
 ```text
-imported: scenes/001-el-faro.md, scenes/002-la-niebla.md, scenes/003-el-regreso.md; unchanged: none; refused: none
+imported: scenes/001-el-faro.md, scenes/002-la-niebla.md; unchanged: none; refused: none
 ```
 
-### Idempotency and Refusal Rules
+### Idempotency & Safety
 
-- **Idempotent**: Re-importing the same database against the same book is a safe no-op. Chapters with identical content are reported under `unchanged:` and no new git commit is made.
-- **Changed chapters are refused**: If a chapter already exists in the book with different text (for example, if an author or editor has revised it in RE;write), the import refuses to overwrite it:
-  `scenes/001-el-faro.md already exists with different text; edit it through a proposal`
-  Nothing is partially written for that chapter, preserving the author's work.
+- **Stable zero-padded filenames**: Chapters are written to `scenes/001-el-faro.md`, `scenes/002-la-niebla.md`.
+- **Idempotent**: Re-running the import with the same export produces zero changes (`unchanged: scenes/...`) and does not create unnecessary git commits.
+- **Refuses changed chapters**: If a scene already exists in RE;write with different text (for example, revised by an editor), RE;write refuses to overwrite it, leaving the existing file completely untouched and reporting it under `refused:`.
+- **Safe Zip extraction**: The internal zip reader strictly refuses absolute paths, directory traversal (`..`), symlinks, and encryption.
