@@ -1,0 +1,5 @@
+{
+  "$comment": "Known divergences of re-write from HCS, and HCS cases that do not apply to it. Read by tests/hcs-conformance.test.ts; explained in docs/hcs.md. `divergences`: re-write deliberately does it another way, reported as 'divergence'. `notApplicable`: features re-write does not implement, reported as 'not-applicable'. Every rule names a `requirement` and a `reason`; a rule without `cases` covers every case of its requirement. Host-level cases and levels without a re-write runner are not applicable without a rule.",
+  "divergences": [],
+  "notApplicable": []
+}

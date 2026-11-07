@@ -8,29 +8,29 @@ Generated from HCS release 0.1.0-draft.2 (vendor/hcs/PIN.json); do not edit.
 | --- | --- | --- | --- | --- |
 | HCS-0000-R001 | MUST | not-applicable |  | Process rule on the HCS repository, not on hosts. |
 | HCS-0000-R002 | MUST NOT | not-applicable |  | Process rule on the HCS repository, not on hosts. |
-| HCS-0000-R003 | MUST NOT | implemented | `src/hcs/extensions.ts`, `tests/hcs-extensions.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
-| HCS-0000-R004 | MUST NOT | implemented | `src/hcs/extensions.ts`, `tests/hcs-extensions.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
+| HCS-0000-R003 | MUST NOT | implemented | `src/hcs/extensions.ts`, `tests/hcs-extensions.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0000-R004 | MUST NOT | implemented | `src/hcs/extensions.ts`, `tests/hcs-extensions.test.ts`, `tests/hcs-conformance.test.ts` |  |
 
 ## HCS-0001
 
 | Requirement | Keyword | Status | Where | Issue or reason |
 | --- | --- | --- | --- | --- |
-| HCS-0001-R001 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
-| HCS-0001-R002 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
-| HCS-0001-R003 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
-| HCS-0001-R004 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
-| HCS-0001-R005 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
-| HCS-0001-R006 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
-| HCS-0001-R007 | MUST | implemented | `src/hcs/package.ts`, `tests/hcs-package.test.ts`, `tests/hcs-conformance-integrity.test.ts` |  |
-| HCS-0001-R008 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
-| HCS-0001-R009 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
-| HCS-0001-R010 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
-| HCS-0001-R011 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
+| HCS-0001-R001 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0001-R002 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0001-R003 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0001-R004 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0001-R005 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0001-R006 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0001-R007 | MUST | implemented | `src/hcs/package.ts`, `tests/hcs-package.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0001-R008 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0001-R009 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0001-R010 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0001-R011 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance.test.ts` |  |
 | HCS-0001-R012 | MUST | implemented | `src/hcs/package.ts`, `src/hcs/tar.ts`, `tests/hcs-package.test.ts`, `tests/hcs-tar.test.ts` |  |
-| HCS-0001-R013 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
+| HCS-0001-R013 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance.test.ts` |  |
 | HCS-0001-R014 | SHOULD | implemented | `src/hcs/package.ts`, `src/hcs/tar.ts`, `tests/hcs-package.test.ts`, `tests/hcs-tar.test.ts` |  |
-| HCS-0001-R015 | SHOULD | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
-| HCS-0001-R016 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
+| HCS-0001-R015 | SHOULD | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0001-R016 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance.test.ts` |  |
 
 ## HCS-0002
 
@@ -46,15 +46,15 @@ Generated from HCS release 0.1.0-draft.2 (vendor/hcs/PIN.json); do not edit.
 
 | Requirement | Keyword | Status | Where | Issue or reason |
 | --- | --- | --- | --- | --- |
-| HCS-0003-R001 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
-| HCS-0003-R002 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
-| HCS-0003-R003 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
-| HCS-0003-R004 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
-| HCS-0003-R005 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
-| HCS-0003-R006 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
-| HCS-0003-R007 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
-| HCS-0003-R008 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
-| HCS-0003-R009 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
+| HCS-0003-R001 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0003-R002 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0003-R003 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0003-R004 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0003-R005 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0003-R006 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0003-R007 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0003-R008 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0003-R009 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance.test.ts` |  |
 | HCS-0003-R010 | MUST | not-applicable |  | re-write declares all-or-nothing; resolve supports partial for conformance. |
 
 ## HCS-0004
@@ -62,7 +62,7 @@ Generated from HCS release 0.1.0-draft.2 (vendor/hcs/PIN.json); do not edit.
 | Requirement | Keyword | Status | Where | Issue or reason |
 | --- | --- | --- | --- | --- |
 | HCS-0004-R001 | MUST NOT | implemented | `src/hcs/host-state.ts`, `src/hcs/package.ts`, `tests/hcs-host-state.test.ts` |  |
-| HCS-0004-R002 | MUST | implemented | `src/hcs/lifecycle.ts`, `src/hcs/host-state.ts`, `tests/hcs-lifecycle.test.ts`, `tests/hcs-conformance-lifecycle.test.ts`, `tests/hcs-host-state.test.ts` |  |
+| HCS-0004-R002 | MUST | implemented | `src/hcs/lifecycle.ts`, `src/hcs/host-state.ts`, `tests/hcs-lifecycle.test.ts`, `tests/hcs-conformance.test.ts`, `tests/hcs-host-state.test.ts` |  |
 | HCS-0004-R003 | MUST | implemented | `src/hcs/host-state.ts`, `tests/hcs-host-state.test.ts`, `tests/hcs-catalog-cli.test.ts` |  |
 | HCS-0004-R004 | MUST | implemented | `src/hcs/host-state.ts`, `tests/hcs-host-state.test.ts` |  |
 | HCS-0004-R005 | MUST | implemented | `src/hcs/capabilities.ts`, `src/hcs/registry.ts`, `src/adapters/mcp.ts`, `tests/hcs-capabilities.test.ts`, `tests/hcs-registry.test.ts`, `tests/mcp.test.ts` |  |
@@ -73,10 +73,10 @@ Generated from HCS release 0.1.0-draft.2 (vendor/hcs/PIN.json); do not edit.
 
 | Requirement | Keyword | Status | Where | Issue or reason |
 | --- | --- | --- | --- | --- |
-| HCS-0005-R001 | MUST | implemented | `src/hcs/authority.ts`, `src/application/decision.ts`, `tests/hcs-authority.test.ts`, `tests/hcs-conformance-authority.test.ts`, `tests/decision.test.ts`, `tests/mcp.test.ts`, `tests/hcs-host-state.test.ts` |  |
-| HCS-0005-R002 | MUST NOT | implemented | `src/hcs/authority.ts`, `src/hcs/grants.ts`, `tests/hcs-authority.test.ts`, `tests/hcs-conformance-authority.test.ts`, `tests/hcs-host-state.test.ts` |  |
+| HCS-0005-R001 | MUST | implemented | `src/hcs/authority.ts`, `src/application/decision.ts`, `tests/hcs-authority.test.ts`, `tests/hcs-conformance.test.ts`, `tests/decision.test.ts`, `tests/mcp.test.ts`, `tests/hcs-host-state.test.ts` |  |
+| HCS-0005-R002 | MUST NOT | implemented | `src/hcs/authority.ts`, `src/hcs/grants.ts`, `tests/hcs-authority.test.ts`, `tests/hcs-conformance.test.ts`, `tests/hcs-host-state.test.ts` |  |
 | HCS-0005-R003 | MUST | implemented | `src/hcs/grants.ts`, `src/application/decision.ts`, `src/adapters/mcp.ts`, `src/adapters/http-server.ts`, `tests/hcs-authority.test.ts`, `tests/decision.test.ts`, `tests/mcp.test.ts`, `tests/review.test.ts` |  |
-| HCS-0005-R004 | MUST NOT | implemented | `src/hcs/authority.ts`, `tests/hcs-authority.test.ts`, `tests/hcs-conformance-authority.test.ts`, `tests/hcs-host-state.test.ts` |  |
+| HCS-0005-R004 | MUST NOT | implemented | `src/hcs/authority.ts`, `tests/hcs-authority.test.ts`, `tests/hcs-conformance.test.ts`, `tests/hcs-host-state.test.ts` |  |
 | HCS-0005-R005 | MUST | planned |  | [#30](https://github.com/FullFran/re-write/issues/30) |
 | HCS-0005-R006 | MUST | planned |  | [#30](https://github.com/FullFran/re-write/issues/30) |
 | HCS-0005-R007 | MUST | planned |  | [#30](https://github.com/FullFran/re-write/issues/30) |

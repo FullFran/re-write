@@ -53,7 +53,7 @@
       ],
       "tests": [
         "tests/hcs-extensions.test.ts",
-        "tests/hcs-conformance-document.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0000-R004": {
@@ -63,7 +63,7 @@
       ],
       "tests": [
         "tests/hcs-extensions.test.ts",
-        "tests/hcs-conformance-document.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0001-R001": {
@@ -73,7 +73,7 @@
       ],
       "tests": [
         "tests/hcs-catalog.test.ts",
-        "tests/hcs-conformance-document.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0001-R002": {
@@ -83,7 +83,7 @@
       ],
       "tests": [
         "tests/hcs-catalog.test.ts",
-        "tests/hcs-conformance-document.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0001-R003": {
@@ -93,7 +93,7 @@
       ],
       "tests": [
         "tests/hcs-catalog.test.ts",
-        "tests/hcs-conformance-document.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0001-R004": {
@@ -103,7 +103,7 @@
       ],
       "tests": [
         "tests/hcs-catalog.test.ts",
-        "tests/hcs-conformance-document.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0001-R005": {
@@ -113,7 +113,7 @@
       ],
       "tests": [
         "tests/hcs-catalog.test.ts",
-        "tests/hcs-conformance-document.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0001-R006": {
@@ -123,13 +123,18 @@
       ],
       "tests": [
         "tests/hcs-catalog.test.ts",
-        "tests/hcs-conformance-document.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0001-R007": {
       "status": "implemented",
-      "code": ["src/hcs/package.ts"],
-      "tests": ["tests/hcs-package.test.ts", "tests/hcs-conformance-integrity.test.ts"]
+      "code": [
+        "src/hcs/package.ts"
+      ],
+      "tests": [
+        "tests/hcs-package.test.ts",
+        "tests/hcs-conformance.test.ts"
+      ]
     },
     "HCS-0001-R008": {
       "status": "implemented",
@@ -139,7 +144,7 @@
       ],
       "tests": [
         "tests/hcs-resolve.test.ts",
-        "tests/hcs-conformance-resolution.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0001-R009": {
@@ -150,7 +155,7 @@
       ],
       "tests": [
         "tests/hcs-resolve.test.ts",
-        "tests/hcs-conformance-resolution.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0001-R010": {
@@ -160,7 +165,7 @@
       ],
       "tests": [
         "tests/hcs-catalog.test.ts",
-        "tests/hcs-conformance-document.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0001-R011": {
@@ -170,13 +175,19 @@
       ],
       "tests": [
         "tests/hcs-catalog.test.ts",
-        "tests/hcs-conformance-document.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0001-R012": {
       "status": "implemented",
-      "code": ["src/hcs/package.ts", "src/hcs/tar.ts"],
-      "tests": ["tests/hcs-package.test.ts", "tests/hcs-tar.test.ts"]
+      "code": [
+        "src/hcs/package.ts",
+        "src/hcs/tar.ts"
+      ],
+      "tests": [
+        "tests/hcs-package.test.ts",
+        "tests/hcs-tar.test.ts"
+      ]
     },
     "HCS-0001-R013": {
       "status": "implemented",
@@ -186,13 +197,19 @@
       ],
       "tests": [
         "tests/hcs-resolve.test.ts",
-        "tests/hcs-conformance-resolution.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0001-R014": {
       "status": "implemented",
-      "code": ["src/hcs/package.ts", "src/hcs/tar.ts"],
-      "tests": ["tests/hcs-package.test.ts", "tests/hcs-tar.test.ts"]
+      "code": [
+        "src/hcs/package.ts",
+        "src/hcs/tar.ts"
+      ],
+      "tests": [
+        "tests/hcs-package.test.ts",
+        "tests/hcs-tar.test.ts"
+      ]
     },
     "HCS-0001-R015": {
       "status": "implemented",
@@ -201,7 +218,7 @@
       ],
       "tests": [
         "tests/hcs-catalog.test.ts",
-        "tests/hcs-conformance-document.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0001-R016": {
@@ -212,7 +229,7 @@
       ],
       "tests": [
         "tests/hcs-resolve.test.ts",
-        "tests/hcs-conformance-resolution.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0002-R001": {
@@ -270,7 +287,7 @@
       ],
       "tests": [
         "tests/hcs-resolve.test.ts",
-        "tests/hcs-conformance-resolution.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0003-R002": {
@@ -281,7 +298,7 @@
       ],
       "tests": [
         "tests/hcs-resolve.test.ts",
-        "tests/hcs-conformance-resolution.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0003-R003": {
@@ -292,7 +309,7 @@
       ],
       "tests": [
         "tests/hcs-resolve.test.ts",
-        "tests/hcs-conformance-resolution.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0003-R004": {
@@ -303,7 +320,7 @@
       ],
       "tests": [
         "tests/hcs-resolve.test.ts",
-        "tests/hcs-conformance-resolution.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0003-R005": {
@@ -314,7 +331,7 @@
       ],
       "tests": [
         "tests/hcs-resolve.test.ts",
-        "tests/hcs-conformance-resolution.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0003-R006": {
@@ -325,7 +342,7 @@
       ],
       "tests": [
         "tests/hcs-resolve.test.ts",
-        "tests/hcs-conformance-resolution.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0003-R007": {
@@ -336,7 +353,7 @@
       ],
       "tests": [
         "tests/hcs-resolve.test.ts",
-        "tests/hcs-conformance-resolution.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0003-R008": {
@@ -347,7 +364,7 @@
       ],
       "tests": [
         "tests/hcs-resolve.test.ts",
-        "tests/hcs-conformance-resolution.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0003-R009": {
@@ -358,7 +375,7 @@
       ],
       "tests": [
         "tests/hcs-resolve.test.ts",
-        "tests/hcs-conformance-resolution.test.ts"
+        "tests/hcs-conformance.test.ts"
       ]
     },
     "HCS-0003-R010": {
@@ -383,7 +400,7 @@
       ],
       "tests": [
         "tests/hcs-lifecycle.test.ts",
-        "tests/hcs-conformance-lifecycle.test.ts",
+        "tests/hcs-conformance.test.ts",
         "tests/hcs-host-state.test.ts"
       ]
     },
@@ -451,7 +468,7 @@
       ],
       "tests": [
         "tests/hcs-authority.test.ts",
-        "tests/hcs-conformance-authority.test.ts",
+        "tests/hcs-conformance.test.ts",
         "tests/decision.test.ts",
         "tests/mcp.test.ts",
         "tests/hcs-host-state.test.ts"
@@ -465,7 +482,7 @@
       ],
       "tests": [
         "tests/hcs-authority.test.ts",
-        "tests/hcs-conformance-authority.test.ts",
+        "tests/hcs-conformance.test.ts",
         "tests/hcs-host-state.test.ts"
       ]
     },
@@ -491,7 +508,7 @@
       ],
       "tests": [
         "tests/hcs-authority.test.ts",
-        "tests/hcs-conformance-authority.test.ts",
+        "tests/hcs-conformance.test.ts",
         "tests/hcs-host-state.test.ts"
       ]
     },
