@@ -1,0 +1,11 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Example mapping for importing chapters from a Notion export into RE;write",
+  "database": "Capítulos.csv",
+  "titleColumn": "Título",
+  "orderColumn": "Orden",
+  "filter": {
+    "column": "Libro",
+    "value": "El Mar del Norte"
+  }
+}
