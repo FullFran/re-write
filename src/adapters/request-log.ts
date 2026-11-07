@@ -13,6 +13,8 @@ interface Context {
   request_id: string;
   door: 'mcp' | 'review' | 'public';
   subject: string;
+  reason?: 'expired' | 'audience' | 'issuer' | 'signature' | 'malformed' | 'other';
+  error_name?: string;
   hash: (value: string) => string;
 }
 const requests = new AsyncLocalStorage<Context>();
@@ -20,6 +22,22 @@ const requests = new AsyncLocalStorage<Context>();
 export function recordSubject(subject: string): void {
   const context = requests.getStore();
   if (context) context.subject = context.hash(subject);
+}
+
+export function recordAuthenticationFailure(error: unknown): void {
+  const context = requests.getStore();
+  if (!context) return;
+  const failure = error as { code?: unknown; claim?: unknown } | undefined;
+  context.reason = failure?.code === 'ERR_JWT_EXPIRED' ? 'expired'
+    : failure?.code === 'ERR_JWT_CLAIM_VALIDATION_FAILED' && failure.claim === 'aud' ? 'audience'
+    : failure?.code === 'ERR_JWT_CLAIM_VALIDATION_FAILED' && failure.claim === 'iss' ? 'issuer'
+    : failure?.code === 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED' ? 'signature'
+    : failure?.code === 'ERR_JWS_INVALID' || failure?.code === 'ERR_JWT_INVALID' ? 'malformed' : 'other';
+}
+
+export function recordUnexpectedError(error: unknown): void {
+  const context = requests.getStore();
+  if (context) context.error_name = error instanceof Error && /^[A-Za-z]+Error$/.test(error.name) ? error.name : 'Error';
 }
 
 function write(context: Context, event: string, start: number, fields: object): void {
@@ -79,7 +97,8 @@ export function withRequestLog(resource: string, handler: RequestListener, salt 
       emitted = true;
       const status = res.writableFinished ? res.statusCode : 499;
       write(context, 'http.request', start, { method: methods.has(req.method ?? '') ? req.method : 'unknown', route, status,
-        ...(book !== undefined ? { book: hash(book) } : {}), ...(status >= 400 ? { error: error ?? 'error' } : {}) });
+        ...(book !== undefined ? { book: hash(book) } : {}), ...(status >= 400 ? { error: error ?? 'error' } : {}),
+        ...(context.reason ? { reason: context.reason } : {}), ...(context.error_name ? { error_name: context.error_name } : {}) });
     };
     res.once('finish', complete);
     res.once('close', complete);

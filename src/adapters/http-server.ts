@@ -9,7 +9,7 @@ import { decide, enforce, ForbiddenError } from '../application/decision.ts';
 import { TokenVerifier } from './auth.ts';
 import { llmsText } from './llms.ts';
 import { buildMcpServer, logMcpTransport } from './mcp.ts';
-import { recordSubject, withRequestLog } from './request-log.ts';
+import { recordAuthenticationFailure, recordSubject, recordUnexpectedError, withRequestLog } from './request-log.ts';
 import { REVIEW_CSS, REVIEW_JS, reviewCsp, reviewHtml } from './review-page.ts';
 import { VERDICTS, type VerdictKind } from '../domain/continuity.ts';
 import { HcsFailure } from '../hcs/errors.ts';
@@ -236,6 +236,7 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
     const challenge = `Bearer resource_metadata="${metadataUrl}"`;
     const raw = bearerOf(req);
     if (!raw) {
+      recordAuthenticationFailure(undefined);
       res.setHeader('www-authenticate', challenge);
       problem(res, 401, 'unauthorized');
       return;
@@ -244,7 +245,8 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
     try {
       subject = await verifier.verifyAccessToken(raw);
       recordSubject(subject);
-    } catch {
+    } catch (error) {
+      recordAuthenticationFailure(error);
       res.setHeader('www-authenticate', `${challenge}, error="invalid_token"`);
       problem(res, 401, 'unauthorized');
       return;
@@ -276,7 +278,8 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
       if (!raw) throw new Error('no token');
       subject = await verifier.verifySessionToken(raw);
       recordSubject(subject);
-    } catch {
+    } catch (error) {
+      recordAuthenticationFailure(error);
       return problem(res, 401, 'unauthorized');
     }
     let parts: string[];
@@ -601,6 +604,7 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
       throw new HttpError(404, 'not found');
     })().catch((error) => {
       const status = error instanceof HttpError ? error.status : 500;
+      if (status === 500 && !(error instanceof HcsFailure)) recordUnexpectedError(error);
       if (res.headersSent) {
         res.destroy();
         return;

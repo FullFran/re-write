@@ -101,8 +101,62 @@ for (const salted of [true, false]) test(`metadata request log protects manuscri
     assert.ok(ids.includes(record.request_id));
     assert.ok(['mcp', 'review', 'public'].includes(record.door));
     assert.ok(['anon', hash(subject)].includes(record.subject));
-    assert.deepEqual(Object.keys(record).filter(key => !['event', 'timestamp', 'request_id', 'method', 'route', 'status', 'duration_ms', 'door', 'subject', 'book', 'error', 'tool', 'result'].includes(key)), []);
+    assert.deepEqual(Object.keys(record).filter(key => !['event', 'timestamp', 'request_id', 'method', 'route', 'status', 'duration_ms', 'door', 'subject', 'book', 'error', 'tool', 'result', 'reason', 'error_name'].includes(key)), []);
   }
   assert.equal(warnings.length, salted ? 0 : 1);
   if (!salted) assert.match(warnings[0], /REWRITE_LOG_SALT.*unset/);
+});
+
+test('rejected tokens retain only allowlisted diagnostic reasons, never token or message text', async (t) => {
+  const lines: string[] = [];
+  t.mock.method(console, 'log', (line: string) => lines.push(line));
+  t.mock.method(console, 'error', (line: string) => lines.push(line));
+  t.mock.method(console, 'warn', () => {});
+  const h = await startHarness();
+  t.after(() => h.close());
+  const marker = 'private-auth-marker';
+  const claims = { iss: h.issuer, aud: h.resource, sub: marker };
+  const cases = [
+    ['expired', await h.sign(claims, { expires: '-1h' })],
+    ['audience', await h.sign({ ...claims, aud: marker })],
+    ['issuer', await h.sign({ ...claims, iss: marker })],
+    ['signature', await h.sign(claims, { key: h.strangerKey })],
+    ['malformed', marker],
+    ['other', ''],
+  ];
+  for (const [reason, token] of cases) {
+    const response = await fetch(h.resource, { method: 'POST', headers: token ? { authorization: `Bearer ${token}` } : {} });
+    assert.equal(response.status, 401);
+    await response.text();
+    const record = JSON.parse(lines.at(-1)!);
+    assert.equal(record.reason, reason);
+    assert.equal(record.subject, 'anon');
+    assert.equal(record.error, `${TYPE}unauthorized`);
+    if (token) assert.ok(!lines.join('\n').includes(token));
+  }
+  const session = await h.sign({ iss: h.issuer, sub: marker, sid: marker, azp: h.base }, { expires: '-1h' });
+  assert.equal((await reviewApi(h, '/books', session)).status, 401);
+  assert.equal(JSON.parse(lines.at(-1)!).reason, 'expired');
+  assert.ok(!lines.join('\n').includes(marker));
+});
+
+test('unexpected HTTP 500 retains a sanitized Error subclass name, never its message', async (t) => {
+  const lines: string[] = [];
+  t.mock.method(console, 'log', (line: string) => lines.push(line));
+  t.mock.method(console, 'error', (line: string) => lines.push(line));
+  t.mock.method(console, 'warn', () => {});
+  const h = await startHarness();
+  t.after(() => h.close());
+  const token = await h.session();
+  const marker = 'Private manuscript message marker';
+  for (const [error, name] of [[new TypeError(marker), 'TypeError'], [Object.assign(new Error(marker), { name: marker }), 'Error']] as const) {
+    h.library.booksFor = () => { throw error; };
+    const response = await reviewApi(h, '/books', token);
+    assert.equal(response.status, 500);
+    await response.text();
+    const record = JSON.parse(lines.at(-1)!);
+    assert.equal(record.error_name, name);
+    assert.equal(record.error, `${TYPE}internal-error`);
+    assert.ok(!lines.join('\n').includes(marker));
+  }
 });
