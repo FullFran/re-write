@@ -275,6 +275,7 @@ test('writer pilot: Notion upload → MCP analysis → human review → evaluati
     class Element {
       children: Element[] = [];
       className = '';
+      value = '';
       style: Record<string, string> = {};
       listeners: Record<string, (...args: any[]) => any> = {};
       ownText = '';
