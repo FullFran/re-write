@@ -232,6 +232,50 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
       return json(res, 200, { ...project.reviewQueue(), scenes: project.scenes() });
     }
 
+    if (parts.length === 3 && parts[2] === 'findings' && req.method === 'GET') {
+      const project = open(READ);
+      return json(res, 200, { findings: project.findingViews() });
+    }
+
+    if (
+      ((parts.length === 3 && parts[2] === 'export') ||
+       (parts.length === 4 && parts[2] === 'findings' && parts[3] === 'export')) &&
+      req.method === 'GET'
+    ) {
+      const project = open(READ);
+      const findings = project.findingViews();
+      const exportData = {
+        book,
+        exported_at: new Date().toISOString(),
+        findings: findings.map((f) => ({
+          finding_id: f.finding_id,
+          question: f.question,
+          kind: f.kind,
+          statement: f.statement,
+          characters: f.characters,
+          author: f.author,
+          created_at: f.created_at,
+          evidence_status: f.evidence_status,
+          evidence: f.evidence.map((e) => ({
+            file: e.file,
+            quote: e.quote,
+            status: e.status,
+            reason: e.reason,
+          })),
+          verdict: f.verdict,
+          rating: f.verdict ? {
+            verdict: f.verdict.verdict,
+            by: f.verdict.by,
+            at: f.verdict.at,
+            note: f.verdict.note,
+            history: (f.verdict as any).history,
+          } : undefined,
+        })),
+      };
+      res.setHeader('content-disposition', `attachment; filename="findings-${book}.json"`);
+      return json(res, 200, exportData);
+    }
+
     if (parts.length === 3 && parts[2] === 'scenes' && req.method === 'GET') {
       return json(res, 200, { scenes: open(READ).scenes() });
     }
@@ -250,7 +294,9 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
       const proposals = project.proposals.all()
         .filter((p) => p.file === sceneFile && p.status === 'proposed')
         .map((p) => project.showProposal(p.proposal_id));
-      return json(res, 200, { file: sceneFile, text, proposals });
+      const findings = project.findingViews()
+        .filter((f) => f.evidence.some((e) => e.file === sceneFile));
+      return json(res, 200, { file: sceneFile, text, proposals, findings });
     }
 
     if (parts.length === 3 && parts[2] === 'import' && req.method === 'POST') {

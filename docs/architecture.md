@@ -126,8 +126,10 @@ Routes available on the review door (`/review`):
 - `GET /review/api/books`: lists accessible books (`com.fullfran.rewrite.book.read`).
 - `POST /review/api/books`: creates a book and grants access to the creator (`com.fullfran.rewrite.book.create`).
 - `GET /review/api/books/{book}`: reads the review queue and scene list (`com.fullfran.rewrite.book.read`).
+- `GET /review/api/books/{book}/findings`: reads narrative findings with current evidence status (`com.fullfran.rewrite.book.read`).
+- `GET /review/api/books/{book}/export`: downloads findings with ratings and notes as JSON (`com.fullfran.rewrite.book.read`).
 - `GET /review/api/books/{book}/scenes`: lists scene files in the book (`com.fullfran.rewrite.book.read`).
-- `GET /review/api/books/{book}/scenes/{file}`: reads a scene text and lists its pending proposals (`com.fullfran.rewrite.book.read`).
+- `GET /review/api/books/{book}/scenes/{file}`: reads a scene text and lists its pending proposals and citing findings (`com.fullfran.rewrite.book.read`).
 - `POST /review/api/books/{book}/import`: uploads and commits Markdown scenes (`com.fullfran.rewrite.book.import`).
 - `POST /review/api/books/{book}/claims/{id}`, `/proposals/{id}`, `/findings/{id}`: reviews claims, proposals, and findings (`com.fullfran.rewrite.review.decide`).
 

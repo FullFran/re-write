@@ -39,6 +39,12 @@ export interface FindingVerdict {
   by: string;
   at: string;
   note?: string;
+  history?: Array<{
+    verdict: string;
+    by: string;
+    at: string;
+    note?: string;
+  }>;
 }
 
 export interface FindingRecord {
