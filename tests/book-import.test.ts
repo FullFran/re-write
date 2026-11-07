@@ -615,3 +615,15 @@ test('names with accents and spaces', () => {
 });
 
 const ROOT_DIR = join(import.meta.dirname, '..');
+
+test('an empty deflated member (an empty Notion page) is read as empty, not refused', () => {
+  const zip = buildSyntheticZip([
+    { name: 'Vacia 0123456789abcdef0123456789abcdef.md', content: '', method: 8 },
+    { name: 'Llena 0123456789abcdef0123456789abcdee.md', content: '# Llena\n\nTexto.', method: 8 },
+  ]);
+  const entries = readZip(zip);
+  const empty = entries.find((e) => e.name.startsWith('Vacia'));
+  const full = entries.find((e) => e.name.startsWith('Llena'));
+  assert.equal(empty?.getData().length, 0);
+  assert.equal(full?.getData().toString('utf8'), '# Llena\n\nTexto.');
+});

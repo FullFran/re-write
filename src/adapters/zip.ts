@@ -227,7 +227,9 @@ function readZipInternal(
         throw new Error(`Invalid zip file: Data out of bounds for ${cleanName}`);
       }
 
-      if (uncompressedSize === 0) {
+      // A stored empty member has no data. A deflated empty member still has a few bytes of deflate
+      // stream (zip tools write them), so it takes the normal path below, which checks size 0 and CRC.
+      if (uncompressedSize === 0 && method === 0) {
         if (compressedSize !== 0) {
           throw new Error(`Invalid zip file: Non-zero compressed size for empty entry ${cleanName}`);
         }
@@ -251,7 +253,8 @@ function readZipInternal(
         decompressed = Buffer.from(compressedData);
       } else if (method === 8) {
         try {
-          decompressed = inflateRawSync(compressedData, { maxOutputLength: uncompressedSize });
+          // zlib refuses a limit of 0; an empty member still has to inflate to exactly 0 bytes (checked below).
+          decompressed = inflateRawSync(compressedData, { maxOutputLength: Math.max(1, uncompressedSize) });
         } catch (err) {
           throw new Error(`Failed to decompress zip entry "${cleanName}": ${(err as Error).message}`);
         }
