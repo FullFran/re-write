@@ -1,7 +1,7 @@
 import { evaluate } from '../hcs/authority.ts';
 import { HcsFailure, type HcsError } from '../hcs/errors.ts';
 import { readGrants } from '../hcs/grants.ts';
-import { REVIEW_DECIDE, REWRITE_PERMISSIONS } from '../hcs/ids.ts';
+import { BOOK_CREATE, REVIEW_DECIDE, REWRITE_PERMISSIONS } from '../hcs/ids.ts';
 import type { Library } from './library.ts';
 
 /** The two doors of the server: agents through the MCP, people through the review page. */
@@ -26,7 +26,12 @@ export type BookDecision =
   | { allow: false; reason: 'forbidden'; detail: string };
 
 const MCP_PERMISSIONS: readonly string[] = REWRITE_PERMISSIONS;
-const REVIEW_PERMISSIONS: readonly string[] = [REVIEW_DECIDE, 'com.fullfran.rewrite.book.read'];
+const REVIEW_PERMISSIONS: readonly string[] = [
+  REVIEW_DECIDE,
+  'com.fullfran.rewrite.book.read',
+  'com.fullfran.rewrite.book.import',
+  BOOK_CREATE,
+];
 
 /**
  * The single decision point for (subject, book, entry, permission). Everything is read at call

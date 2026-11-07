@@ -56,6 +56,7 @@ body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.5 Ge
 header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 h1 { margin: 0; font-size: 20px; }
 h2 { margin: 32px 0 8px; font-size: 18px; }
+h3 { margin: 20px 0 8px; font-size: 16px; }
 main { max-width: 760px; margin: 0 auto; padding: 16px; }
 article { border-top: 1px solid var(--line); padding: 16px 0; }
 blockquote { margin: 8px 0; padding-left: 12px; border-left: 3px solid var(--line); }
@@ -65,9 +66,17 @@ pre { overflow-x: auto; padding: 12px; border: 1px solid var(--line); font: 13px
 button { min-height: 44px; padding: 8px 16px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: 15px system-ui, sans-serif; cursor: pointer; }
 button.accept { border-color: var(--accept); color: var(--accept); }
 button.reject { border-color: var(--reject); color: var(--reject); }
+button.active { border-color: var(--ink); background: var(--line); font-weight: bold; }
 button:disabled { opacity: .5; cursor: default; }
-select { min-height: 44px; max-width: 100%; font: 15px system-ui, sans-serif; }
+select, input[type=text] { min-height: 44px; max-width: 100%; font: 15px system-ui, sans-serif; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
+input[type=file] { font: 14px system-ui, sans-serif; }
 [role=alert] { color: var(--reject); }
+[role=status] { color: var(--accept); font-weight: 500; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.card-box { border: 1px solid var(--line); border-radius: 6px; padding: 16px; margin: 16px 0; }
+.form-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+.scenes-grid { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.scene-viewer { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 16px; }
 `;
 
 export const REVIEW_JS = String.raw`
@@ -185,17 +194,152 @@ function section(title, cards, empty) {
   return box;
 }
 
-async function showBook(book, picker) {
-  const reload = () => showBook(book, picker);
-  const data = await api('/books/' + book);
+function createBookSection(onCreated) {
+  const box = el('section', undefined, 'card-box');
+  box.append(el('h2', 'Crear un nuevo libro'));
+  const row = el('div', undefined, 'form-row');
+  const input = el('input');
+  input.type = 'text';
+  input.placeholder = 'Título del libro';
+  input.setAttribute('aria-label', 'Título del libro');
+  const submit = button('Crear libro', '', async () => {
+    const title = input.value.trim();
+    if (!title) throw new Error('Escribe un título para el libro');
+    const created = await api('/books', { title });
+    input.value = '';
+    await onCreated(created.book_id);
+  });
+  row.append(input, submit);
+  box.append(row);
+  return box;
+}
+
+function importSection(book, onImported) {
+  const box = el('section', undefined, 'card-box');
+  box.append(el('h2', 'Importar escenas Markdown'));
+  box.append(el('p', 'Selecciona uno o más archivos .md (máximo 2 MB por archivo) para añadirlos al libro.', 'meta'));
+  const row = el('div', undefined, 'form-row');
+  const input = el('input');
+  input.type = 'file';
+  input.multiple = true;
+  input.accept = '.md';
+  input.setAttribute('aria-label', 'Archivos Markdown');
+  const status = el('p', undefined, 'meta');
+  const submit = button('Importar Markdown', '', async () => {
+    status.textContent = '';
+    if (!input.files || input.files.length === 0) {
+      throw new Error('Selecciona al menos un archivo Markdown (.md)');
+    }
+    const files = [];
+    for (const f of input.files) {
+      if (!f.name.endsWith('.md')) throw new Error('Solo se admiten archivos Markdown (.md): ' + f.name);
+      if (f.size > 2 * 1024 * 1024) throw new Error('El archivo supera el límite de 2 MB: ' + f.name);
+      files.push({ name: f.name, content: await f.text() });
+    }
+    const result = await api('/books/' + book + '/import', { files });
+    status.textContent = 'Importadas: ' + (result.imported.join(', ') || 'ninguna') + (result.unchanged.length ? ' · Sin cambios: ' + result.unchanged.join(', ') : '');
+    status.setAttribute('role', 'status');
+    input.value = '';
+    await onImported();
+  });
+  row.append(input, submit);
+  box.append(row, status);
+  return box;
+}
+
+function scenesSection(book, scenes, reloadBook) {
+  const box = el('section', undefined, 'card-box');
+  box.append(el('h2', 'Navegar escenas'));
+  if (!scenes || !scenes.length) {
+    box.append(el('p', 'Este libro aún no tiene escenas. Importa archivos Markdown arriba para empezar.', 'meta'));
+    return box;
+  }
+  const grid = el('div', undefined, 'scenes-grid');
+  const viewer = el('div', undefined, 'scene-viewer');
+  viewer.style.display = 'none';
+
+  let activeBtn = null;
+  const loadScene = async (sceneFile, btn) => {
+    if (activeBtn) activeBtn.classList.remove('active');
+    btn.classList.add('active');
+    activeBtn = btn;
+    viewer.style.display = 'block';
+    viewer.replaceChildren(el('p', 'Cargando escena…', 'meta'));
+    try {
+      const data = await api('/books/' + book + '/scenes/' + encodeURIComponent(sceneFile));
+      viewer.replaceChildren();
+      viewer.append(el('h3', data.file));
+      viewer.append(el('pre', data.text));
+      const propBox = el('div');
+      propBox.append(el('h3', 'Propuestas para esta escena'));
+      if (data.proposals && data.proposals.length > 0) {
+        const reloadScene = async () => {
+          await loadScene(sceneFile, btn);
+          await reloadBook();
+        };
+        for (const p of data.proposals) {
+          propBox.append(proposalCard(book, p, reloadScene));
+        }
+      } else {
+        propBox.append(el('p', 'Sin cambios pendientes para esta escena.', 'meta'));
+      }
+      viewer.append(propBox);
+    } catch (error) {
+      viewer.replaceChildren(el('p', error.message, 'meta'));
+    }
+  };
+
+  for (const scene of scenes) {
+    const btn = button(scene, '', () => loadScene(scene, btn));
+    grid.append(btn);
+  }
+  box.append(grid, viewer);
+  return box;
+}
+
+async function renderApp(selectedBookId) {
+  const { books } = await api('/books');
+  app.replaceChildren();
+
+  if (!books.length) {
+    app.append(el('p', 'Tu cuenta todavía no tiene acceso a ningún libro. Crea uno para empezar:'));
+    app.append(createBookSection(async (newId) => renderApp(newId)));
+    return;
+  }
+
+  const currentBook = books.some((b) => b.book_id === selectedBookId) ? selectedBookId : books[0].book_id;
+  const toolbar = el('div', undefined, 'toolbar');
+  const picker = el('select');
+  picker.setAttribute('aria-label', 'Libro');
+  for (const b of books) {
+    const opt = el('option', b.title);
+    opt.value = b.book_id;
+    if (b.book_id === currentBook) opt.selected = true;
+    picker.append(opt);
+  }
+  picker.addEventListener('change', () => renderApp(picker.value).catch((err) => showError(err.message)));
+  toolbar.append(picker);
+
+  const createBox = createBookSection(async (newId) => renderApp(newId));
+  createBox.style.display = 'none';
+  const toggleBtn = button('Crear otro libro', '', () => {
+    createBox.style.display = createBox.style.display === 'none' ? 'block' : 'none';
+  });
+  toolbar.append(toggleBtn);
+  app.append(toolbar, createBox);
+
+  const reload = () => renderApp(currentBook);
+  const data = await api('/books/' + currentBook);
   const pending = (c) => c.editorial_status === 'proposed';
-  app.replaceChildren(picker);
+
   app.append(
-    section('Cambios propuestos', data.proposals.filter((p) => p.proposal.status === 'proposed').map((p) => proposalCard(book, p, reload)), 'Ningún cambio pendiente.'),
-    section('Posibles problemas', data.findings.map((f) => findingCard(book, f, reload)), 'Sin hallazgos, lo que no demuestra que no haya problemas.'),
-    section('Afirmaciones por revisar', data.claims.filter(pending).map((c) => claimCard(book, c, reload)), 'Ninguna pendiente.'),
-    section('Canon', data.canon.map((c) => claimCard(book, c, reload)), 'El canon está vacío.'),
-    section('Historial de cambios', data.proposals.filter((p) => p.proposal.status !== 'proposed').map((p) => proposalCard(book, p, reload)), 'Sin decisiones todavía.'),
+    importSection(currentBook, reload),
+    scenesSection(currentBook, data.scenes || [], reload),
+    section('Cambios propuestos', data.proposals.filter((p) => p.proposal.status === 'proposed').map((p) => proposalCard(currentBook, p, reload)), 'Ningún cambio pendiente.'),
+    section('Posibles problemas', data.findings.map((f) => findingCard(currentBook, f, reload)), 'Sin hallazgos, lo que no demuestra que no haya problemas.'),
+    section('Afirmaciones por revisar', data.claims.filter(pending).map((c) => claimCard(currentBook, c, reload)), 'Ninguna pendiente.'),
+    section('Canon', data.canon.map((c) => claimCard(currentBook, c, reload)), 'El canon está vacío.'),
+    section('Historial de cambios', data.proposals.filter((p) => p.proposal.status !== 'proposed').map((p) => proposalCard(currentBook, p, reload)), 'Sin decisiones todavía.'),
   );
 }
 
@@ -209,20 +353,7 @@ window.addEventListener('load', async () => {
       return;
     }
     window.Clerk.mountUserButton(document.getElementById('user'));
-    const { books } = await api('/books');
-    if (!books.length) {
-      app.replaceChildren(el('p', 'Tu cuenta todavía no tiene acceso a ningún libro.'));
-      return;
-    }
-    const picker = el('select');
-    picker.setAttribute('aria-label', 'Libro');
-    for (const book of books) {
-      const option = el('option', book.title);
-      option.value = book.book_id;
-      picker.append(option);
-    }
-    picker.addEventListener('change', () => showBook(picker.value, picker).catch((error) => showError(error.message)));
-    await showBook(books[0].book_id, picker);
+    await renderApp();
   } catch (error) {
     app.replaceChildren();
     showError(error.message || 'No se pudo cargar la página');

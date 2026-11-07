@@ -47,3 +47,4 @@ export const REWRITE_PERMISSIONS = [
   'com.fullfran.rewrite.revision.propose',
 ] as const;
 export const REVIEW_DECIDE = 'com.fullfran.rewrite.review.decide';
+export const BOOK_CREATE = 'com.fullfran.rewrite.book.create';

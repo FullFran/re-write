@@ -26,6 +26,8 @@ npm test        # automated tests
 
 ## Use it
 
+Books can be created directly from the browser at `/review` (where signed-in writers can create a book, upload Markdown scenes, and navigate chapters without opening a terminal), or managed through the CLI:
+
 ```bash
 alias rewrite="node $PWD/src/cli/main.ts"
 
