@@ -127,8 +127,9 @@
       ]
     },
     "HCS-0001-R007": {
-      "status": "planned",
-      "issue": 26
+      "status": "implemented",
+      "code": ["src/hcs/package.ts"],
+      "tests": ["tests/hcs-package.test.ts", "tests/hcs-conformance-integrity.test.ts"]
     },
     "HCS-0001-R008": {
       "status": "implemented",
@@ -173,8 +174,9 @@
       ]
     },
     "HCS-0001-R012": {
-      "status": "planned",
-      "issue": 26
+      "status": "implemented",
+      "code": ["src/hcs/package.ts", "src/hcs/tar.ts"],
+      "tests": ["tests/hcs-package.test.ts", "tests/hcs-tar.test.ts"]
     },
     "HCS-0001-R013": {
       "status": "implemented",
@@ -188,8 +190,9 @@
       ]
     },
     "HCS-0001-R014": {
-      "status": "planned",
-      "issue": 24
+      "status": "implemented",
+      "code": ["src/hcs/package.ts", "src/hcs/tar.ts"],
+      "tests": ["tests/hcs-package.test.ts", "tests/hcs-tar.test.ts"]
     },
     "HCS-0001-R015": {
       "status": "implemented",

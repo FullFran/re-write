@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
-import { realpathSync } from 'node:fs';
+import { realpathSync, writeFileSync } from 'node:fs';
+import { basename, resolve } from 'node:path';
+import { buildPackage } from '../hcs/package.ts';
 import { fileURLToPath } from 'node:url';
 import { HcsFailure } from '../hcs/errors.ts';
 import { productProblem, rejectedCandidate } from '../adapters/problems.ts';
@@ -12,6 +14,7 @@ import { VERDICTS, type Finding, type VerdictKind } from '../domain/continuity.t
 
 const USAGE = `RE;write: narrative memory with evidence and human review.
 
+  rewrite package <dir> [--out <file>] [--json]  build a deterministic package archive
   rewrite init <dir> [--title <title>]       create or open a book repository
   rewrite import <dir> <scene.md>...         copy scenes in and commit them
   rewrite read <dir> <scenes/file.md>        print a scene
@@ -87,6 +90,14 @@ function dispatch(args: string[], values: Record<string, string | boolean | unde
   const [command, dir, ...rest] = args;
   const option = (name: string) => values[name] as string | undefined;
   switch (command) {
+    case 'package': {
+      const source = need(dir, '<dir>');
+      if (rest.length) throw new UsageError('unexpected package arguments');
+      const file = option('out') ?? `${basename(resolve(source))}.tar.gz`;
+      const { bytes, contentHash, size, mediaType } = buildPackage(source);
+      writeFileSync(file, bytes);
+      return { json: { contentHash, size, mediaType, file }, text: `${contentHash} ${size}` };
+    }
     case 'init': {
       const { project, created } = Project.init(need(dir, '<dir>'), option('title') ?? 'Untitled book');
       return { json: { dir: project.dir, created }, text: `${created ? 'created' : 'opened'} ${project.dir}` };
@@ -199,7 +210,7 @@ function main(): number {
     parsed = parseArgs({
       allowPositionals: true,
       options: {
-        json: { type: 'boolean' }, title: { type: 'string' }, from: { type: 'string' },
+        json: { type: 'boolean' }, out: { type: 'string' }, title: { type: 'string' }, from: { type: 'string' },
         by: { type: 'string' }, note: { type: 'string' }, file: { type: 'string' }, find: { type: 'string' },
         replace: { type: 'string' }, rationale: { type: 'string' }, finding: { type: 'string' },
       },

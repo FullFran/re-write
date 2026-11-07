@@ -21,14 +21,14 @@ Generated from HCS pin 9f40641ebdff9aae73e797b1223b54bcc43a41b7; do not edit.
 | HCS-0001-R004 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
 | HCS-0001-R005 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
 | HCS-0001-R006 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
-| HCS-0001-R007 | MUST | planned |  | [#26](https://github.com/FullFran/re-write/issues/26) |
+| HCS-0001-R007 | MUST | implemented | `src/hcs/package.ts`, `tests/hcs-package.test.ts`, `tests/hcs-conformance-integrity.test.ts` |  |
 | HCS-0001-R008 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
 | HCS-0001-R009 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
 | HCS-0001-R010 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
 | HCS-0001-R011 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
-| HCS-0001-R012 | MUST | planned |  | [#26](https://github.com/FullFran/re-write/issues/26) |
+| HCS-0001-R012 | MUST | implemented | `src/hcs/package.ts`, `src/hcs/tar.ts`, `tests/hcs-package.test.ts`, `tests/hcs-tar.test.ts` |  |
 | HCS-0001-R013 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
-| HCS-0001-R014 | SHOULD | planned |  | [#24](https://github.com/FullFran/re-write/issues/24) |
+| HCS-0001-R014 | SHOULD | implemented | `src/hcs/package.ts`, `src/hcs/tar.ts`, `tests/hcs-package.test.ts`, `tests/hcs-tar.test.ts` |  |
 | HCS-0001-R015 | SHOULD | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
 | HCS-0001-R016 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
 
