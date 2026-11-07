@@ -1,8 +1,9 @@
-import { inflateRawSync } from 'node:zlib';
+import { crc32 as nodeCrc32, inflateRawSync } from 'node:zlib';
 
 export interface ZipLimits {
   maxBytes?: number;
   maxMembers?: number;
+  allowNested?: boolean;
 }
 
 export interface ZipEntry {
@@ -16,14 +17,89 @@ export interface ZipEntry {
 const DEFAULT_MAX_BYTES = 256 * 1024 * 1024; // 256 MB
 const DEFAULT_MAX_MEMBERS = 10000;
 
+const CRC_TABLE = new Uint32Array(256);
+for (let i = 0; i < 256; i++) {
+  let c = i;
+  for (let k = 0; k < 8; k++) {
+    c = (c & 1) ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  }
+  CRC_TABLE[i] = c >>> 0;
+}
+
 /**
- * Reads a ZIP archive from a buffer safely.
- * Rejects absolute paths, path traversal (..), symlinks, encryption, and Zip64.
- * Enforces size and entry-count limits.
+ * Computes CRC-32 using node:zlib if available, or a table-driven fallback.
  */
-export function readZip(buffer: Buffer, limits: ZipLimits = {}): ZipEntry[] {
+export function computeCrc32(buf: Buffer): number {
+  if (typeof nodeCrc32 === 'function') {
+    return nodeCrc32(buf) >>> 0;
+  }
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) {
+    crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ buf[i]) & 0xff];
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+const CP437_CHARS =
+  'ÇüéâäàåçêëèïîìÄÅ' +
+  'ÉæÆôöòûùÿÖÜ¢£¥₧ƒ' +
+  'áíóúñÑªº¿⌐¬½¼¡«»' +
+  '░▒▓│┤╡╢╖╕╣║╗╝╜╛┐' +
+  '└┴┬├─┼╞╟╚╔╩╦╠═╬╧' +
+  '╨╤╥╙╙╘╒╓╫╪┘┌█▄▌▐▀' +
+  'αßΓπΣσμτΦΘΩδ∞φε∩' +
+  '≡±≥≤⌠⌡÷≈°∙·√ⁿ²■ ';
+
+function decodeCp437(buf: Buffer): string {
+  let out = '';
+  for (let i = 0; i < buf.length; i++) {
+    const b = buf[i];
+    if (b < 0x80) {
+      out += String.fromCharCode(b);
+    } else {
+      out += CP437_CHARS[b - 0x80] ?? String.fromCharCode(b);
+    }
+  }
+  return out;
+}
+
+function decodeEntryName(buf: Buffer, offset: number, len: number, flags: number): string {
+  const slice = buf.subarray(offset, offset + len);
+  const isBit11 = (flags & (1 << 11)) !== 0;
+  if (isBit11) {
+    return slice.toString('utf8');
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(slice);
+  } catch {
+    return decodeCp437(slice);
+  }
+}
+
+interface ZipCounter {
+  totalBytes: number;
+  totalMembers: number;
+}
+
+interface RawEntry {
+  cleanName: string;
+  isDirectory: boolean;
+  method: number;
+  expectedCrc: number;
+  compressedSize: number;
+  uncompressedSize: number;
+  localHeaderOffset: number;
+}
+
+function readZipInternal(
+  buffer: Buffer,
+  limits: ZipLimits,
+  counter: ZipCounter,
+  depth: number
+): ZipEntry[] {
   const maxBytes = limits.maxBytes ?? DEFAULT_MAX_BYTES;
   const maxMembers = limits.maxMembers ?? DEFAULT_MAX_MEMBERS;
+  const allowNested = limits.allowNested ?? true;
 
   if (buffer.length < 22) {
     throw new Error('Invalid zip file: buffer too small');
@@ -56,17 +132,12 @@ export function readZip(buffer: Buffer, limits: ZipLimits = {}): ZipEntry[] {
     throw new Error('Zip64 format is not supported');
   }
 
-  if (totalEntries > maxMembers) {
-    throw new Error(`Zip member limit exceeded: ${totalEntries} > ${maxMembers}`);
-  }
-
   if (centralDirOffset + centralDirSize > buffer.length) {
     throw new Error('Invalid zip file: Central directory out of bounds');
   }
 
-  const entries: ZipEntry[] = [];
+  const rawEntries: RawEntry[] = [];
   let cdOffset = centralDirOffset;
-  let totalUncompressed = 0;
 
   for (let i = 0; i < totalEntries; i++) {
     if (cdOffset + 46 > buffer.length) {
@@ -88,6 +159,7 @@ export function readZip(buffer: Buffer, limits: ZipLimits = {}): ZipEntry[] {
       throw new Error(`Unsupported zip compression method: ${method}`);
     }
 
+    const expectedCrc = buffer.readUInt32LE(cdOffset + 16);
     const compressedSize = buffer.readUInt32LE(cdOffset + 20);
     const uncompressedSize = buffer.readUInt32LE(cdOffset + 24);
     const fileNameLen = buffer.readUInt16LE(cdOffset + 28);
@@ -102,7 +174,7 @@ export function readZip(buffer: Buffer, limits: ZipLimits = {}): ZipEntry[] {
       throw new Error('Zip symlink entries are not allowed');
     }
 
-    const rawName = buffer.toString('utf8', cdOffset + 46, cdOffset + 46 + fileNameLen);
+    const rawName = decodeEntryName(buffer, cdOffset + 46, fileNameLen, flags);
     const cleanName = rawName.replace(/\\/g, '/');
 
     // Path security checks
@@ -117,14 +189,24 @@ export function readZip(buffer: Buffer, limits: ZipLimits = {}): ZipEntry[] {
 
     const isDirectory = cleanName.endsWith('/');
 
-    totalUncompressed += uncompressedSize;
-    if (totalUncompressed > maxBytes) {
-      throw new Error(`Zip total uncompressed size limit exceeded: ${totalUncompressed} > ${maxBytes}`);
-    }
+    rawEntries.push({
+      cleanName,
+      isDirectory,
+      method,
+      expectedCrc,
+      compressedSize,
+      uncompressedSize,
+      localHeaderOffset,
+    });
+
+    cdOffset += 46 + fileNameLen + extraLen + commentLen;
+  }
+
+  function makeZipEntry(raw: RawEntry): ZipEntry {
+    const { cleanName, isDirectory, method, expectedCrc, compressedSize, uncompressedSize, localHeaderOffset } = raw;
 
     const entryDataGetter = (): Buffer => {
-      if (uncompressedSize === 0) return Buffer.alloc(0);
-      if (localHeaderOffset + 30 > buffer.length) {
+      if (localHeaderOffset < 0 || localHeaderOffset + 30 > buffer.length) {
         throw new Error(`Invalid zip file: Local header out of bounds for ${cleanName}`);
       }
 
@@ -137,27 +219,138 @@ export function readZip(buffer: Buffer, limits: ZipLimits = {}): ZipEntry[] {
       const localExtraLen = buffer.readUInt16LE(localHeaderOffset + 28);
       const dataStart = localHeaderOffset + 30 + localFileNameLen + localExtraLen;
 
-      if (dataStart + compressedSize > buffer.length) {
+      if (
+        dataStart < localHeaderOffset + 30 ||
+        dataStart + compressedSize > buffer.length ||
+        dataStart + compressedSize < dataStart
+      ) {
         throw new Error(`Invalid zip file: Data out of bounds for ${cleanName}`);
       }
 
-      const compressedData = buffer.subarray(dataStart, dataStart + compressedSize);
-      if (method === 0) {
-        return Buffer.from(compressedData);
+      if (uncompressedSize === 0) {
+        if (compressedSize !== 0) {
+          throw new Error(`Invalid zip file: Non-zero compressed size for empty entry ${cleanName}`);
+        }
+        if (expectedCrc !== 0) {
+          throw new Error(
+            `Zip entry "${cleanName}" CRC-32 mismatch: expected 0x${expectedCrc.toString(16)}, got 0x0`
+          );
+        }
+        return Buffer.alloc(0);
       }
-      return inflateRawSync(compressedData);
+
+      const compressedData = buffer.subarray(dataStart, dataStart + compressedSize);
+      let decompressed: Buffer;
+
+      if (method === 0) {
+        if (compressedSize !== uncompressedSize) {
+          throw new Error(
+            `Zip entry "${cleanName}" stored size mismatch: compressed ${compressedSize} != uncompressed ${uncompressedSize}`
+          );
+        }
+        decompressed = Buffer.from(compressedData);
+      } else if (method === 8) {
+        try {
+          decompressed = inflateRawSync(compressedData, { maxOutputLength: uncompressedSize });
+        } catch (err) {
+          throw new Error(`Failed to decompress zip entry "${cleanName}": ${(err as Error).message}`);
+        }
+      } else {
+        throw new Error(`Unsupported zip compression method: ${method}`);
+      }
+
+      if (decompressed.length !== uncompressedSize) {
+        throw new Error(
+          `Zip entry "${cleanName}" decompressed size mismatch: expected ${uncompressedSize}, got ${decompressed.length}`
+        );
+      }
+
+      const actualCrc = computeCrc32(decompressed);
+      if (actualCrc !== expectedCrc) {
+        throw new Error(
+          `Zip entry "${cleanName}" CRC-32 mismatch: expected 0x${expectedCrc.toString(16).padStart(8, '0')}, got 0x${actualCrc.toString(16).padStart(8, '0')}`
+        );
+      }
+
+      return decompressed;
     };
 
-    entries.push({
+    return {
       name: cleanName,
       size: uncompressedSize,
       compressedSize,
       isDirectory,
       getData: entryDataGetter,
-    });
+    };
+  }
 
-    cdOffset += 46 + fileNameLen + extraLen + commentLen;
+  // Handle one level of nested ZIPs at depth === 0
+  if (depth === 0 && allowNested) {
+    const innerZipRawEntries = rawEntries.filter(
+      (e) => !e.isDirectory && e.cleanName.toLowerCase().endsWith('.zip')
+    );
+
+    if (innerZipRawEntries.length > 0) {
+      // Sort inner zips naturally so Part-1 is processed before Part-2
+      innerZipRawEntries.sort((a, b) =>
+        a.cleanName.localeCompare(b.cleanName, undefined, { numeric: true })
+      );
+
+      const nonZipRawEntries = rawEntries.filter(
+        (e) => e.isDirectory || !e.cleanName.toLowerCase().endsWith('.zip')
+      );
+
+      const resultEntries: ZipEntry[] = [];
+      for (const raw of nonZipRawEntries) {
+        counter.totalMembers++;
+        if (counter.totalMembers > maxMembers) {
+          throw new Error(`Zip member limit exceeded: ${counter.totalMembers} > ${maxMembers}`);
+        }
+        counter.totalBytes += raw.uncompressedSize;
+        if (counter.totalBytes > maxBytes) {
+          throw new Error(
+            `Zip total uncompressed size limit exceeded: ${counter.totalBytes} > ${maxBytes}`
+          );
+        }
+        resultEntries.push(makeZipEntry(raw));
+      }
+
+      for (const innerRaw of innerZipRawEntries) {
+        const innerEntry = makeZipEntry(innerRaw);
+        const innerBuf = innerEntry.getData();
+        const innerEntries = readZipInternal(innerBuf, limits, counter, depth + 1);
+        resultEntries.push(...innerEntries);
+      }
+
+      return resultEntries;
+    }
+  }
+
+  const entries: ZipEntry[] = [];
+  for (const raw of rawEntries) {
+    counter.totalMembers++;
+    if (counter.totalMembers > maxMembers) {
+      throw new Error(`Zip member limit exceeded: ${counter.totalMembers} > ${maxMembers}`);
+    }
+    counter.totalBytes += raw.uncompressedSize;
+    if (counter.totalBytes > maxBytes) {
+      throw new Error(
+        `Zip total uncompressed size limit exceeded: ${counter.totalBytes} > ${maxBytes}`
+      );
+    }
+    entries.push(makeZipEntry(raw));
   }
 
   return entries;
+}
+
+/**
+ * Reads a ZIP archive from a buffer safely.
+ * Rejects absolute paths, path traversal (..), symlinks, encryption, and Zip64.
+ * Enforces size and entry-count limits.
+ * Supports one level of nested zips, verifying maxOutputLength and CRC-32.
+ */
+export function readZip(buffer: Buffer, limits: ZipLimits = {}): ZipEntry[] {
+  const counter: ZipCounter = { totalBytes: 0, totalMembers: 0 };
+  return readZipInternal(buffer, limits, counter, 0);
 }

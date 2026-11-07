@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { crc32 } from 'node:zlib';
+import { crc32, deflateRawSync } from 'node:zlib';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -23,38 +23,52 @@ import { readZip } from '../src/adapters/zip.ts';
 const SECRET_MARKER = 'SECRET_ANDRES_UNPUBLISHED_NOVEL_PROSE_MARKER_998877';
 const SECRET_CELL = 'SECRET_CSV_CELL_VALUE_112233';
 
-function buildSyntheticZip(entries: { name: string; content: string | Buffer }[]): Buffer {
+interface SyntheticZipEntry {
+  name: string;
+  content: string | Buffer;
+  method?: number;
+  declaredUncompressedSize?: number;
+  overrideCrc?: number;
+  flags?: number;
+}
+
+function buildSyntheticZip(entries: SyntheticZipEntry[]): Buffer {
   const localChunks: Buffer[] = [];
   const cdChunks: Buffer[] = [];
   let offset = 0;
 
   for (const entry of entries) {
     const nameBuf = Buffer.from(entry.name, 'utf8');
-    const dataBuf = Buffer.isBuffer(entry.content) ? entry.content : Buffer.from(entry.content, 'utf8');
-    const crc = crc32(dataBuf);
+    const rawData = Buffer.isBuffer(entry.content) ? entry.content : Buffer.from(entry.content, 'utf8');
+    const method = entry.method ?? 0;
+    const compressedData = method === 8 ? deflateRawSync(rawData) : rawData;
+    const uncompressedSize = entry.declaredUncompressedSize ?? rawData.length;
+    const compressedSize = compressedData.length;
+    const crc = entry.overrideCrc ?? crc32(rawData);
+    const flags = entry.flags ?? 0;
 
     const lh = Buffer.alloc(30);
     lh.writeUInt32LE(0x04034b50, 0);
     lh.writeUInt16LE(20, 4);
-    lh.writeUInt16LE(0, 6);
-    lh.writeUInt16LE(0, 8); // method 0 = store
+    lh.writeUInt16LE(flags, 6);
+    lh.writeUInt16LE(method, 8);
     lh.writeUInt32LE(crc, 14);
-    lh.writeUInt32LE(dataBuf.length, 18);
-    lh.writeUInt32LE(dataBuf.length, 22);
+    lh.writeUInt32LE(compressedSize, 18);
+    lh.writeUInt32LE(uncompressedSize, 22);
     lh.writeUInt16LE(nameBuf.length, 26);
     lh.writeUInt16LE(0, 28);
 
-    localChunks.push(lh, nameBuf, dataBuf);
+    localChunks.push(lh, nameBuf, compressedData);
 
     const cd = Buffer.alloc(46);
     cd.writeUInt32LE(0x02014b50, 0);
     cd.writeUInt16LE(20, 4);
     cd.writeUInt16LE(20, 6);
-    cd.writeUInt16LE(0, 8);
-    cd.writeUInt16LE(0, 10);
+    cd.writeUInt16LE(flags, 8);
+    cd.writeUInt16LE(method, 10);
     cd.writeUInt32LE(crc, 16);
-    cd.writeUInt32LE(dataBuf.length, 20);
-    cd.writeUInt32LE(dataBuf.length, 24);
+    cd.writeUInt32LE(compressedSize, 20);
+    cd.writeUInt32LE(uncompressedSize, 24);
     cd.writeUInt16LE(nameBuf.length, 28);
     cd.writeUInt16LE(0, 30);
     cd.writeUInt16LE(0, 32);
@@ -64,7 +78,7 @@ function buildSyntheticZip(entries: { name: string; content: string | Buffer }[]
     cd.writeUInt32LE(offset, 42);
 
     cdChunks.push(cd, nameBuf);
-    offset += 30 + nameBuf.length + dataBuf.length;
+    offset += 30 + nameBuf.length + compressedData.length;
   }
 
   const cdTotalSize = cdChunks.reduce((acc, c) => acc + c.length, 0);
@@ -406,6 +420,198 @@ test('import-notion CLI imports from zip and reports missing page in refused', (
   assert.equal(run.json.refused.length, 1);
   assert.equal(run.json.refused[0].title, 'Capítulo Perdido');
   assert.match(run.json.refused[0].reason, /missing page file in Notion export/i);
+});
+
+test('a crafted member whose real inflated size exceeds the declared size is refused without allocating beyond the limit', () => {
+  // 50 KB of repeating data deflates to a few dozen bytes, but declares 100 bytes
+  const largeData = Buffer.alloc(50000, 0x61); // 50 KB of 'a'
+  const zipBuf = buildSyntheticZip([
+    {
+      name: 'bomb.txt',
+      content: largeData,
+      method: 8,
+      declaredUncompressedSize: 100, // declares 100 bytes, real size is 50,000 bytes
+    },
+  ]);
+
+  const entries = readZip(zipBuf);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].size, 100);
+  assert.throws(
+    () => entries[0].getData(),
+    /(decompressed size mismatch|Cannot create a Buffer larger than|Failed to decompress)/i
+  );
+});
+
+test('CRC mismatch refused', () => {
+  const zipBuf = buildSyntheticZip([
+    {
+      name: 'corrupted.txt',
+      content: 'hello world',
+      overrideCrc: 0x12345678,
+    },
+  ]);
+
+  const entries = readZip(zipBuf);
+  assert.equal(entries.length, 1);
+  assert.throws(
+    () => entries[0].getData(),
+    /CRC-32 mismatch/i
+  );
+});
+
+test('nested Part-1/Part-2 export imported in order', () => {
+  const csv = [
+    'Título,Orden,Libro',
+    'Capítulo 1,1,Libro Dividido',
+    'Capítulo 2,2,Libro Dividido',
+  ].join('\n');
+
+  const page1 = '# Capítulo 1\n\nOrden: 1\nLibro: Libro Dividido\n\nTexto del primer capítulo.\n';
+  const page2 = '# Capítulo 2\n\nOrden: 2\nLibro: Libro Dividido\n\nTexto del segundo capítulo.\n';
+
+  // Part 1 contains the CSV and Chapter 1
+  const part1Zip = buildSyntheticZip([
+    { name: 'Capítulos 11111111111111111111111111111111.csv', content: csv },
+    { name: 'Capítulo 1 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d.md', content: page1 },
+  ]);
+
+  // Part 2 contains Chapter 2
+  const part2Zip = buildSyntheticZip([
+    { name: 'Capítulo 2 9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c.md', content: page2 },
+  ]);
+
+  // Outer zip containing both parts
+  const outerZip = buildSyntheticZip([
+    { name: 'Export-uuid-Part-1.zip', content: part1Zip },
+    { name: 'Export-uuid-Part-2.zip', content: part2Zip },
+  ]);
+
+  const zipPath = join(tempDir(), 'nested-export.zip');
+  writeFileSync(zipPath, outerZip);
+
+  const bookDir = join(tempDir(), 'nested-book');
+  const { project } = Project.init(bookDir, 'Libro Dividido');
+
+  const mapping: NotionMapping = {
+    database: 'Capítulos.csv',
+    titleColumn: 'Título',
+    orderColumn: 'Orden',
+  };
+
+  const { chapters, missing } = loadNotionChapters(zipPath, mapping);
+  assert.equal(missing.length, 0);
+  assert.equal(chapters.length, 2);
+  assert.equal(chapters[0].title, 'Capítulo 1');
+  assert.equal(chapters[1].title, 'Capítulo 2');
+
+  const result = importBook(project, chapters);
+  assert.equal(result.imported.length, 2);
+  assert.deepEqual(project.scenes(), [
+    'scenes/001-capitulo-1.md',
+    'scenes/002-capitulo-2.md',
+  ]);
+  assert.match(project.readScene('scenes/001-capitulo-1.md')!, /Texto del primer capítulo/);
+  assert.match(project.readScene('scenes/002-capitulo-2.md')!, /Texto del segundo capítulo/);
+});
+
+test('_all.csv preferred', () => {
+  // View CSV with only 1 chapter
+  const viewCsv = [
+    'Título,Orden',
+    'Capítulo 1,1',
+  ].join('\n');
+
+  // _all CSV with all 2 chapters
+  const allCsv = [
+    'Título,Orden',
+    'Capítulo 1,1',
+    'Capítulo 2,2',
+  ].join('\n');
+
+  const page1 = '# Capítulo 1\n\nProsa del uno.\n';
+  const page2 = '# Capítulo 2\n\nProsa del dos.\n';
+
+  const zipBuf = buildSyntheticZip([
+    { name: 'Capítulos 11111111111111111111111111111111.csv', content: viewCsv },
+    { name: 'Capítulos 11111111111111111111111111111111_all.csv', content: allCsv },
+    { name: 'Capítulo 1 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d.md', content: page1 },
+    { name: 'Capítulo 2 9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c.md', content: page2 },
+  ]);
+
+  const zipPath = join(tempDir(), 'all-csv-export.zip');
+  writeFileSync(zipPath, zipBuf);
+
+  const mapping: NotionMapping = {
+    database: 'Capítulos.csv',
+    titleColumn: 'Título',
+    orderColumn: 'Orden',
+  };
+
+  const { chapters } = loadNotionChapters(zipPath, mapping);
+  // Prefers _all.csv, so it loads both chapters, not just the single one from view CSV
+  assert.equal(chapters.length, 2);
+  assert.equal(chapters[0].title, 'Capítulo 1');
+  assert.equal(chapters[1].title, 'Capítulo 2');
+});
+
+test('names with accents and spaces', () => {
+  const csv = [
+    'Título,Orden',
+    'El Sueño del Pescador,1',
+    'La Noche Más Oscura,2',
+  ].join('\n');
+
+  const page1 = '# El Sueño del Pescador\n\nTexto sobre el sueño con acentos y eñes: cigüeña y camión.\n';
+  const page2 = '# La Noche Más Oscura\n\nTexto de la noche.\n';
+
+  const zipBuf = buildSyntheticZip([
+    {
+      name: 'Capítulos y Escenas.csv',
+      content: csv,
+      flags: 0x0800, // UTF-8 language encoding flag (bit 11)
+    },
+    {
+      name: 'El Sueño del Pescador 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d.md',
+      content: page1,
+      flags: 0x0800,
+    },
+    {
+      name: 'La Noche Más Oscura 9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c.md',
+      content: page2,
+      flags: 0x0800,
+    },
+  ]);
+
+  const zipPath = join(tempDir(), 'accents-export.zip');
+  writeFileSync(zipPath, zipBuf);
+
+  // Inspection safely detects accented database and pages
+  const report = inspectNotion(zipPath);
+  assert.equal(report.databases.length, 1);
+  assert.equal(report.databases[0].name, 'Capítulos y Escenas.csv');
+  assert.equal(report.pages.length, 2);
+
+  const bookDir = join(tempDir(), 'accents-book');
+  const { project } = Project.init(bookDir, 'Novela con Acentos');
+
+  const mapping: NotionMapping = {
+    database: 'Capítulos y Escenas.csv',
+    titleColumn: 'Título',
+    orderColumn: 'Orden',
+  };
+
+  const { chapters } = loadNotionChapters(zipPath, mapping);
+  assert.equal(chapters.length, 2);
+  assert.equal(chapters[0].title, 'El Sueño del Pescador');
+
+  const result = importBook(project, chapters);
+  assert.equal(result.imported.length, 2);
+  assert.deepEqual(project.scenes(), [
+    'scenes/001-el-sueno-del-pescador.md',
+    'scenes/002-la-noche-mas-oscura.md',
+  ]);
+  assert.match(project.readScene('scenes/001-el-sueno-del-pescador.md')!, /cigüeña y camión/);
 });
 
 const ROOT_DIR = join(import.meta.dirname, '..');

@@ -63,13 +63,31 @@ export function loadNotionExportFiles(sourcePath: string): NotionExportFile[] {
         if (entry.isDirectory()) {
           walk(fullPath);
         } else if (entry.isFile()) {
-          const relName = relative(sourcePath, fullPath).replace(/\\/g, '/');
-          const size = statSync(fullPath).size;
-          results.push({
-            name: relName,
-            size,
-            readText: () => readFileSync(fullPath, 'utf8'),
-          });
+          if (entry.name.toLowerCase().endsWith('.zip')) {
+            try {
+              const zipBuf = readFileSync(fullPath);
+              const zEntries = readZip(zipBuf);
+              for (const ze of zEntries) {
+                if (!ze.isDirectory) {
+                  results.push({
+                    name: ze.name,
+                    size: ze.size,
+                    readText: () => ze.getData().toString('utf8'),
+                  });
+                }
+              }
+            } catch {
+              // ignore invalid zip in folder
+            }
+          } else {
+            const relName = relative(sourcePath, fullPath).replace(/\\/g, '/');
+            const size = statSync(fullPath).size;
+            results.push({
+              name: relName,
+              size,
+              readText: () => readFileSync(fullPath, 'utf8'),
+            });
+          }
         }
       }
     };
@@ -200,9 +218,19 @@ export function stripNotionPropertyHeader(markdown: string): string {
     i++;
   }
 
+  let seenProperty = false;
   while (i < lines.length) {
     const trimmed = lines[i].trim();
     if (!trimmed) {
+      if (seenProperty) {
+        // End of property block if followed by blank lines or divider
+        let next = i + 1;
+        while (next < lines.length && !lines[next].trim()) next++;
+        if (next < lines.length && (lines[next].trim() === '---' || lines[next].trim() === '***')) {
+          i = next + 1;
+        }
+        break;
+      }
       i++;
       continue;
     }
@@ -210,8 +238,11 @@ export function stripNotionPropertyHeader(markdown: string): string {
       i++;
       break;
     }
-    // Property line: "Prop: val" or "- Prop: val" or "* Prop: val"
-    if (/^(?:[-*]\s+)?[A-Za-z0-9\u00C0-\u024F _-]+:\s*.*/.test(trimmed)) {
+    // Property line: short key (up to 32 chars) followed by colon:
+    // e.g. "Prop: val" or "- Prop: val" or "* Prop: val"
+    const propMatch = trimmed.match(/^(?:[-*]\s+)?([A-Za-z0-9\u00C0-\u024F _-]{1,32}):\s*(.*)$/);
+    if (propMatch) {
+      seenProperty = true;
       i++;
       continue;
     }
@@ -350,24 +381,80 @@ export function findNotionPageFile(title: string, files: NotionExportFile[]): No
 }
 
 /**
+ * Finds the database CSV file in Notion export files.
+ * Supports matching by exact name, normalized name, prefix, or 32-hex ID pattern.
+ * If both `<name> <id>.csv` and `<name> <id>_all.csv` exist, prefers `_all.csv`.
+ */
+export function findNotionDatabaseFile(
+  mappingDb: string,
+  files: NotionExportFile[]
+): NotionExportFile | undefined {
+  const csvFiles = files.filter((f) => f.name.toLowerCase().endsWith('.csv'));
+  if (csvFiles.length === 0) return undefined;
+
+  const target = mappingDb.trim();
+  const targetBase = basename(target).toLowerCase();
+  const targetNoCsv = targetBase.replace(/\.csv$/i, '');
+  const targetClean = targetNoCsv.replace(/\s+[0-9a-fA-F]{32}(?:_all)?$/i, '').trim();
+  const targetSlug = normalizeTitle(targetClean);
+
+  const scored: { file: NotionExportFile; score: number; isAll: boolean }[] = [];
+
+  for (const f of csvFiles) {
+    const fBase = basename(f.name);
+    const fBaseLower = fBase.toLowerCase();
+    const fBaseNoCsv = fBaseLower.replace(/\.csv$/i, '');
+    const isAll = fBaseNoCsv.endsWith('_all');
+    const fWithoutAll = isAll ? fBaseNoCsv.slice(0, -4).trim() : fBaseNoCsv;
+    const fClean = fWithoutAll.replace(/\s+[0-9a-fA-F]{32}$/i, '').trim();
+    const fSlug = normalizeTitle(fClean);
+
+    let score = -1;
+
+    if (fBaseLower === targetBase || fBaseLower === `${targetBase}.csv`) {
+      score = 100;
+    } else if (fBaseNoCsv === targetNoCsv || fWithoutAll === targetNoCsv) {
+      score = 90;
+    } else if (fClean === targetClean) {
+      score = 80;
+    } else if (targetSlug && fSlug === targetSlug) {
+      score = 70;
+    } else if (targetClean && fClean.startsWith(targetClean)) {
+      score = 60;
+    } else if (targetClean && fBaseLower.startsWith(targetClean)) {
+      score = 50;
+    }
+
+    if (score > 0) {
+      scored.push({ file: f, score, isAll });
+    }
+  }
+
+  if (scored.length === 0) {
+    return undefined;
+  }
+
+  // Sort candidates:
+  // 1. Prefer _all.csv when both exist
+  // 2. Highest match score
+  scored.sort((a, b) => {
+    if (a.isAll !== b.isAll) {
+      return a.isAll ? -1 : 1;
+    }
+    return b.score - a.score;
+  });
+
+  return scored[0].file;
+}
+
+/**
  * Loads chapters from a Notion export according to a declarative mapping.
  */
 export function loadNotionChapters(sourcePath: string, mapping: NotionMapping): LoadedNotionExport {
   const files = loadNotionExportFiles(sourcePath);
 
-  // Find the database CSV
-  const dbPattern = mapping.database.toLowerCase();
-  const dbFile = files.find((f) => {
-    const lower = f.name.toLowerCase();
-    const baseLower = basename(f.name).toLowerCase();
-    return (
-      baseLower === dbPattern ||
-      baseLower === `${dbPattern}.csv` ||
-      lower.endsWith(`/${dbPattern}`) ||
-      lower.endsWith(`/${dbPattern}.csv`) ||
-      baseLower.startsWith(dbPattern)
-    );
-  });
+  // Find the database CSV, preferring _all.csv when pairs exist
+  const dbFile = findNotionDatabaseFile(mapping.database, files);
 
   if (!dbFile) {
     throw new Error(`Database CSV not found in Notion export: "${mapping.database}"`);

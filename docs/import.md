@@ -6,9 +6,9 @@ This guide explains how to import novels and manuscripts into RE;write from a No
 
 ---
 
-## 1. For Writers (e.g. Andrés): Exporting and Inspecting
+## 1. For Writers (e.g. Andrés): Exporting from Notion
 
-Non-programmers can export their books from Notion in seconds without sharing their prose before a mapping is configured.
+Writers do not need to install Node, run command-line tools, or configure JSON files. The writer simply exports their workspace from Notion and delivers the downloaded archive to the editorial team (or uploads it once the web import interface is live).
 
 ### Step 1: Export from Notion
 
@@ -21,27 +21,43 @@ Non-programmers can export their books from Notion in seconds without sharing th
    - **Include subpages**: Enabled
 5. Click **Export**. Notion will generate and download a `.zip` file (e.g. `Export-xxxxxxxx.zip`).
 
-### Step 2: Inspect the Export Safely
+#### Nested ZIP Parts
+When a manuscript or workspace is large, Notion's export often produces an outer `.zip` file that contains one or more inner part zips (such as `Export-<uuid>-Part-1.zip` and `Export-<uuid>-Part-2.zip`).
 
-Before sending anything, you can safely inspect what databases and pages are inside:
+**You do not need to unzip, re-compress, or reorganize anything.** Send the single downloaded zip file as-is. RE;write automatically detects and unpacks nested zip parts in order.
+
+### Step 2: Send the ZIP File
+
+Send the downloaded `.zip` file to Fran or the engineering team (or upload it directly once the web import interface exists). Your text remains safe, and the editorial team will handle inspection, mapping, and import.
+
+---
+
+## 2. For Operators (e.g. Fran): Inspecting, Mapping, and Importing
+
+Operators use the RE;write CLI to inspect the archive safely, create a declarative mapping, preview with a dry run, and import chapters into the book's repository.
+
+### Step 1: Inspect the Export Safely
+
+Run `notion-inspect` on the export zip (or unzipped folder):
 
 ```bash
 rewrite notion-inspect /path/to/Export.zip
 ```
 
-*(You can also run this against an unzipped folder).*
-
-#### Your Manuscript Stays Private
-- The inspection **never prints your text, story, or cell values**.
-- It only prints database CSV filenames, column headers, row counts, and page filenames with byte sizes.
-- The zip reader is strictly read-only and validates file paths safely.
+#### Safe and Private Inspection
+- **Your manuscript stays private**: The inspection **never prints novel text, story prose, or database cell values**.
+- It only reports database CSV filenames, column headers, row counts, and page filenames with byte sizes.
+- **Nested zips**: If the archive contains nested parts (`Part-1.zip`, `Part-2.zip`), `notion-inspect` traverses inner zips automatically.
+- **CSV Pairs (`_all.csv`)**: Notion exports database views as pairs: `<name> <id>.csv` (the active view) and `<name> <id>_all.csv` (the full database). Both are listed so you can see the complete row count.
 
 Sample output:
 
 ```text
 Notion export: /path/to/Export.zip
-Databases (1):
-  Capítulos.csv (12 rows)
+Databases (2):
+  Capítulos 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d.csv (10 rows)
+    Columns: Título, Orden, Libro, Estado, Notas
+  Capítulos 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d_all.csv (12 rows)
     Columns: Título, Orden, Libro, Estado, Notas
 Pages (12):
   El Faro 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d.md (4,320 bytes)
@@ -49,13 +65,7 @@ Pages (12):
   ...
 ```
 
-Notice that not a single sentence of your novel appears. Send this inspection summary (or output of `--json`) to Fran so the mapping can be created.
-
----
-
-## 2. For Operators (e.g. Fran): Writing a Mapping and Importing
-
-### Declarative Mapping
+### Step 2: Configure Declarative Mapping
 
 A mapping tells RE;write which database CSV defines the chapters and which columns to use. Example ([`tests/fixtures/import/example-mapping.json`](../tests/fixtures/import/example-mapping.json)):
 
@@ -72,27 +82,21 @@ A mapping tells RE;write which database CSV defines the chapters and which colum
 ```
 
 #### Mapping Fields
-
 - `database`: Name of the CSV file in the export (e.g. `"Capítulos.csv"` or `"Capítulos"`).
-- `titleColumn`: *(Optional)* Column containing the chapter title (e.g. `"Título"`, `"Title"`). If omitted, RE;write looks for common title names or falls back to the first column.
+  - **`_all.csv` preference**: When both `<name> <id>.csv` and `<name> <id>_all.csv` exist in the export, RE;write automatically prefers `_all.csv` to capture the complete database without requiring you to type the 32-hex ID.
+- `titleColumn`: *(Optional)* Column containing chapter titles (e.g. `"Título"`, `"Title"`). If omitted, RE;write looks for common title names or falls back to the first column.
 - `orderColumn`: *(Optional)* Column containing chapter sequence numbers. If omitted or blank, falls back to the 1-based CSV row order.
 - `filter`: *(Optional)* Filter by another column (e.g. if one database holds chapters for multiple books: `{ "column": "Libro", "value": "El Mar del Norte" }`).
 
-### Notion Page File Matching & Header Stripping
-
-- Notion names exported Markdown files using `<Title> <32-hex-id>.md` (for example, `El Faro 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d.md`). RE;write matches pages by title and ID.
-- Notion adds property tables or metadata blocks at the top of page exports (e.g. `Orden: 1`, `Estado: Listo`). RE;write strips these export artefacts cleanly while keeping the `# Title` heading and the story prose.
-- If a chapter row in the CSV has no matching Markdown file in the export, it is reported under `refused` as a missing page, without interrupting the other chapters.
-
 ### Step 3: Dry Run
 
-Always run a dry run first to verify titles, order, and sizes without modifying the book repository:
+Always run a dry run first to verify chapter titles, sequence order, and page file matching without modifying the book repository:
 
 ```bash
 rewrite import-notion /path/to/book /path/to/Export.zip --mapping mapping.json --dry-run
 ```
 
-Output:
+Sample output:
 
 ```text
 dry run: 2 chapters in /path/to/Export.zip
@@ -108,15 +112,25 @@ Run the import without `--dry-run`:
 rewrite import-notion /path/to/book /path/to/Export.zip --mapping mapping.json
 ```
 
-Output:
+Sample output:
 
 ```text
 imported: scenes/001-el-faro.md, scenes/002-la-niebla.md; unchanged: none; refused: none
 ```
 
-### Idempotency & Safety
+---
 
-- **Stable zero-padded filenames**: Chapters are written to `scenes/001-el-faro.md`, `scenes/002-la-niebla.md`.
-- **Idempotent**: Re-running the import with the same export produces zero changes (`unchanged: scenes/...`) and does not create unnecessary git commits.
-- **Refuses changed chapters**: If a scene already exists in RE;write with different text (for example, revised by an editor), RE;write refuses to overwrite it, leaving the existing file completely untouched and reporting it under `refused:`.
-- **Safe Zip extraction**: The internal zip reader strictly refuses absolute paths, directory traversal (`..`), symlinks, and encryption.
+## 3. Idempotency and Security Guarantees
+
+- **Nested ZIP Support**: Supports one level of inner ZIPs (`Part-1.zip`, `Part-2.zip`) in natural order, sharing the total size and member limits.
+- **Zip Bomb & Archive Hardening**:
+  - Inflates deflated entries with `maxOutputLength` matching declared size to prevent decompression expansion attacks.
+  - Refuses members where output length differs from declared uncompressed size.
+  - Verifies CRC-32 checksums from central directory headers on every decompressed entry.
+  - Validates local file header signatures and ensures local header name and extra fields keep data offsets safely within buffer boundaries.
+  - Rejects absolute paths, directory traversal (`..`), symlinks, and encryption.
+- **UTF-8 Name Handling**: Respects general purpose flag bit 11 (Language Encoding Flag) for UTF-8 filenames, supporting accented titles and special characters (`á`, `é`, `í`, `ó`, `ú`, `ñ`) seamlessly.
+- **Header Stripping**: Cleans Notion property metadata tables at the top of markdown files while preserving `# Title` headers and body prose (even paragraphs containing colons).
+- **Stable Scene Naming**: Generates zero-padded, slugified filenames (`scenes/001-el-faro.md`).
+- **Idempotent**: Re-running the import with the same export produces zero changes (`unchanged: scenes/...`) without creating extra commits.
+- **Refuses Changed Chapters**: If a scene file already exists in RE;write with different text (e.g. edited by an author or reviewer), RE;write refuses to overwrite it, reporting it under `refused:` and keeping disk state intact.
