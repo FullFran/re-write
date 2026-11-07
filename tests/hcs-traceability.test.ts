@@ -137,3 +137,16 @@ test('CLI rejects map validation errors in write and check modes without changin
     }
   }
 });
+
+
+test('rejects malformed map shapes and duplicate requirement ids', () => {
+  for (const map of [null, [], {}, { documents: null, requirements: {} },
+    { documents: { 'HCS-9999': null }, requirements: {} },
+    { documents: { 'HCS-9999': { status: 'unknown' } }, requirements: {} },
+    { documents: { 'HCS-9999': { status: 'planned', issue: -1, code: [4] } }, requirements: {} }]) {
+    const result = generateTraceability([requirements[0]], map as never, pin);
+    assert.ok(result.errors.length > 0, JSON.stringify(map));
+  }
+  const result = generateTraceability([requirements[0], requirements[0]], { documents: { 'HCS-9999': { status: 'planned', issue: 25 } }, requirements: {} }, pin);
+  assert.ok(result.errors.some((error) => /duplicate.*HCS-9999-R001/i.test(error)));
+});
