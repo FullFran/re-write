@@ -1,0 +1,116 @@
+import { createHash, randomBytes } from 'node:crypto';
+import { chmodSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, posix } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { gzipSync, gunzipSync } from 'node:zlib';
+import { HcsFailure, hcsError } from './errors.ts';
+import { readTar, writeTar, TarUnsafeNameError, type TarInput } from './tar.ts';
+
+export interface PackageExpected { size: number; contentHash: string }
+export interface PackageLimits { maxBytes?: number; maxMembers?: number }
+const mediaType = 'application/vnd.oci.image.layer.v1.tar+gzip';
+const hashPattern = /^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128})$/;
+function failure(message: string): never { throw new HcsFailure([hcsError('integrity_mismatch', message, { requirement: 'HCS-0001-R007' })]); }
+function unsafe(name: string, reason: string): never {
+  throw new HcsFailure([hcsError('integrity_mismatch', 'Unsafe archive member', { details: { 'x-rewrite-archive': 'unsafe-member', 'x-rewrite-member': name, 'x-rewrite-reason': reason } })]);
+}
+export function buildPackage(dir: string) {
+  const members: TarInput[] = [];
+  function walk(path: string, prefix: string) {
+    for (const name of readdirSync(path)) {
+      const full = join(path, name), relative = prefix ? `${prefix}/${name}` : name;
+      const stat = lstatSync(full);
+      if (stat.isDirectory()) { members.push({ name: relative, type: 'directory' }); walk(full, relative); }
+      else if (stat.isFile()) members.push({ name: relative, data: readFileSync(full) });
+      else throw new Error(`Unsupported source member: ${relative}`);
+    }
+  }
+  if (!lstatSync(dir).isDirectory()) throw new Error('Package source must be a directory');
+  walk(dir, ''); const bytes = gzipSync(writeTar(members), { level: 9 });
+  return { bytes, contentHash: `sha256:${createHash('sha256').update(bytes).digest('hex')}`, size: bytes.length, mediaType };
+}
+export function verifyPackage(bytes: Uint8Array, expected: PackageExpected): void {
+  if (bytes.length !== expected.size) failure('Package size does not match');
+  if (!hashPattern.test(expected.contentHash)) failure('Invalid package content hash');
+  const [algorithm, digest] = expected.contentHash.split(':');
+  if (createHash(algorithm).update(bytes).digest('hex') !== digest) failure('Package digest does not match');
+}
+export function sealTree(dir: string): void {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) sealTree(path);
+    else if (entry.isFile()) chmodSync(path, 0o444);
+    else throw new Error('Cannot seal non-regular member');
+  }
+  chmodSync(dir, 0o555);
+}
+// lstat, not existsSync: a dangling symlink at the target must also count as taken.
+function taken(path: string): boolean {
+  try { lstatSync(path); return true; } catch (error: any) { if (error.code === 'ENOENT') return false; throw error; }
+}
+function unsealTree(dir: string): void {
+  chmodSync(dir, 0o700);
+  for (const entry of readdirSync(dir, { withFileTypes: true })) if (entry.isDirectory()) unsealTree(join(dir, entry.name));
+}
+export function unpackPackage(bytes: Uint8Array, expected: PackageExpected, targetDir: string, limits: PackageLimits = {}): void {
+  verifyPackage(bytes, expected);
+  const maxBytes = limits.maxBytes ?? 256 * 1024 * 1024, maxMembers = limits.maxMembers ?? 10000;
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || !Number.isSafeInteger(maxMembers) || maxMembers < 0) throw new RangeError('Invalid package limits');
+  if (taken(targetDir)) throw new Error('Package target already exists');
+  // Allow each member a header and up to one padding block, plus the terminator.
+  const cap = Math.min(maxBytes + maxMembers * 1023 + 1024, 0x7fffffff);
+  let members: ReturnType<typeof readTar>;
+  try { members = readTar(gunzipSync(bytes, { maxOutputLength: Math.max(1, cap) })); }
+  catch (error) {
+    if (error instanceof TarUnsafeNameError) unsafe(error.memberName, 'invalid path');
+    throw error;
+  }
+  if (members.length > maxMembers) throw new Error('Package member limit exceeded');
+  let total = 0; const names = new Set<string>();
+  for (const member of members) {
+    const name = member.name;
+    if (!name || name.startsWith('/') || name.includes('\\') || name.includes('\0') || name.split('/').includes('..')) unsafe(name, 'invalid path');
+    const normalized = posix.normalize(name).replace(/\/$/, '');
+    if (!normalized || normalized === '.' || names.has(normalized)) unsafe(name, 'duplicate or empty path');
+    names.add(normalized);
+    if (name.split('/').some(part => part.startsWith('.wh.'))) unsafe(name, 'whiteout');
+    if (member.type !== '0' && member.type !== '5') unsafe(name, 'unsupported type');
+    if (member.type === '5' && member.size !== 0) unsafe(name, 'directory data');
+    total += member.size; if (total > maxBytes) throw new Error('Package size limit exceeded');
+  }
+  const partial = `${targetDir}.partial-${randomBytes(16).toString('hex')}`;
+  mkdirSync(partial, { mode: 0o700 });
+  try {
+    for (const member of members) {
+      const dest = join(partial, member.name);
+      if (member.type === '5') mkdirSync(dest, { recursive: true });
+      else { mkdirSync(dirname(dest), { recursive: true }); writeFileSync(dest, member.data, { flag: 'wx' }); }
+    }
+    sealTree(partial);
+    // Callers that share a state directory serialize through the host lock (#29), so no writer races this check.
+    if (taken(targetDir)) throw new Error('Package target already exists');
+    renameSync(partial, targetDir);
+  } catch (error) { unsealTree(partial); rmSync(partial, { recursive: true, force: true }); throw error; }
+}
+export async function fetchPackageBytes(entry: PackageExpected & { locations?: string[] }, options: { storeDir: string }): Promise<Buffer> {
+  if (!hashPattern.test(entry.contentHash)) throw new Error('Invalid package content hash');
+  const [algorithm, digest] = entry.contentHash.split(':');
+  try { return readFileSync(join(options.storeDir, algorithm, digest)); } catch (error: any) { if (error.code !== 'ENOENT') throw error; }
+  let lastError: unknown = new Error('No package location available');
+  for (const location of entry.locations ?? []) {
+    try {
+      const url = new URL(location);
+      if (url.protocol === 'file:') return readFileSync(fileURLToPath(url));
+      if (url.protocol !== 'https:') throw new Error('Unsupported package location');
+      const controller = new AbortController();
+      try {
+        const response = await fetch(url, { signal: controller.signal, redirect: 'error' });
+        if (!response.ok || !response.body) throw new Error(`Package fetch failed: ${response.status}`);
+        const chunks: Buffer[] = []; let length = 0;
+        for await (const chunk of response.body) { length += chunk.length; if (length > entry.size) { controller.abort(); throw new Error('Package download exceeds expected size'); } chunks.push(Buffer.from(chunk)); }
+        return Buffer.concat(chunks, length);
+      } finally { controller.abort(); }
+    } catch (error) { lastError = error; }
+  }
+  throw lastError;
+}

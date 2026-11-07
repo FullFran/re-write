@@ -44,6 +44,7 @@ rewrite review-proposal /tmp/book <proposal-id> accept --by "your name"
 
 | Command | What it does |
 | --- | --- |
+| `package <dir> [--out <file>] [--json]` | Builds a deterministic package archive; defaults to `<dir-basename>.tar.gz` in the current directory |
 | `init <dir> [--title]` | Creates a book repository, or opens an existing one |
 | `import <dir> <scene.md>...` | Copies scenes in and commits them; refuses to overwrite different text |
 | `read <dir> <scenes/file.md>` | Prints a scene |
