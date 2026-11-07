@@ -1,8 +1,15 @@
 import { shortHash, type ClaimView } from './claim.ts';
 
 export type Classification = 'possible_contradiction' | 'insufficient_evidence';
-export const VERDICTS = ['confirmed', 'deliberate_mystery', 'false_positive'] as const;
+export const VERDICTS = ['confirmed', 'deliberate_mystery', 'false_positive', 'useful', 'noise'] as const;
 export type VerdictKind = (typeof VERDICTS)[number];
+
+export interface VerdictHistoryEntry {
+  verdict: VerdictKind;
+  by: string;
+  at: string;
+  note?: string;
+}
 
 export interface Verdict {
   finding_id: string;
@@ -10,6 +17,7 @@ export interface Verdict {
   by: string;
   at: string;
   note?: string;
+  history?: VerdictHistoryEntry[];
 }
 
 export interface Citation {

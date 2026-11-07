@@ -8,7 +8,7 @@ import {
   claimId, EPISTEMIC_KINDS, isCanon, nextEditorialStatus,
   type Claim, type ClaimCandidate, type ClaimView, type Decision,
 } from '../domain/claim.ts';
-import { inspectContinuity, type Finding, type Verdict, type VerdictKind } from '../domain/continuity.ts';
+import { inspectContinuity, type Finding, type Verdict, type VerdictHistoryEntry, type VerdictKind } from '../domain/continuity.ts';
 import { applyChange, proposalId, type Proposal } from '../domain/proposal.ts';
 import {
   findingId, viewFinding,
@@ -222,11 +222,18 @@ export class Project {
   }
 
   /** Everything a reviewer needs for one book, recomputed from the text on each read. */
-  reviewQueue(): { claims: ClaimView[]; canon: ClaimView[]; findings: Finding[]; proposals: ReturnType<Project['showProposal']>[] } {
+  reviewQueue(): {
+    claims: ClaimView[];
+    canon: ClaimView[];
+    findings: Finding[];
+    finding_views: FindingView[];
+    proposals: ReturnType<Project['showProposal']>[];
+  } {
     return {
       claims: this.claimViews(),
       canon: this.canon(),
       findings: this.check(),
+      finding_views: this.findingViews(),
       proposals: this.proposals.all().map((p) => this.showProposal(p.proposal_id)),
     };
   }
@@ -240,8 +247,27 @@ export class Project {
   }
 
   reviewFinding(id: string, verdict: VerdictKind, by: string, note?: string): Verdict {
-    if (!this.check().some((finding) => finding.finding_id === id)) throw new Error(`unknown finding: ${id}`);
-    const record: Verdict = { finding_id: id, verdict, by, at: new Date().toISOString(), ...(note ? { note } : {}) };
+    const isContinuity = this.check().some((finding) => finding.finding_id === id);
+    const isNarrative = this.findings.get(id) !== null;
+    if (!isContinuity && !isNarrative) throw new Error(`unknown finding: ${id}`);
+    const existing = this.verdicts.get(id);
+    const history: VerdictHistoryEntry[] = existing?.history ? [...existing.history] : [];
+    if (existing) {
+      history.push({
+        verdict: existing.verdict,
+        by: existing.by,
+        at: existing.at,
+        ...(existing.note ? { note: existing.note } : {}),
+      });
+    }
+    const record: Verdict = {
+      finding_id: id,
+      verdict,
+      by,
+      at: new Date().toISOString(),
+      ...(note ? { note } : {}),
+      ...(history.length ? { history } : {}),
+    };
     this.verdicts.put(id, record);
     this.git.commit(`rewrite: ${verdict} finding ${id}`, [STATE_DIR]);
     return record;

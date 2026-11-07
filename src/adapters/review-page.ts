@@ -77,6 +77,12 @@ input[type=file] { font: 14px system-ui, sans-serif; }
 .form-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
 .scenes-grid { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 .scene-viewer { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 16px; }
+mark { background: #ffe066; color: inherit; padding: 2px 4px; border-radius: 3px; }
+@media (prefers-color-scheme: dark) { mark { background: #7a6200; color: inherit; } }
+.badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font: 12px/1.2 system-ui, sans-serif; border: 1px solid var(--line); margin-right: 6px; }
+.badge-stale { border-color: var(--reject); color: var(--reject); }
+.clickable-quote { cursor: pointer; text-decoration: underline; text-decoration-style: dotted; }
+.clickable-quote:hover { background: var(--line); }
 `;
 
 export const REVIEW_JS = String.raw`
@@ -150,7 +156,126 @@ function claimCard(book, claim, reload) {
   return card;
 }
 
-const VERDICTS = { confirmed: 'Es un error real', deliberate_mystery: 'Misterio deliberado', false_positive: 'Falso positivo' };
+const VERDICTS = { confirmed: 'Es un error real', deliberate_mystery: 'Misterio deliberado', false_positive: 'Falso positivo', useful: 'Me ayuda', noise: 'Ruido' };
+
+const FINDING_KINDS = {
+  fact: 'Hecho del texto',
+  interpretation: 'Interpretación',
+  alternative: 'Idea alternativa',
+};
+
+function narrativeFindingCard(book, finding, reload, openQuote) {
+  const card = el('article');
+  const kindBadge = el('span', FINDING_KINDS[finding.kind] || finding.kind, 'badge');
+  const statement = el('p');
+  statement.append(kindBadge, document.createTextNode(finding.statement));
+  card.append(statement);
+
+  if (finding.characters && finding.characters.length) {
+    card.append(el('p', 'Personajes: ' + finding.characters.join(', '), 'meta'));
+  }
+  card.append(el('p', 'Propuesto por: ' + finding.author, 'meta'));
+
+  for (const ev of finding.evidence) {
+    const evBox = el('div');
+    const quoteEl = el('blockquote', ev.quote, 'clickable-quote');
+    quoteEl.title = 'Haz clic para ver y resaltar esta cita en la escena';
+    if (openQuote) {
+      quoteEl.addEventListener('click', () => {
+        openQuote(ev.file, ev.quote, ev.anchor, ev.status);
+      });
+    }
+    const statusText = ev.status === 'valid' ? 'válida' : (ev.status === 'stale' ? 'desactualizada' : ev.status);
+    let detail = ev.file + ' · evidencia: ' + statusText;
+    if (ev.status === 'stale') {
+      detail += ' (el texto alrededor de la cita cambió en la escena)';
+    }
+    evBox.append(quoteEl, el('p', detail, 'meta' + (ev.status === 'stale' ? ' badge-stale' : '')));
+    card.append(evBox);
+  }
+
+  if (finding.evidence_status === 'stale') {
+    card.append(el('p', 'Aviso: La evidencia general está desactualizada; el texto de la escena ha cambiado.', 'meta badge-stale'));
+  }
+
+  if (finding.verdict) {
+    const vText = finding.verdict.verdict === 'useful' ? 'Me ayuda' : (finding.verdict.verdict === 'noise' ? 'Ruido' : (VERDICTS[finding.verdict.verdict] || finding.verdict.verdict));
+    const when = new Date(finding.verdict.at).toLocaleString('es');
+    let summary = 'Valoración actual: ' + vText + ' · por ' + finding.verdict.by + ' el ' + when;
+    if (finding.verdict.note) summary += ' · Nota: "' + finding.verdict.note + '"';
+    card.append(el('p', summary, 'meta'));
+  }
+
+  const ratingRow = el('div', undefined, 'form-row actions');
+  const noteInput = el('input');
+  noteInput.type = 'text';
+  noteInput.placeholder = 'Nota opcional sobre la valoración…';
+  noteInput.setAttribute('aria-label', 'Nota opcional sobre la valoración');
+  if (finding.verdict && finding.verdict.note) {
+    noteInput.value = finding.verdict.note;
+  }
+  const rate = (verdict) => async () => {
+    const note = noteInput.value.trim() || undefined;
+    await api('/books/' + book + '/findings/' + finding.finding_id, { verdict, note });
+    await reload();
+  };
+  const usefulBtn = button('Me ayuda', finding.verdict?.verdict === 'useful' ? 'active' : '', rate('useful'));
+  const noiseBtn = button('Ruido', finding.verdict?.verdict === 'noise' ? 'active' : '', rate('noise'));
+  ratingRow.append(noteInput, usefulBtn, noiseBtn);
+  card.append(ratingRow);
+
+  return card;
+}
+
+function findingsSection(book, findings, reload, openQuote) {
+  const box = el('section', undefined, 'card-box');
+  const headerRow = el('div', undefined, 'toolbar');
+  headerRow.append(el('h2', 'Hallazgos de la trama'));
+  const exportBtn = button('Descargar evaluación (JSON)', '', async () => {
+    const data = await api('/books/' + book + '/export');
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'findings-' + book + '.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+  headerRow.append(exportBtn);
+  box.append(headerRow);
+
+  if (!findings || !findings.length) {
+    box.append(el('p', 'Sin hallazgos narrativos propuestos para este libro.', 'meta'));
+    return box;
+  }
+
+  const QUESTION_LABELS = {
+    motivation: 'Motivación: ¿Qué quiere cada personaje y por qué actúa de esa manera?',
+    consequences: 'Consecuencias: ¿Qué consecuencias tienen sus decisiones y qué contradicciones podrían existir?',
+    knowledge: 'Conocimiento: ¿Qué sabe cada personaje, qué sabe el lector y qué información falta para entender la historia?',
+  };
+  const QUESTION_ORDER = ['motivation', 'consequences', 'knowledge'];
+
+  for (const q of QUESTION_ORDER) {
+    const grouped = findings.filter((f) => f.question === q);
+    if (grouped.length) {
+      box.append(el('h3', QUESTION_LABELS[q] || q));
+      for (const f of grouped) {
+        box.append(narrativeFindingCard(book, f, reload, openQuote));
+      }
+    }
+  }
+
+  const others = findings.filter((f) => !QUESTION_ORDER.includes(f.question));
+  if (others.length) {
+    box.append(el('h3', 'Otros hallazgos'));
+    for (const f of others) {
+      box.append(narrativeFindingCard(book, f, reload, openQuote));
+    }
+  }
+
+  return box;
+}
 
 function findingCard(book, finding, reload) {
   const card = el('article');
@@ -247,7 +372,7 @@ function importSection(book, onImported) {
   return box;
 }
 
-function scenesSection(book, scenes, reloadBook) {
+function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
   const box = el('section', undefined, 'card-box');
   box.append(el('h2', 'Navegar escenas'));
   if (!scenes || !scenes.length) {
@@ -259,22 +384,75 @@ function scenesSection(book, scenes, reloadBook) {
   viewer.style.display = 'none';
 
   let activeBtn = null;
-  const loadScene = async (sceneFile, btn) => {
+  const loadScene = async (sceneFile, highlight) => {
+    const canonical = sceneFile.startsWith('scenes/') ? sceneFile : 'scenes/' + sceneFile;
     if (activeBtn) activeBtn.classList.remove('active');
-    btn.classList.add('active');
-    activeBtn = btn;
+    for (const child of grid.children) {
+      if (child.textContent === canonical || child.textContent === sceneFile) {
+        child.classList.add('active');
+        activeBtn = child;
+        break;
+      }
+    }
     viewer.style.display = 'block';
     viewer.replaceChildren(el('p', 'Cargando escena…', 'meta'));
     try {
-      const data = await api('/books/' + book + '/scenes/' + encodeURIComponent(sceneFile));
+      const data = await api('/books/' + book + '/scenes/' + encodeURIComponent(canonical));
       viewer.replaceChildren();
       viewer.append(el('h3', data.file));
-      viewer.append(el('pre', data.text));
+
+      if (highlight && highlight.status === 'stale') {
+        const staleAlert = el('p', 'Aviso: La evidencia está desactualizada. El texto alrededor de la cita cambió en la escena.', 'meta badge-stale');
+        viewer.append(staleAlert);
+      }
+
+      const pre = el('pre');
+      if (highlight && highlight.quote) {
+        let start = -1;
+        const q = highlight.quote;
+        if (highlight.anchor && typeof highlight.anchor.start === 'number') {
+          if (data.text.slice(highlight.anchor.start, highlight.anchor.start + q.length) === q) {
+            start = highlight.anchor.start;
+          }
+        }
+        if (start === -1) {
+          start = data.text.indexOf(q);
+        }
+        if (start !== -1) {
+          const before = data.text.slice(0, start);
+          const matched = data.text.slice(start, start + q.length);
+          const after = data.text.slice(start + q.length);
+          const mark = el('mark', matched);
+          pre.append(document.createTextNode(before), mark, document.createTextNode(after));
+          setTimeout(() => mark.scrollIntoView({ block: 'center', behavior: 'smooth' }), 50);
+        } else {
+          pre.textContent = data.text;
+        }
+      } else {
+        pre.textContent = data.text;
+      }
+      viewer.append(pre);
+
+      const citingBox = el('div');
+      citingBox.append(el('h3', 'Hallazgos que citan esta escena'));
+      if (data.findings && data.findings.length > 0) {
+        const reloadScene = async () => {
+          await loadScene(canonical, highlight);
+          await reloadBook();
+        };
+        for (const f of data.findings) {
+          citingBox.append(narrativeFindingCard(book, f, reloadScene, (fFile, fQuote, fAnchor, fStatus) => loadScene(fFile, { quote: fQuote, anchor: fAnchor, status: fStatus })));
+        }
+      } else {
+        citingBox.append(el('p', 'Ningún hallazgo cita esta escena.', 'meta'));
+      }
+      viewer.append(citingBox);
+
       const propBox = el('div');
       propBox.append(el('h3', 'Propuestas para esta escena'));
       if (data.proposals && data.proposals.length > 0) {
         const reloadScene = async () => {
-          await loadScene(sceneFile, btn);
+          await loadScene(canonical, highlight);
           await reloadBook();
         };
         for (const p of data.proposals) {
@@ -284,13 +462,20 @@ function scenesSection(book, scenes, reloadBook) {
         propBox.append(el('p', 'Sin cambios pendientes para esta escena.', 'meta'));
       }
       viewer.append(propBox);
+      viewer.scrollIntoView({ behavior: 'smooth' });
     } catch (error) {
       viewer.replaceChildren(el('p', error.message, 'meta'));
     }
   };
 
+  if (registerOpenQuote) {
+    registerOpenQuote((file, quote, anchor, status) => {
+      loadScene(file, { quote, anchor, status });
+    });
+  }
+
   for (const scene of scenes) {
-    const btn = button(scene, '', () => loadScene(scene, btn));
+    const btn = button(scene, '', () => loadScene(scene, null));
     grid.append(btn);
   }
   box.append(grid, viewer);
@@ -332,9 +517,16 @@ async function renderApp(selectedBookId) {
   const data = await api('/books/' + currentBook);
   const pending = (c) => c.editorial_status === 'proposed';
 
+  let openQuoteHandler = null;
+  const scenesBox = scenesSection(currentBook, data.scenes || [], reload, (fn) => { openQuoteHandler = fn; });
+  const findingsBox = findingsSection(currentBook, data.finding_views || [], reload, (file, quote, anchor, status) => {
+    if (openQuoteHandler) openQuoteHandler(file, quote, anchor, status);
+  });
+
   app.append(
     importSection(currentBook, reload),
-    scenesSection(currentBook, data.scenes || [], reload),
+    scenesBox,
+    findingsBox,
     section('Cambios propuestos', data.proposals.filter((p) => p.proposal.status === 'proposed').map((p) => proposalCard(currentBook, p, reload)), 'Ningún cambio pendiente.'),
     section('Posibles problemas', data.findings.map((f) => findingCard(currentBook, f, reload)), 'Sin hallazgos, lo que no demuestra que no haya problemas.'),
     section('Afirmaciones por revisar', data.claims.filter(pending).map((c) => claimCard(currentBook, c, reload)), 'Ninguna pendiente.'),
