@@ -6,9 +6,9 @@ This guide explains how to import novels and manuscripts into RE;write from a No
 
 ---
 
-## 1. For Writers (e.g. Andrés): Exporting from Notion
+## 1. For Writers (e.g. Andrés): Importing from the Browser
 
-Writers do not need to install Node, run command-line tools, or configure JSON files. The writer simply exports their workspace from Notion and delivers the downloaded archive to the editorial team (or uploads it once the web import interface is live).
+Writers do not need to install Node, run command-line tools, or configure JSON files. The entire import workflow can be completed directly from the browser at `/review`.
 
 ### Step 1: Export from Notion
 
@@ -24,11 +24,27 @@ Writers do not need to install Node, run command-line tools, or configure JSON f
 #### Nested ZIP Parts
 When a manuscript or workspace is large, Notion's export often produces an outer `.zip` file that contains one or more inner part zips (such as `Export-<uuid>-Part-1.zip` and `Export-<uuid>-Part-2.zip`).
 
-**You do not need to unzip, re-compress, or reorganize anything.** Send the single downloaded zip file as-is. RE;write automatically detects and unpacks nested zip parts in order.
+**You do not need to unzip, re-compress, or reorganize anything.** Upload the single downloaded zip file as-is. RE;write automatically detects and unpacks nested zip parts in order.
 
-### Step 2: Send the ZIP File
+### Step 2: Upload, Inspect, and Import in the Browser
 
-Send the downloaded `.zip` file to Fran or the engineering team (or upload it directly once the web import interface exists). Your text remains safe, and the editorial team will handle inspection, mapping, and import.
+1. Open RE;write in your browser and sign in at `/review`.
+2. Select your book (or create one).
+3. In the **"Importar desde Notion"** section, click **"Seleccionar archivo"** and choose your exported `.zip` file (up to 50 MB).
+4. Click **"Inspeccionar exportación"**:
+   - RE;write checks the archive safely and displays the structure: database CSV files, row counts, column names, and total page count.
+   - **Privacy guaranteed**: The inspection **never** displays story text, novel prose, or cell values.
+5. In the **"Configurar correspondencia (Mapping)"** form:
+   - **Base de datos de capítulos**: Select the database containing your chapter list (e.g. `Capítulos.csv` or `_all.csv`).
+   - **Columna de título**: Select the column with chapter titles (e.g. `Título`).
+   - **Columna de orden**: Select the chapter sequence column, or choose `"orden de la tabla"` to follow the database's natural row order.
+   - **Filtrar por columna (opcional)**: If your database contains chapters for multiple books, select the filter column (e.g. `Libro`) and enter the value to match.
+6. Click **"Vista previa"** (dry run):
+   - RE;write calculates the chapter order, target scene filenames (`scenes/001-titulo.md`), sizes, and highlights any missing markdown pages without modifying the book repository.
+7. Click **"Importar"**:
+   - The chapters are imported into the book, committed to Git version control, and become available in the scene browser immediately.
+   - Re-running the import on the same export is a harmless no-op (`unchanged`). If an existing chapter was edited in RE;write, the import safely refuses to overwrite it (`refused`).
+   - The uploaded zip file is held only in memory for the request duration and is never permanently stored on the server.
 
 ---
 
