@@ -290,3 +290,23 @@ test('import validates filenames before staging: rejects .md, leading dot, NUL, 
   const scenesData = await scenesRes.json();
   assert.deepEqual(scenesData.scenes, []);
 });
+
+test('book name collisions are neutral and identical for members and strangers', async () => {
+  const owner = await h.session('user_fran');
+  const stranger = await h.session('user_stranger');
+  const beforeOwner = await (await api('/books', owner)).json();
+  const beforeStranger = await (await api('/books', stranger)).json();
+  const responses = [];
+  for (const token of [owner, stranger]) {
+    const res = await api('/books', token, { title: 'Sal', slug: 'sal' });
+    assert.equal(res.status, 409);
+    const body = await res.json();
+    assert.equal(body.error, 'Ese nombre de libro no está disponible; elige otro título.');
+    assert.equal(body.detail, body.error);
+    assert.ok(!JSON.stringify(body).includes('sal'));
+    responses.push(body);
+  }
+  assert.deepEqual(responses[0], responses[1]);
+  assert.deepEqual(await (await api('/books', owner)).json(), beforeOwner);
+  assert.deepEqual(await (await api('/books', stranger)).json(), beforeStranger);
+});

@@ -292,7 +292,7 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
           return json(res, 201, created);
         } catch (error) {
           const msg = library.publicMessage(error);
-          if (msg.includes('already exists')) {
+          if (msg === 'Ese nombre de libro no está disponible; elige otro título.') {
             return problem(res, 409, msg);
           }
           throw error;

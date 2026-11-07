@@ -72,7 +72,7 @@ export class Library {
     const dir = this.bookDir(slug);
     const access = this.access();
     if (existsSync(dir) || Object.hasOwn(access.books, slug)) {
-      throw new Error(`book already exists: ${slug}`);
+      throw new Error('Ese nombre de libro no está disponible; elige otro título.');
     }
     Project.init(dir, trimmedTitle);
     this.grant(slug, subject);
