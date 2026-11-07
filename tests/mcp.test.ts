@@ -6,6 +6,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Library } from '../src/application/library.ts';
 import { buildMcpServer } from '../src/adapters/mcp.ts';
+import { HcsFailure, hcsError } from '../src/hcs/errors.ts';
 import { cli, FIXTURES, git, read, tempDir } from './helpers.ts';
 
 const SCENE = 'scenes/escena-01.md';
@@ -41,10 +42,61 @@ async function call(client: Client, name: string, args: object): Promise<{ isErr
   return { isError: Boolean(result.isError), data, text };
 }
 
+test('MCP carries an HCS failure as a JSON-RPC error', async () => {
+  const { lib } = library();
+  const error = hcsError('timeout', 'Timed out');
+  lib.booksFor = () => { throw new HcsFailure([error]); };
+  const client = await connect(lib, 'user_fran');
+  await assert.rejects(client.callTool({ name: 'list_books', arguments: {} }), (failure: any) => {
+    assert.equal(failure.code, -32000);
+    assert.deepEqual(failure.data, { hcsError: error });
+    return true;
+  });
+});
+
+test('MCP product refusals expose a problem without revealing hidden books', async () => {
+  const { lib } = library();
+  const stranger = await connect(lib, 'user_other');
+  const hidden: any = await stranger.callTool({ name: 'list_scenes', arguments: { book: 'sal' } });
+  const missing: any = await stranger.callTool({ name: 'list_scenes', arguments: { book: 'nope' } });
+  assert.equal(hidden.isError, true);
+  assert.deepEqual(hidden.structuredContent, missing.structuredContent);
+  assert.match(hidden.structuredContent.type, /^https:\/\/github\.com\/FullFran\/re-write\/blob\/main\/docs\/problems\.md#/);
+  assert.equal('hcsError' in hidden.structuredContent, false);
+});
+
 const candidate = {
   statement: 'Elena has guarded the bridge for eleven years.', subject: 'Elena', source_file: SCENE,
   quote: QUOTE, scope: 'book', epistemic_kind: 'narrated_fact',
 };
+
+test('MCP schema refusals carry an invalid-input problem without changing claims', async () => {
+  const { lib } = library();
+  const client = await connect(lib, 'user_fran');
+  const result: any = await client.callTool({ name: 'propose_claims', arguments: { book: 'sal', extractor: 'x', candidates: [] } });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /Invalid arguments/);
+  assert.equal(result.structuredContent.type, 'https://github.com/FullFran/re-write/blob/main/docs/problems.md#invalid-input');
+  assert.equal(result.structuredContent.status, 400);
+  assert.equal(result.structuredContent.detail, result.content[0].text);
+  assert.equal('hcsError' in result.structuredContent, false);
+  assert.equal((await call(client, 'list_claims', { book: 'sal' })).data.total, 0);
+});
+
+test('MCP rejected quote retains its reason and adds a product problem', async () => {
+  const { lib } = library();
+  const client = await connect(lib, 'user_fran');
+  const result = await call(client, 'propose_claims', { book: 'sal', extractor: 'x', candidates: [{ ...candidate, quote: 'not a literal quote' }] });
+  assert.equal(result.isError, false);
+  assert.equal(result.data.created.length, 0);
+  assert.equal(result.data.existing.length, 0);
+  const rejected = result.data.rejected[0];
+  assert.match(rejected.reason, /quote not found/);
+  assert.equal(rejected.problem.type, 'https://github.com/FullFran/re-write/blob/main/docs/problems.md#quote-not-literal');
+  assert.equal(rejected.problem.detail, rejected.reason);
+  assert.equal('hcsError' in rejected.problem, false);
+  assert.equal((await call(client, 'list_claims', { book: 'sal' })).data.total, 0);
+});
 
 test('the MCP offers reading and proposing, and no way to accept or reject', async () => {
   const { lib } = library();

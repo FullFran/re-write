@@ -1,4 +1,4 @@
-import { isExtensionName } from './ids.ts';
+import { isDottedId, isExtensionName, parseCapabilityRef } from './ids.ts';
 
 // Closed set of HCS error codes (HCS-0006-R002). Product refusals are not HCS errors.
 export const HCS_ERROR_CODES = [
@@ -45,7 +45,9 @@ export function hcsError(
 ): HcsError {
   if (!isHcsErrorCode(code)) throw new TypeError(`Not an HCS error code: ${String(code)}`);
   if (message.length === 0) throw new TypeError('HCS error message must not be empty');
-  if (extra.requirement !== undefined && !requirementPattern.test(extra.requirement)) {
+  if (extra.entry !== undefined && !isDottedId(extra.entry)) throw new TypeError(`Not an HCS entry id: ${extra.entry}`);
+  if (extra.capability !== undefined && !parseCapabilityRef(extra.capability).ok) throw new TypeError(`Not an HCS capability ref: ${extra.capability}`);
+  if (extra.requirement !== undefined && (!requirementPattern.test(extra.requirement) || extra.requirement.length !== 13)) {
     throw new TypeError(`Not an HCS requirement id: ${extra.requirement}`);
   }
   for (const key of Object.keys(extra.details ?? {})) {
@@ -55,7 +57,7 @@ export function hcsError(
   if (extra.entry !== undefined) error.entry = extra.entry;
   if (extra.capability !== undefined) error.capability = extra.capability;
   if (extra.requirement !== undefined) error.requirement = extra.requirement;
-  if (extra.details !== undefined) error.details = extra.details;
+  if (extra.details !== undefined) error.details = { ...extra.details };
   return error;
 }
 
@@ -63,6 +65,7 @@ export function hcsError(
 export class HcsFailure extends Error {
   readonly errors: readonly HcsError[];
   constructor(errors: readonly HcsError[]) {
+    if (errors.length === 0) throw new TypeError('HcsFailure requires at least one error');
     super(errors.map(e => `${e.code}: ${e.message}`).join('; '));
     this.name = 'HcsFailure';
     this.errors = errors;

@@ -5,6 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { base64url, generateSecret, SignJWT } from 'jose';
 import { readConfig } from '../src/adapters/http-server.ts';
+import { HcsFailure, hcsError } from '../src/hcs/errors.ts';
 import { startHarness, type Harness } from './server-helpers.ts';
 
 let h: Harness;
@@ -28,6 +29,34 @@ function post(token?: string, body: unknown = INIT, headers: Record<string, stri
     body: typeof body === 'string' ? body : JSON.stringify(body),
   });
 }
+
+test('HTTP problem responses carry HCS errors and preserve product statuses', async () => {
+  const refusal = await fetch(`${h.base}/missing`);
+  assert.equal(refusal.status, 404);
+  assert.match(refusal.headers.get('content-type')!, /^application\/problem\+json/);
+  const problem = await refusal.json();
+  assert.match(problem.type, /^https:\/\/github\.com\/FullFran\/re-write\/blob\/main\/docs\/problems\.md#/);
+  assert.equal('hcsError' in problem, false);
+  const error = hcsError('timeout', 'Timed out');
+  const original = h.library.booksFor;
+  h.library.booksFor = () => { throw new HcsFailure([error]); };
+  try {
+    const response = await fetch(`${h.base}/review/api/books`, { headers: { authorization: `Bearer ${await h.session()}` } });
+    assert.equal(response.status, 504);
+    assert.match(response.headers.get('content-type')!, /^application\/problem\+json/);
+    const body = await response.json();
+    assert.equal(body.type, 'urn:hcs:error:timeout');
+    assert.deepEqual(body.hcsError, error);
+    assert.equal('x-rewrite-errors' in body, false);
+    const rpc = await post(await h.access(), { jsonrpc: '2.0', id: 42, method: 'tools/call', params: { name: 'list_books', arguments: {} } });
+    assert.equal(rpc.status, 200);
+    assert.deepEqual(await rpc.json(), { jsonrpc: '2.0', id: 42, error: { code: -32000, message: 'Timed out', data: { hcsError: error } } });
+    const second = hcsError('plugin_failed', 'Plugin failed');
+    h.library.booksFor = () => { throw new HcsFailure([error, second]); };
+    const multiple = await fetch(`${h.base}/review/api/books`, { headers: { authorization: `Bearer ${await h.session()}` } });
+    assert.deepEqual((await multiple.json())['x-rewrite-errors'], [error, second]);
+  } finally { h.library.booksFor = original; }
+});
 
 test('health is public and says nothing else', async () => {
   const res = await fetch(`${h.base}/health`);

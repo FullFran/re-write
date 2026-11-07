@@ -17,9 +17,17 @@ test('hcsError builds error objects and keeps details under extension names', ()
   assert.throws(() => hcsError('timeout', 'Slow', { details: { phase: 'prepare' } }), TypeError);
   assert.throws(() => hcsError('timeout', 'Slow', { requirement: 'R003' }), TypeError);
   assert.throws(() => hcsError('timeout', ''), TypeError);
+  assert.throws(() => hcsError('timeout', 'x', { entry: 'invalid' }), TypeError);
+  assert.throws(() => hcsError('timeout', 'x', { capability: 'com.example.cap' }), TypeError);
+  assert.equal(hcsError('timeout', 'x', { capability: 'com.example.cap@1' }).capability, 'com.example.cap@1');
+  const details = { 'x-phase': 'before' };
+  const error = hcsError('timeout', 'x', { details });
+  details['x-phase'] = 'after';
+  assert.equal(error.details?.['x-phase'], 'before');
 });
 
 test('HcsFailure carries every error', () => {
+  assert.throws(() => new HcsFailure([]), TypeError);
   const failure = new HcsFailure([hcsError('duplicate_entry', 'a'), hcsError('duplicate_entry', 'b')]);
   assert.equal(failure.errors.length, 2);
   assert.match(failure.message, /duplicate_entry: a; duplicate_entry: b/);
