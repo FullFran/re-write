@@ -47,6 +47,8 @@ rewrite review-proposal /tmp/book <proposal-id> accept --by "your name"
 | `package <dir> [--out <file>] [--json]` | Builds a deterministic package archive; defaults to `<dir-basename>.tar.gz` in the current directory |
 | `init <dir> [--title]` | Creates a book repository, or opens an existing one |
 | `import <dir> <scene.md>...` | Copies scenes in and commits them; refuses to overwrite different text |
+| `inspect-sqlite <file.db>` | Safely inspects a SQLite database structure without revealing row text ([guide](docs/import.md)) |
+| `import-sqlite <book-dir> <file.db> --mapping <file.json> [--dry-run]` | Imports chapters from SQLite via declarative mapping ([guide](docs/import.md)) |
 | `read <dir> <scenes/file.md>` | Prints a scene |
 | `extract <dir> --from <file.json>` | Loads candidate claims and rejects any quote that is not literal |
 | `claims <dir>` | Lists claims with their current evidence status |
