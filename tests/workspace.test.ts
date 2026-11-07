@@ -194,3 +194,99 @@ test('cross-book refusal for another subject across all workspace endpoints', as
   const strangerRead = await api(`/books/${bookId}/scenes/escena-01.md`, strangerSession);
   assert.equal(strangerRead.status, 404);
 });
+
+test('import rejects batch with duplicate basenames (400 naming duplicate, nothing written)', async () => {
+  const authorSession = await h.session('user_author5');
+  const createRes = await api('/books', authorSession, { title: 'Collision Test Book' });
+  const bookId = (await createRes.json()).book_id;
+
+  const res = await api(`/books/${bookId}/import`, authorSession, {
+    files: [
+      { name: 'chapter1/scene-01.md', content: 'Text of Chapter 1' },
+      { name: 'chapter2/scene-01.md', content: 'Text of Chapter 2' },
+    ],
+  });
+
+  assert.equal(res.status, 400);
+  const data = await res.json();
+  assert.match(data.error, /duplicate/i);
+  assert.match(data.error, /scene-01\.md/);
+
+  // Verify nothing was written
+  const scenesRes = await api(`/books/${bookId}/scenes`, authorSession);
+  const scenesData = await scenesRes.json();
+  assert.deepEqual(scenesData.scenes, []);
+});
+
+test('import is all-or-nothing: mixed batch with conflict writes nothing (409)', async () => {
+  const authorSession = await h.session('user_author6');
+  const createRes = await api('/books', authorSession, { title: 'Partial Write Book' });
+  const bookId = (await createRes.json()).book_id;
+
+  // Import an initial scene
+  const initialRes = await api(`/books/${bookId}/import`, authorSession, {
+    files: [{ name: 'existing-scene.md', content: 'Initial committed text' }],
+  });
+  assert.equal(initialRes.status, 200);
+
+  // Attempt batch with a new scene and a conflicting scene
+  const batchRes = await api(`/books/${bookId}/import`, authorSession, {
+    files: [
+      { name: 'new-scene.md', content: 'New scene text' },
+      { name: 'existing-scene.md', content: 'Conflicting modified text' },
+    ],
+  });
+  assert.equal(batchRes.status, 409);
+
+  // Verify new-scene.md was NOT written to disk and cannot be read
+  const readRes = await api(`/books/${bookId}/scenes/new-scene.md`, authorSession);
+  assert.equal(readRes.status, 404);
+
+  const scenesRes = await api(`/books/${bookId}/scenes`, authorSession);
+  const scenesData = await scenesRes.json();
+  assert.deepEqual(scenesData.scenes, ['scenes/existing-scene.md']);
+});
+
+test('import validates filenames before staging: rejects .md, leading dot, NUL, long names with 400 and no path disclosure', async () => {
+  const authorSession = await h.session('user_author7');
+  const createRes = await api('/books', authorSession, { title: 'Validation Book' });
+  const bookId = (await createRes.json()).book_id;
+
+  // 1. Bare .md
+  const bareRes = await api(`/books/${bookId}/import`, authorSession, {
+    files: [{ name: '.md', content: '# Bare dot md' }],
+  });
+  assert.equal(bareRes.status, 400);
+  const bareData = await bareRes.json();
+  assert.ok(!bareData.error.includes('/tmp'));
+
+  // 2. Leading dot
+  const hiddenRes = await api(`/books/${bookId}/import`, authorSession, {
+    files: [{ name: '.hidden.md', content: '# Hidden' }],
+  });
+  assert.equal(hiddenRes.status, 400);
+  const hiddenData = await hiddenRes.json();
+  assert.ok(!hiddenData.error.includes('/tmp'));
+
+  // 3. NUL byte
+  const nulRes = await api(`/books/${bookId}/import`, authorSession, {
+    files: [{ name: 'scene\0.md', content: '# Nul' }],
+  });
+  assert.equal(nulRes.status, 400);
+  const nulData = await nulRes.json();
+  assert.ok(!nulData.error.includes('/tmp'));
+
+  // 4. Filename > 255 bytes
+  const longName = 'a'.repeat(255) + '.md';
+  const longRes = await api(`/books/${bookId}/import`, authorSession, {
+    files: [{ name: longName, content: '# Long' }],
+  });
+  assert.equal(longRes.status, 400);
+  const longData = await longRes.json();
+  assert.ok(!longData.error.includes('/tmp'));
+
+  // Verify nothing was written to the book
+  const scenesRes = await api(`/books/${bookId}/scenes`, authorSession);
+  const scenesData = await scenesRes.json();
+  assert.deepEqual(scenesData.scenes, []);
+});

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { CLI, cli, claimByQuote, extractedBook, FIXTURES, git, newBook, read, tempDir } from './helpers.ts';
@@ -22,6 +22,32 @@ test('import refuses to overwrite an existing scene with different text', () => 
   assert.equal(result.code, 1);
   assert.match(result.stderr, /already exists with different text/);
   assert.equal(read(dir, 'scenes/escena-01.md'), read(FIXTURES, 'escena-01.md'));
+});
+
+test('import is all-or-nothing: a mixed batch writes nothing on conflict or invalid name', () => {
+  const dir = newBook();
+  const newScene = join(tempDir(), 'escena-03.md');
+  writeFileSync(newScene, '# Escena 3\nNuevo contenido\n');
+  const conflictScene = join(tempDir(), 'escena-01.md');
+  writeFileSync(conflictScene, 'texto en conflicto\n');
+
+  // Conflict case
+  const result = cli('import', dir, newScene, conflictScene);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /already exists with different text/);
+
+  // Neither the conflicting file was overwritten, nor was the new scene written to disk
+  assert.equal(existsSync(join(dir, 'scenes/escena-03.md')), false);
+  assert.equal(read(dir, 'scenes/escena-01.md'), read(FIXTURES, 'escena-01.md'));
+  assert.equal(git(dir, 'status', '--porcelain'), '');
+
+  // Invalid name case in mixed batch
+  const invalidScene = join(tempDir(), '.md');
+  writeFileSync(invalidScene, '# Invalid name\n');
+  const result2 = cli('import', dir, newScene, invalidScene);
+  assert.equal(result2.code, 1);
+  assert.equal(existsSync(join(dir, 'scenes/escena-03.md')), false);
+  assert.equal(git(dir, 'status', '--porcelain'), '');
 });
 
 test('extraction records full provenance and starts every claim as proposed', () => {

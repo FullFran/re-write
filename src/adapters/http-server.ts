@@ -29,6 +29,11 @@ const MAX_SCENE_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_NOTE = 2_000;
 const READ = 'com.fullfran.rewrite.book.read';
 const IMPORT = 'com.fullfran.rewrite.book.import';
+const SCENE_FILE_NAME = /^[^./][^/]*\.md$/;
+
+function isFsError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && ('code' in error || 'syscall' in error || 'errno' in error);
+}
 
 class HttpError extends Error {
   readonly status: number;
@@ -254,14 +259,28 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
       if (!body.files || !Array.isArray(body.files) || body.files.length === 0) {
         throw new HttpError(400, 'files must be a non-empty array');
       }
+      const seenNames = new Set<string>();
       for (const file of body.files as Array<{ name?: unknown; content?: unknown }>) {
         if (typeof file?.name !== 'string' || typeof file?.content !== 'string') {
           throw new HttpError(400, 'each file must have a name and content');
         }
+        if (file.name.includes('\0')) {
+          throw new HttpError(400, 'invalid file name: contains NUL byte');
+        }
         const base = basename(file.name);
-        if (!base.endsWith('.md') || base.includes('..')) {
+        if (base.includes('\0')) {
+          throw new HttpError(400, 'invalid file name: contains NUL byte');
+        }
+        if (Buffer.byteLength(base, 'utf8') > 255) {
+          throw new HttpError(400, `file name too long: ${base.slice(0, 30)}... exceeds 255 bytes limit`);
+        }
+        if (!SCENE_FILE_NAME.test(base)) {
           throw new HttpError(400, `only Markdown (.md) files are supported: ${file.name}`);
         }
+        if (seenNames.has(base)) {
+          throw new HttpError(400, `duplicate file name in import batch: ${base}`);
+        }
+        seenNames.add(base);
         if (Buffer.byteLength(file.content, 'utf8') > MAX_SCENE_FILE_BYTES) {
           throw new HttpError(413, `file too large: ${file.name} exceeds 2 MB limit`);
         }
@@ -278,7 +297,14 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
         return json(res, 200, result);
       } catch (error) {
         if (error instanceof HttpError || error instanceof HcsFailure) throw error;
-        return problem(res, 409, library.publicMessage(error));
+        if (isFsError(error)) {
+          return problem(res, 409, 'file system error during import');
+        }
+        const msg = library.publicMessage(error);
+        if (msg.includes('/tmp') || msg.includes(tmpdir())) {
+          return problem(res, 409, 'file system error during import');
+        }
+        return problem(res, 409, msg);
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
       }

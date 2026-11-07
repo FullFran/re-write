@@ -72,15 +72,39 @@ export class Project {
 
   /** Copies scenes in and commits them. It never overwrites a scene with different text. */
   importScenes(files: string[]): { imported: string[]; unchanged: string[] } {
+    const seen = new Set<string>();
+    for (const file of files) {
+      if (file.includes('\0')) {
+        throw new Error(`invalid scene file name: contains NUL byte: ${file}`);
+      }
+      const base = basename(file);
+      if (base.includes('\0')) {
+        throw new Error(`invalid scene file name: contains NUL byte: ${base}`);
+      }
+      if (Buffer.byteLength(base, 'utf8') > 255) {
+        throw new Error(`file name too long: ${base} exceeds 255 bytes`);
+      }
+      const relative = `${SCENES_DIR}/${base}`;
+      if (base.startsWith('.') || !base.endsWith('.md') || !SCENE_FILE.test(relative)) {
+        throw new Error(`only Markdown (.md) files are supported: ${base}`);
+      }
+      if (seen.has(base)) {
+        throw new Error(`duplicate file name in import batch: ${base}`);
+      }
+      seen.add(base);
+      const target = join(this.dir, relative);
+      if (existsSync(target)) {
+        if (readFileSync(target, 'utf8') !== readFileSync(file, 'utf8')) {
+          throw new Error(`${relative} already exists with different text; edit it through a proposal`);
+        }
+      }
+    }
     const imported: string[] = [];
     const unchanged: string[] = [];
     for (const file of files) {
       const relative = `${SCENES_DIR}/${basename(file)}`;
       const target = join(this.dir, relative);
       if (existsSync(target)) {
-        if (readFileSync(target, 'utf8') !== readFileSync(file, 'utf8')) {
-          throw new Error(`${relative} already exists with different text; edit it through a proposal`);
-        }
         unchanged.push(relative);
         continue;
       }
