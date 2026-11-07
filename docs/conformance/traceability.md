@@ -22,15 +22,15 @@ Generated from HCS pin 9f40641ebdff9aae73e797b1223b54bcc43a41b7; do not edit.
 | HCS-0001-R005 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
 | HCS-0001-R006 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
 | HCS-0001-R007 | MUST | planned |  | [#26](https://github.com/FullFran/re-write/issues/26) |
-| HCS-0001-R008 | MUST NOT | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
-| HCS-0001-R009 | MUST NOT | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
+| HCS-0001-R008 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
+| HCS-0001-R009 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
 | HCS-0001-R010 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
 | HCS-0001-R011 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
 | HCS-0001-R012 | MUST | planned |  | [#26](https://github.com/FullFran/re-write/issues/26) |
-| HCS-0001-R013 | MUST NOT | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
+| HCS-0001-R013 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
 | HCS-0001-R014 | SHOULD | planned |  | [#24](https://github.com/FullFran/re-write/issues/24) |
 | HCS-0001-R015 | SHOULD | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance-document.test.ts` |  |
-| HCS-0001-R016 | MUST NOT | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
+| HCS-0001-R016 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
 
 ## HCS-0002
 
@@ -46,16 +46,16 @@ Generated from HCS pin 9f40641ebdff9aae73e797b1223b54bcc43a41b7; do not edit.
 
 | Requirement | Keyword | Status | Where | Issue or reason |
 | --- | --- | --- | --- | --- |
-| HCS-0003-R001 | MUST | planned |  | [#27](https://github.com/FullFran/re-write/issues/27) |
-| HCS-0003-R002 | MUST | planned |  | [#27](https://github.com/FullFran/re-write/issues/27) |
-| HCS-0003-R003 | MUST | planned |  | [#27](https://github.com/FullFran/re-write/issues/27) |
-| HCS-0003-R004 | MUST | planned |  | [#27](https://github.com/FullFran/re-write/issues/27) |
-| HCS-0003-R005 | MUST | planned |  | [#27](https://github.com/FullFran/re-write/issues/27) |
-| HCS-0003-R006 | MUST | planned |  | [#27](https://github.com/FullFran/re-write/issues/27) |
-| HCS-0003-R007 | MUST | planned |  | [#27](https://github.com/FullFran/re-write/issues/27) |
-| HCS-0003-R008 | MUST | planned |  | [#27](https://github.com/FullFran/re-write/issues/27) |
-| HCS-0003-R009 | MUST NOT | planned |  | [#27](https://github.com/FullFran/re-write/issues/27) |
-| HCS-0003-R010 | MUST | not-applicable |  | re-write declares all-or-nothing, not partial policy. |
+| HCS-0003-R001 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
+| HCS-0003-R002 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
+| HCS-0003-R003 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
+| HCS-0003-R004 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
+| HCS-0003-R005 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
+| HCS-0003-R006 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
+| HCS-0003-R007 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
+| HCS-0003-R008 | MUST | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
+| HCS-0003-R009 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance-resolution.test.ts` |  |
+| HCS-0003-R010 | MUST | not-applicable |  | re-write declares all-or-nothing; resolve supports partial for conformance. |
 
 ## HCS-0004
 
