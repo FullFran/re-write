@@ -5,7 +5,24 @@ RE;write adopts the Harness Composition Specification as described in [ADR-0001]
 - `vendor/hcs/PIN.json` records the release `version`, the `sha256` of its tarball and its `url`.
 - `vendor/hcs/<version>/` is the release as published: `spec/`, `schemas/`, `requirements/requirements.json`, `conformance/`, `index.json`, `LICENSE` and `SHA256SUMS`. Never edit anything under it: `tests/hcs-vendor.test.ts` checks every file against `SHA256SUMS` and fails on one changed byte, one extra file, or a second vendored version. `.gitattributes` marks it `-text` so git keeps the bytes.
 
-`npm test` runs the vendored conformance cases (`tests/hcs-conformance-*.test.ts`) and the vendor check, so CI runs them too. CI also runs the traceability drift check (`npm run hcs:trace:check`). `docs/conformance/traceability.md` is generated from the vendored `requirements.json` and `docs/conformance/traceability.map.json`; edit the map, never the matrix.
+`npm test` runs the vendor check and the conformance measurement, so CI runs them too. CI also runs the traceability drift check (`npm run hcs:trace:check`). `docs/conformance/traceability.md` is generated from the vendored `requirements.json` and `docs/conformance/traceability.map.json`; edit the map, never the matrix.
+
+## Conformance: measured, not imposed
+
+HCS is a set of shared patterns, not a cage: re-write follows it where it fits and may diverge where the product needs to. [`tests/hcs-conformance.test.ts`](../tests/hcs-conformance.test.ts) feeds every case of the vendored release to the re-write code that owns it ([`tests/fixtures/hcs/conformance.ts`](../tests/fixtures/hcs/conformance.ts)) and classifies it:
+
+| Status | Meaning |
+| --- | --- |
+| `pass` | re-write reaches the case's verdict |
+| `fail` | it reaches another one: fix it here, or record it as a divergence, or discuss it in HCS |
+| `not-applicable` | a host-level case (needs a running host), a level re-write has no runner for, or a rule in `notApplicable` |
+| `divergence` | re-write does it another way on purpose; listed in `divergences` |
+
+Rules live in [`tests/fixtures/hcs/divergences.json`](../tests/fixtures/hcs/divergences.json): each names a `requirement`, a `reason` and optionally the `cases` it covers. They are printed, never skipped silently, and a rule that matches no case of the vendored release fails the test.
+
+The test fails only on a **regression**: a case that passes in [`tests/fixtures/hcs/baseline.json`](../tests/fixtures/hcs/baseline.json) and does not pass now. A new case that fails does not block anything; it shows up as `fail` in the report. After fixing a `fail` or moving to a new release, regenerate the baseline with `HCS_BASELINE=write node --test tests/hcs-conformance.test.ts` and review its diff in the pull request. `node --test --test-reporter=tap tests/hcs-conformance.test.ts` prints the per-level table.
+
+Measured with HCS `0.1.0-draft.2`: 91 pass, 0 fail, 168 not applicable (67 host, 37 distribution, 23 projection, 7 client, 34 document cases of schemas without a runner), 0 divergences.
 
 ## Updating to a new HCS release
 
@@ -14,7 +31,7 @@ One pull request per HCS release:
 1. Copy the version and the tarball `sha256` from the release notes (`gh release view v<version> -R FullFran/hcs`).
 2. `npm run hcs:sync -- <version> <sha256>`. It downloads `https://github.com/FullFran/hcs/releases/download/v<version>/hcs-<version>.tar.gz`, refuses it unless its digest is the one you gave, unpacks it in memory (regular files and folders only: no links, special files, absolute paths or `..`), checks every file against the release's `SHA256SUMS`, writes `vendor/hcs/<version>/` through a staging folder and then `vendor/hcs/PIN.json`. A refused release leaves the previous tree and pin untouched. Nothing from the release is executed. Exit codes: 0 vendored, 1 refused, 2 usage error.
 3. Remove the previous version with `git rm -r vendor/hcs/<previous>`; the script only replaces its own folder.
-4. Read the release notes (`-draft` releases may change things incompatibly), run `npm test`, and fix in the same pull request what the new cases reject.
+4. Read the release notes (`-draft` releases may change things incompatibly), run the conformance test and decide for each new `fail`: fix it, list it as a divergence, or leave it as `fail`. Then regenerate the baseline (`HCS_BASELINE=write`).
 5. Regenerate the matrix with `npm run hcs:trace` and map any new requirement in `docs/conformance/traceability.map.json`.
 
 A release of another contract version (for example `0.2.x`) is refused until `HCS_VERSION` is changed, because instance documents carry `hcsVersion`.
