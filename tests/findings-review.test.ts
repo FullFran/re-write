@@ -5,7 +5,7 @@ import { after, before, test } from 'node:test';
 import { Project } from '../src/application/project.ts';
 import { decide } from '../src/application/decision.ts';
 import { REVIEW_DECIDE } from '../src/hcs/ids.ts';
-import { git, read } from './helpers.ts';
+import { cli, git, read } from './helpers.ts';
 import { reviewApi, startHarness, type Harness } from './server-helpers.ts';
 
 const SCENE = 'scenes/escena-01.md';
@@ -199,4 +199,22 @@ test('stale evidence shown as stale after the scene changes', async () => {
   assert.ok(finding, 'finding is present');
   assert.equal(finding.evidence_status, 'stale', 'overall evidence status turns stale');
   assert.equal(finding.evidence[0].status, 'stale', 'quote evidence status turns stale');
+});
+
+test('narrative findings refuse continuity verdicts through review and CLI', async () => {
+  const before = await (await reviewApi(h, '/books/sal/findings', session)).json();
+  const head = git(h.bookDir, 'rev-parse', 'HEAD');
+  for (const verdict of ['confirmed', 'deliberate_mystery', 'false_positive']) {
+    const res = await reviewApi(h, `/books/sal/findings/${findingId}`, session, { verdict });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.type, /invalid-input/);
+    assert.match(body.error, /narrative.*useful, noise/);
+    const result = cli('review-finding', h.bookDir, findingId, verdict, '--by', 'Reviewer');
+    assert.notEqual(result.code, 0);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /narrative.*useful, noise/);
+    assert.deepEqual(await (await reviewApi(h, '/books/sal/findings', session)).json(), before);
+    assert.equal(git(h.bookDir, 'rev-parse', 'HEAD'), head);
+  }
 });

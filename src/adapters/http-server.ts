@@ -10,7 +10,7 @@ import { TokenVerifier } from './auth.ts';
 import { llmsText } from './llms.ts';
 import { buildMcpServer } from './mcp.ts';
 import { REVIEW_CSS, REVIEW_JS, reviewCsp, reviewHtml } from './review-page.ts';
-import { VERDICTS, type VerdictKind } from '../domain/continuity.ts';
+import { InvalidFindingVerdictError, VERDICTS, type VerdictKind } from '../domain/continuity.ts';
 import { HcsFailure } from '../hcs/errors.ts';
 import { BOOK_CREATE, REVIEW_DECIDE } from '../hcs/ids.ts';
 import { toProblemDetails } from '../hcs/transport.ts';
@@ -523,7 +523,14 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
     if (kind === 'findings') {
       const verdict = body.verdict as VerdictKind;
       if (!VERDICTS.includes(verdict)) throw new HttpError(400, 'unknown verdict');
-      return refusable(() => project.reviewFinding(id, verdict, subject, note));
+      return refusable(() => {
+        try {
+          return project.reviewFinding(id, verdict, subject, note);
+        } catch (error) {
+          if (error instanceof InvalidFindingVerdictError) throw new HttpError(400, error.message);
+          throw error;
+        }
+      });
     }
     throw new HttpError(404, 'not found');
   };
