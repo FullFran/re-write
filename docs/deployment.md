@@ -30,8 +30,36 @@ Build from the `Dockerfile`, mount a named volume at `/data`, and expose port 80
 | `CLERK_PUBLISHABLE_KEY` | `pk_live_...` | Clerk sign-in on the review page; it is public by design |
 | `REWRITE_DATA_DIR` | `/data` | Already set in the image |
 | `PORT` | `8080` | Already set in the image |
+| `REWRITE_LOG_SALT` | (deployment secret) | HMAC-SHA256 key for pseudonymous subject and book identifiers; keep stable within the deployment |
 
 The server refuses to start if a setting is missing or the URLs are not HTTPS. It needs no Clerk secret key, and **it has no setting that turns authentication off**.
+
+## Read the metadata request log
+
+The server writes one JSON line per HTTP request and an additional line per MCP JSON-RPC call to stdout. Docker captures them without a log file or collector:
+
+```bash
+docker logs rewrite 2>&1 | grep '"event":"http.request"'
+docker logs rewrite 2>&1 | grep '"event":"mcp.call"'
+docker logs rewrite 2>&1 | grep '"request_id":"<x-request-id from the response>"'
+docker logs --since 30m rewrite 2>&1 | grep '"tool":"read_scene"'
+```
+
+Replace `rewrite` with the container name. Every response has a server-generated `x-request-id` header (client-supplied ids are ignored), shared by its HTTP and MCP records.
+
+| Record | Metadata |
+| --- | --- |
+| Both | `event`, ISO `timestamp`, `request_id`, `duration_ms`, `door` (`mcp`, `review`, `public`), pseudonymous `subject` |
+| `http.request` | HTTP `method`, allowlisted `route` template, `status`, optional hashed `book`; errors contain only a known RFC 9457 problem `type` or HCS code in `error` (otherwise `error`) |
+| `mcp.call` | Allowlisted JSON-RPC `method`, known `tool` for `tools/call`, optional hashed `book`, and `result`: `ok`, a known product problem type, an HCS code, or `error` |
+
+Dynamic paths are templates such as `/review/api/books/:book/import` and `/review/api/books/:book/scenes/:file`. Unknown paths are `unmatched`; unknown methods and tools are `unknown`, never echoed. Aborted HTTP requests have status 499. JSON-RPC notifications are not calls and do not produce a separate MCP record.
+
+**Never logged:** manuscript text, quotes, statements, titles, scene or upload file names, concrete request paths, query strings, headers, tokens, raw Clerk subject ids, raw book slugs, MCP arguments or results, error messages or problem `detail`. Authentication failures retain a `reason` from the closed set `expired`, `audience`, `issuer`, `signature`, `malformed`, `other` (derived from known JWT error codes, never the message). Unexpected HTTP 500s retain `error_name` only when the Error subclass name matches `^[A-Za-z]+Error$`, otherwise `Error`. These safe fields preserve the previous rejection/internal-error diagnostics without their free text.
+
+Set `REWRITE_LOG_SALT` to a strong randomly generated secret through the deployment's environment configuration. It is not printed. Subject ids and book slugs use the first 16 hex characters of HMAC-SHA256 with that key, stable across restarts and both doors. With no salt, startup warns once: authenticated subjects and book ids become `unset`, while unauthenticated requests use subject `anon`. There is no unkeyed-hash fallback. Rotating the salt breaks correlation with earlier records. Treat the pseudonyms as sensitive metadata and configure Docker log retention on the host.
+
+This is a first step toward [#42](https://github.com/FullFran/re-write/issues/42), using the `metadata` privacy boundary of [#6](https://github.com/FullFran/re-write/issues/6), not the complete OpenTelemetry profile. Traces, lifecycle events and selectable `off`/`masked` levels remain outside this change; #42 stays open.
 
 ## Updating and backups
 

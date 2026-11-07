@@ -1,4 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
+import { observeMcpTransport } from './request-log.ts';
 import { CallToolRequestSchema, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { HcsFailure } from '../hcs/errors.ts';
 import { builtinCapabilities, dispatch, type HostCapabilities } from '../hcs/capabilities.ts';
@@ -36,6 +38,11 @@ const TOOL_PERMISSIONS: Record<string, string> = {
   propose_findings: 'com.fullfran.rewrite.findings.propose',
   propose_revision: 'com.fullfran.rewrite.revision.propose',
 };
+
+/** Log only known protocol/tool identifiers, never user-supplied unknown names. */
+export function logMcpTransport(transport: Transport): void {
+  observeMcpTransport(transport, new Set(Object.keys(TOOL_PERMISSIONS)));
+}
 
 const text = z.string().min(1).max(MAX_TEXT);
 const book = z.string().max(64).describe('Book id from list_books');

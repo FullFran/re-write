@@ -8,7 +8,8 @@ import { slugify, BOOK_ID } from '../application/library.ts';
 import { decide, enforce, ForbiddenError } from '../application/decision.ts';
 import { TokenVerifier } from './auth.ts';
 import { llmsText } from './llms.ts';
-import { buildMcpServer } from './mcp.ts';
+import { buildMcpServer, logMcpTransport } from './mcp.ts';
+import { recordAuthenticationFailure, recordSubject, recordUnexpectedError, withRequestLog } from './request-log.ts';
 import { REVIEW_CSS, REVIEW_JS, reviewCsp, reviewHtml } from './review-page.ts';
 import { InvalidFindingVerdictError, VERDICTS, type VerdictKind } from '../domain/continuity.ts';
 import { HcsFailure } from '../hcs/errors.ts';
@@ -208,6 +209,7 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
     const challenge = `Bearer resource_metadata="${metadataUrl}"`;
     const raw = bearerOf(req);
     if (!raw) {
+      recordAuthenticationFailure(undefined);
       res.setHeader('www-authenticate', challenge);
       problem(res, 401, 'unauthorized');
       return;
@@ -215,8 +217,9 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
     let subject: string;
     try {
       subject = await verifier.verifyAccessToken(raw);
+      recordSubject(subject);
     } catch (error) {
-      console.error(`access token rejected: ${(error as Error).message.slice(0, 120)}`);
+      recordAuthenticationFailure(error);
       res.setHeader('www-authenticate', `${challenge}, error="invalid_token"`);
       problem(res, 401, 'unauthorized');
       return;
@@ -236,6 +239,7 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
       void server.close();
     });
     await server.connect(transport);
+    logMcpTransport(transport);
     await transport.handleRequest(req, res, body);
   };
 
@@ -246,8 +250,9 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
     try {
       if (!raw) throw new Error('no token');
       subject = await verifier.verifySessionToken(raw);
+      recordSubject(subject);
     } catch (error) {
-      console.error(`session token rejected: ${(error as Error).message.slice(0, 120)}`);
+      recordAuthenticationFailure(error);
       return problem(res, 401, 'unauthorized');
     }
     let parts: string[];
@@ -543,7 +548,7 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
     res.end(content);
   };
 
-  return (req, res) => {
+  return withRequestLog(config.resource, (req, res) => {
     void (async () => {
       let path: string;
       try {
@@ -579,7 +584,7 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
       throw new HttpError(404, 'not found');
     })().catch((error) => {
       const status = error instanceof HttpError ? error.status : 500;
-      if (status === 500 && !(error instanceof HcsFailure)) console.error(library.publicMessage(error));
+      if (status === 500 && !(error instanceof HcsFailure)) recordUnexpectedError(error);
       if (res.headersSent) {
         res.destroy();
         return;
@@ -589,5 +594,5 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
       if (error instanceof HcsFailure) return hcsProblem(res, error);
       problem(res, status, status === 500 ? 'internal error' : (error as Error).message);
     });
-  };
+  });
 }

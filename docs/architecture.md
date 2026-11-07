@@ -156,6 +156,12 @@ slugs are globally unique; it does not grant access to the existing book.
 | [#19](https://github.com/FullFran/re-write/issues/19) | Scene planning and craft diagnostics | exploratory; diagnostics ship as `x-rewrite-check` packages |
 | [#1](https://github.com/FullFran/re-write/issues/1), [#2](https://github.com/FullFran/re-write/issues/2), [#3](https://github.com/FullFran/re-write/issues/3) | Backup and isolation, review end to end, extraction evaluation | operations (M3), core review (P1), extractor packages (P1) |
 
+## Metadata request logging
+
+`src/adapters/request-log.ts` wraps the HTTP handler and observes the MCP transport boundary through `src/adapters/mcp.ts`. An async request context correlates both records with the generated `x-request-id`; subjects enter it only after token verification. A closed metadata allowlist excludes bodies, concrete paths, unknown tool names, and free-text errors. Subject and book identifiers are short HMAC-SHA256 pseudonyms keyed by `REWRITE_LOG_SALT`, never raw ids; missing salt disables identifier correlation rather than falling back to a plain hash.
+
+Each HTTP request and each JSON-RPC call emits a JSON line to stdout, including known problem types or HCS error codes, never their messages or details. See [deployment: reading the log](deployment.md#read-the-metadata-request-log) for fields, salt configuration and commands. This implements an initial `metadata`-only diagnostic surface for [#42](https://github.com/FullFran/re-write/issues/42), following the privacy boundary in [#6](https://github.com/FullFran/re-write/issues/6); the broader OpenTelemetry and lifecycle profile remains planned.
+
 ## 7. What does not change
 
 Evidence status stays derived, never stored. Canon stays a query. Ids stay content-derived. Book state stays in the book repository. Text changes only on a human accept, in the same commit as the decision.
