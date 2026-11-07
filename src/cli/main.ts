@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { HcsFailure } from '../hcs/errors.ts';
 import { readCatalog } from '../hcs/catalog.ts';
 import { activeGeneration, applyDesiredSet, statusReport } from '../hcs/host-state.ts';
+import { grantPermission, revokePermission } from '../hcs/grants.ts';
 import type { EntryStatus } from '../hcs/lifecycle.ts';
 import { productProblem, rejectedCandidate } from '../adapters/problems.ts';
 import { ANNOTATION_EXTRACTOR, loadAnnotations } from '../adapters/annotation-extractor.ts';
@@ -19,8 +20,9 @@ const USAGE = `RE;write: narrative memory with evidence and human review.
 
   rewrite package <dir> [--out <file>] [--json]  build a deterministic package archive
   rewrite catalog validate <catalog.json>    check a catalog document
-  rewrite catalog apply <catalog.json> --state <dir> [--store <dir>]
-                                             install a catalog as a new generation (runs no package code)
+  rewrite catalog apply <catalog.json> --state <dir> [--store <dir>] [--grants <data-dir>]
+                                             install a catalog as a new generation (runs no package code);
+                                             each entry needs a grant for every permission it requests
   rewrite catalog status --state <dir>       show the active generation and entry states
   rewrite init <dir> [--title <title>]       create or open a book repository
   rewrite import <dir> <scene.md>...         copy scenes in and commit them
@@ -36,6 +38,11 @@ const USAGE = `RE;write: narrative memory with evidence and human review.
   rewrite review-proposal <dir> <id> accept|reject [--by <name>] [--note <text>]
   rewrite status <dir>                       show the restored project state
   rewrite grant <data-dir> <book> <user-id>  give a person access to a book on a server
+  rewrite revoke <data-dir> <book> <user-id> remove a person's access to a book; applies to their next call
+  rewrite package-grant <data-dir> <entry> <permission>
+                                             grant a permission to a package entry (never review decisions)
+  rewrite package-revoke <data-dir> <entry> <permission>
+                                             revoke it; applies to the next operation
 
 Add --json to any command for machine-readable output. Failures are JSON on stderr.`;
 
@@ -104,7 +111,7 @@ async function catalogCommand(sub: string | undefined, rest: string[], option: (
   if (rest.length > 1) throw new UsageError(`unexpected catalog ${sub} arguments`);
   if (sub === 'apply') {
     const stateDir = need(option('state'), '--state');
-    const result = await applyDesiredSet(readFileSync(file), { stateDir, storeDir: option('store') });
+    const result = await applyDesiredSet(readFileSync(file), { stateDir, storeDir: option('store'), grantsDir: option('grants') });
     return lifecycleOutput(result.generation, result.status);
   }
   const read = readCatalog(readFileSync(file));
@@ -222,6 +229,18 @@ async function dispatch(args: string[], values: Record<string, string | boolean 
       new Library(need(dir, '<data-dir>')).grant(need(book, '<book>'), need(subject, '<user-id>'));
       return { json: { book, subject }, text: `granted ${subject} access to ${book}` };
     }
+    case 'revoke': {
+      const [book, subject] = rest;
+      new Library(need(dir, '<data-dir>')).revoke(need(book, '<book>'), need(subject, '<user-id>'));
+      return { json: { book, subject }, text: `revoked ${subject} access to ${book}` };
+    }
+    case 'package-grant':
+    case 'package-revoke': {
+      const [entry, permission] = rest;
+      const data = need(dir, '<data-dir>');
+      (command === 'package-grant' ? grantPermission : revokePermission)(data, need(entry, '<entry>'), need(permission, '<permission>'));
+      return { json: { entry, permission }, text: `${command === 'package-grant' ? 'granted' : 'revoked'} ${permission} ${command === 'package-grant' ? 'to' : 'from'} ${entry}` };
+    }
     case 'status': {
       const status = statusOf(Project.open(need(dir, '<dir>')));
       return { json: status, text: JSON.stringify(status, null, 2) };
@@ -247,7 +266,7 @@ async function main(): Promise<number> {
         json: { type: 'boolean' }, out: { type: 'string' }, title: { type: 'string' }, from: { type: 'string' },
         by: { type: 'string' }, note: { type: 'string' }, file: { type: 'string' }, find: { type: 'string' },
         replace: { type: 'string' }, rationale: { type: 'string' }, finding: { type: 'string' },
-        state: { type: 'string' }, store: { type: 'string' },
+        state: { type: 'string' }, store: { type: 'string' }, grants: { type: 'string' },
       },
     });
   } catch (error) {

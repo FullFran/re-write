@@ -7,7 +7,9 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Library } from '../src/application/library.ts';
 import { buildMcpServer } from '../src/adapters/mcp.ts';
 import { HcsFailure, hcsError } from '../src/hcs/errors.ts';
-import { REWRITE_CAPABILITIES, REVIEW_DECIDE } from '../src/hcs/ids.ts';
+import { REWRITE_CAPABILITIES, REWRITE_PERMISSIONS, REVIEW_DECIDE } from '../src/hcs/ids.ts';
+import { grantPermission, revokePermission } from '../src/hcs/grants.ts';
+import { decide } from '../src/application/decision.ts';
 import { cli, FIXTURES, git, read, tempDir } from './helpers.ts';
 
 const SCENE = 'scenes/escena-01.md';
@@ -389,4 +391,108 @@ test('a revision on a scene that already holds a NUL byte still shows its real c
   });
   const shown = await call(client, 'get_proposal', { book: 'sal', proposal_id: created.data.proposal.proposal_id });
   assert.match(shown.data.diff, /^\+.*veinte años/m);
+});
+
+const READ = 'com.fullfran.rewrite.book.read';
+const PACKAGE = 'com.example.reader';
+
+async function connectAs(lib: Library, subject: string, entry: string | null): Promise<Client> {
+  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+  await buildMcpServer(lib, subject, undefined, undefined, entry).connect(serverSide);
+  const client = new Client({ name: 'test', version: '1' });
+  await client.connect(clientSide);
+  return client;
+}
+
+function deniedBy(code: string, permission: string) {
+  return (failure: any) => {
+    assert.equal(failure.code, -32000);
+    assert.equal(failure.data.hcsError.code, code);
+    assert.equal(failure.data.hcsError.entry, PACKAGE);
+    assert.equal(failure.data.hcsError.requirement, 'HCS-0005-R001');
+    assert.equal(failure.data.hcsError.message, `Permission denied: ${permission}`);
+    return true;
+  };
+}
+
+const BOOK_TOOLS: [string, Record<string, unknown>][] = [
+  ['list_scenes', {}], ['read_scene', { file: SCENE }], ['list_claims', {}],
+  ['propose_claims', { extractor: 'x', candidates: [candidate] }], ['inspect_continuity', {}],
+  ['propose_revision', { file: SCENE, find: 'once años', replace: 'doce años', rationale: 'r' }],
+  ['list_proposals', {}], ['get_proposal', { proposal_id: 'p-1' }],
+];
+
+test('MCP checks the package grant of every tool at dispatch, and a revocation denies the next call (HCS-0005-R001, R003)', async () => {
+  const { lib, data, book } = library();
+  const client = await connectAs(lib, 'user_fran', PACKAGE);
+  await assert.rejects(client.callTool({ name: 'list_books', arguments: {} }), deniedBy('permission_denied', READ));
+  for (const [name, args] of BOOK_TOOLS) {
+    const permission = name === 'propose_claims' ? 'com.fullfran.rewrite.claims.propose'
+      : name === 'propose_revision' ? 'com.fullfran.rewrite.revision.propose' : READ;
+    await assert.rejects(client.callTool({ name, arguments: { book: 'sal', ...args } }), deniedBy('permission_denied', permission), name);
+  }
+  grantPermission(data, PACKAGE, READ);
+  assert.deepEqual((await call(client, 'list_books', {})).data.books.map((b: any) => b.book_id), ['sal']);
+  assert.equal((await call(client, 'list_scenes', { book: 'sal' })).isError, false);
+  assert.equal((await call(client, 'list_scenes', { book: 'sal' })).isError, false, 'a held grant allows every call');
+  await assert.rejects(client.callTool({ name: 'propose_claims', arguments: { book: 'sal', extractor: 'x', candidates: [candidate] } }),
+    deniedBy('permission_denied', 'com.fullfran.rewrite.claims.propose'));
+  await assert.rejects(client.callTool({ name: 'propose_revision', arguments: { book: 'sal', ...BOOK_TOOLS[5][1] } }),
+    deniedBy('permission_denied', 'com.fullfran.rewrite.revision.propose'));
+  assert.equal(git(book, 'status', '--porcelain'), '');
+  assert.equal((await call(client, 'list_claims', { book: 'sal' })).data.total, 0, 'a denied proposal stores nothing');
+  revokePermission(data, PACKAGE, READ);
+  await assert.rejects(client.callTool({ name: 'list_scenes', arguments: { book: 'sal' } }), deniedBy('permission_denied', READ));
+});
+
+test('removing a person\'s book access takes effect on the next MCP call', async () => {
+  const { lib } = library();
+  const client = await connect(lib, 'user_fran');
+  assert.equal((await call(client, 'list_scenes', { book: 'sal' })).isError, false);
+  lib.revoke('sal', 'user_fran');
+  const denied: any = await client.callTool({ name: 'list_scenes', arguments: { book: 'sal' } });
+  assert.equal(denied.isError, true);
+  assert.equal(denied.structuredContent.type, 'https://github.com/FullFran/re-write/blob/main/docs/problems.md#unknown-book');
+  assert.deepEqual((await call(client, 'list_books', {})).data.books, []);
+});
+
+test('an agent for one book gets nothing from another book through any MCP tool, whatever is granted', async () => {
+  const { lib, data } = library();
+  const other = join(data, 'books', 'otra');
+  cli('init', other);
+  cli('import', other, join(FIXTURES, 'escena-01.md'));
+  lib.grant('otra', 'user_ana');
+  for (const permission of REWRITE_PERMISSIONS) grantPermission(data, PACKAGE, permission);
+  const head = git(other, 'rev-parse', 'HEAD');
+  for (const entry of [null, PACKAGE]) {
+    const client = await connectAs(lib, 'user_fran', entry);
+    assert.deepEqual((await call(client, 'list_books', {})).data.books.map((b: any) => b.book_id), ['sal']);
+    for (const [name, args] of BOOK_TOOLS) {
+      const hidden: any = await client.callTool({ name, arguments: { book: 'otra', ...args } });
+      const missing: any = await client.callTool({ name, arguments: { book: 'nope', ...args } });
+      assert.equal(hidden.isError, true, name);
+      assert.deepEqual(hidden.structuredContent, missing.structuredContent, name);
+      assert.equal(hidden.structuredContent.type, 'https://github.com/FullFran/re-write/blob/main/docs/problems.md#unknown-book', name);
+    }
+  }
+  assert.equal(git(other, 'rev-parse', 'HEAD'), head);
+  assert.equal(git(other, 'status', '--porcelain'), '');
+  assert.equal(cli('claims', other).json.claims.length, 0);
+});
+
+test('no grant lets an MCP session accept or reject a claim or a proposal', async () => {
+  const { lib, data } = library();
+  for (const permission of REWRITE_PERMISSIONS) grantPermission(data, PACKAGE, permission);
+  assert.throws(() => grantPermission(data, PACKAGE, REVIEW_DECIDE), /cannot be granted/);
+  for (const entry of [null, PACKAGE]) {
+    const client = await connectAs(lib, 'user_fran', entry);
+    const names = (await client.listTools()).tools.map(t => t.name);
+    assert.ok(!names.some(name => /accept|approve|reject|decide|review|verdict/.test(name)), names.join(','));
+    for (const name of ['review_claim', 'accept_claim', 'review_proposal']) {
+      const result: any = await client.callTool({ name, arguments: { book: 'sal' } }).catch(error => ({ isError: true, error }));
+      assert.equal(result.isError, true, name);
+    }
+    const decision = decide({ library: lib, subject: 'user_fran', book: 'sal', door: 'mcp', permission: REVIEW_DECIDE, entry });
+    assert.equal(!decision.allow && decision.reason, 'forbidden');
+  }
 });

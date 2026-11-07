@@ -443,6 +443,58 @@
         "tests/hcs-host-state.test.ts"
       ]
     },
+    "HCS-0005-R001": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/authority.ts",
+        "src/application/decision.ts"
+      ],
+      "tests": [
+        "tests/hcs-authority.test.ts",
+        "tests/hcs-conformance-authority.test.ts",
+        "tests/decision.test.ts",
+        "tests/mcp.test.ts",
+        "tests/hcs-host-state.test.ts"
+      ]
+    },
+    "HCS-0005-R002": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/authority.ts",
+        "src/hcs/grants.ts"
+      ],
+      "tests": [
+        "tests/hcs-authority.test.ts",
+        "tests/hcs-conformance-authority.test.ts",
+        "tests/hcs-host-state.test.ts"
+      ]
+    },
+    "HCS-0005-R003": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/grants.ts",
+        "src/application/decision.ts",
+        "src/adapters/mcp.ts",
+        "src/adapters/http-server.ts"
+      ],
+      "tests": [
+        "tests/hcs-authority.test.ts",
+        "tests/decision.test.ts",
+        "tests/mcp.test.ts",
+        "tests/review.test.ts"
+      ]
+    },
+    "HCS-0005-R004": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/authority.ts"
+      ],
+      "tests": [
+        "tests/hcs-authority.test.ts",
+        "tests/hcs-conformance-authority.test.ts",
+        "tests/hcs-host-state.test.ts"
+      ]
+    },
     "HCS-0006-R001": {
       "status": "implemented",
       "code": [

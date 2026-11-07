@@ -194,3 +194,42 @@ test('a malformed path escape is a 404, not a server error', async () => {
 test('the review API only answers on its documented paths', async () => {
   assert.equal((await api('/other/sal', await h.session())).status, 404);
 });
+
+test('a review session for one book cannot read or decide in another book', async () => {
+  const other = join(h.data, 'books', 'otra');
+  cli('init', other, '--title', 'Otra');
+  cli('import', other, join(FIXTURES, 'escena-01.md'), join(FIXTURES, 'escena-02.md'));
+  cli('extract', other, '--from', join(FIXTURES, 'annotations.json'));
+  const proposal = cli('propose', other, '--file', SCENE, '--find', 'once años', '--replace', 'doce años', '--rationale', 'r').json.proposal.proposal_id;
+  h.library.grant('otra', 'user_ana');
+  const owner = await h.session('user_ana');
+  const { claims, findings } = await (await api('/books/otra', owner)).json();
+  const head = git(other, 'rev-parse', 'HEAD');
+  const session = await h.session();
+  const missing = await (await api('/books/nope', session)).json();
+  assert.deepEqual((await (await api('/books', session)).json()).books.map((b: any) => b.book_id), ['sal']);
+  for (const [path, body] of [
+    ['/books/otra', undefined],
+    [`/books/otra/claims/${claims[0].claim_id}`, { decision: 'accept' }],
+    [`/books/otra/proposals/${proposal}`, { decision: 'accept' }],
+    ...(findings.length ? [[`/books/otra/findings/${findings[0].finding_id}`, { verdict: 'confirmed' }]] : []),
+  ] as [string, unknown][]) {
+    const res = await api(path, session, body);
+    assert.equal(res.status, 404, path);
+    assert.deepEqual(await res.json(), missing, path);
+  }
+  assert.equal(git(other, 'rev-parse', 'HEAD'), head);
+  assert.ok((await (await api('/books/otra', owner)).json()).claims.every((c: any) => c.editorial_status === 'proposed'));
+});
+
+test('removing a person\'s book access closes the review door on the next request', async () => {
+  const book = join(h.data, 'books', 'breve');
+  cli('init', book, '--title', 'Breve');
+  cli('import', book, join(FIXTURES, 'escena-01.md'));
+  h.library.grant('breve', 'user_eva');
+  const session = await h.session('user_eva');
+  assert.equal((await api('/books/breve', session)).status, 200);
+  h.library.revoke('breve', 'user_eva');
+  assert.equal((await api('/books/breve', session)).status, 404);
+  assert.deepEqual((await (await api('/books', session)).json()).books, []);
+});

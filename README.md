@@ -59,9 +59,12 @@ rewrite review-proposal /tmp/book <proposal-id> accept --by "your name"
 | `review-proposal <dir> <id> accept\|reject [--by] [--note]` | The only command that changes a scene, and only on accept |
 | `status <dir>` | Shows the restored project state |
 | `catalog validate <catalog.json>` | Checks an HCS catalog document |
-| `catalog apply <catalog.json> --state <dir> [--store <dir>]` | Installs a catalog as a new generation; runs no package code |
+| `catalog apply <catalog.json> --state <dir> [--store <dir>] [--grants <data-dir>]` | Installs a catalog as a new generation; runs no package code; each entry needs a grant for every permission its package requests |
 | `catalog status --state <dir>` | Shows the active generation and entry states |
 | `grant <data-dir> <book> <user-id>` | Gives a person access to a book on a server |
+| `revoke <data-dir> <book> <user-id>` | Removes that access; it applies to the person's next call |
+| `package-grant <data-dir> <entry> <permission>` | Grants a package entry one permission; review decisions are never grantable |
+| `package-revoke <data-dir> <entry> <permission>` | Revokes it; it applies to the next operation |
 
 Add `--json` to any command. Exit codes: 0 for success, 1 for a refusal, 2 for a usage error.
 

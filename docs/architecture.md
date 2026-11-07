@@ -115,7 +115,9 @@ An operation is allowed only when all of these hold, checked when it is dispatch
 2. the package entry, if the operation comes from a package, holds a grant for the permission;
 3. the operation is reachable through the door it arrived on.
 
-There are two doors. The MCP door can read and propose. The review door, behind a browser session, is the only way to accept or reject. That is a host-owned setting: generation content cannot add an approve tool, remove the untrusted-text instruction or widen it (HCS-0008-R007). Per-person credentials for projected MCP servers follow [#4](https://github.com/FullFran/re-write/issues/4).
+One function decides this: `decide({ subject, book, door, permission, entry })` in `src/application/decision.ts`. Every MCP tool and every review route that touches a book calls it before doing any work, and it reads people's book access (`access.json`) and package grants (`grants.json`) from disk on every call, so `rewrite revoke` and `rewrite package-revoke` apply to the next call without a restart. A person without access to a book gets the same refusal as for a missing book; a package without a grant gets `permission_denied` (HCS-0005-R001); a permission the door does not offer is `forbidden`. Requests and contribution metadata such as Agent Skills `allowed-tools` never count as grants (HCS-0005-R002, R004).
+
+There are two doors. The MCP door can read and propose. The review door, behind a browser session, is the only way to accept or reject. Review decisions (`com.fullfran.rewrite.review.decide`) are never grantable to a package, and the MCP door refuses them whatever is granted. That is a host-owned setting: generation content cannot add an approve tool, remove the untrusted-text instruction or widen it (HCS-0008-R007). Per-person credentials for projected MCP servers follow [#4](https://github.com/FullFran/re-write/issues/4).
 
 ## 6. Where the planned features fit
 
