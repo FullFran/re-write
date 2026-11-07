@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
-import { realpathSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { buildPackage } from '../hcs/package.ts';
 import { fileURLToPath } from 'node:url';
 import { HcsFailure } from '../hcs/errors.ts';
+import { readCatalog } from '../hcs/catalog.ts';
+import { activeGeneration, applyDesiredSet, statusReport } from '../hcs/host-state.ts';
+import type { EntryStatus } from '../hcs/lifecycle.ts';
 import { productProblem, rejectedCandidate } from '../adapters/problems.ts';
 import { ANNOTATION_EXTRACTOR, loadAnnotations } from '../adapters/annotation-extractor.ts';
 import { Library } from '../application/library.ts';
@@ -15,6 +18,10 @@ import { VERDICTS, type Finding, type VerdictKind } from '../domain/continuity.t
 const USAGE = `RE;write: narrative memory with evidence and human review.
 
   rewrite package <dir> [--out <file>] [--json]  build a deterministic package archive
+  rewrite catalog validate <catalog.json>    check a catalog document
+  rewrite catalog apply <catalog.json> --state <dir> [--store <dir>]
+                                             install a catalog as a new generation (runs no package code)
+  rewrite catalog status --state <dir>       show the active generation and entry states
   rewrite init <dir> [--title <title>]       create or open a book repository
   rewrite import <dir> <scene.md>...         copy scenes in and commit them
   rewrite read <dir> <scenes/file.md>        print a scene
@@ -81,12 +88,37 @@ function statusOf(project: Project): object {
   };
 }
 
+function lifecycleOutput(generation: number | null, entries: EntryStatus[]): Output {
+  const lines = entries.map(e => `  ${e.entry} ${e.version} ${e.state}${e.error ? ` (${e.error.code}: ${e.error.message})` : ''}`);
+  return { json: { generation, entries }, text: [`generation ${generation ?? 'none'}`, ...lines].join('\n') };
+}
+
+async function catalogCommand(sub: string | undefined, rest: string[], option: (name: string) => string | undefined): Promise<Output> {
+  if (sub === 'status') {
+    if (rest.length) throw new UsageError('unexpected catalog status arguments');
+    const stateDir = need(option('state'), '--state');
+    return lifecycleOutput(activeGeneration(stateDir), statusReport(stateDir));
+  }
+  if (sub !== 'validate' && sub !== 'apply') throw new UsageError(sub ? `unknown catalog command: ${sub}` : 'missing catalog command');
+  const file = need(rest[0], '<catalog.json>');
+  if (rest.length > 1) throw new UsageError(`unexpected catalog ${sub} arguments`);
+  if (sub === 'apply') {
+    const stateDir = need(option('state'), '--state');
+    const result = await applyDesiredSet(readFileSync(file), { stateDir, storeDir: option('store') });
+    return lifecycleOutput(result.generation, result.status);
+  }
+  const read = readCatalog(readFileSync(file));
+  if (!read.ok) throw new HcsFailure(read.errors);
+  const { id, version, entries } = read.catalog;
+  return { json: { valid: true, id, version, entries: entries.length }, text: `valid: ${id} ${version} (${entries.length} entries)` };
+}
+
 interface Output {
   json: unknown;
   text: string;
 }
 
-function dispatch(args: string[], values: Record<string, string | boolean | undefined>): Output {
+async function dispatch(args: string[], values: Record<string, string | boolean | undefined>): Promise<Output> {
   const [command, dir, ...rest] = args;
   const option = (name: string) => values[name] as string | undefined;
   switch (command) {
@@ -98,6 +130,8 @@ function dispatch(args: string[], values: Record<string, string | boolean | unde
       writeFileSync(file, bytes);
       return { json: { contentHash, size, mediaType, file }, text: `${contentHash} ${size}` };
     }
+    case 'catalog':
+      return catalogCommand(dir, rest, option);
     case 'init': {
       const { project, created } = Project.init(need(dir, '<dir>'), option('title') ?? 'Untitled book');
       return { json: { dir: project.dir, created }, text: `${created ? 'created' : 'opened'} ${project.dir}` };
@@ -204,7 +238,7 @@ export function renderFailure(error: unknown, json: boolean, usage = false): { c
   return { code, text: code === 2 ? `usage error: ${message}\n\n${USAGE}` : `error: ${message}` };
 }
 
-function main(): number {
+async function main(): Promise<number> {
   let parsed;
   try {
     parsed = parseArgs({
@@ -213,6 +247,7 @@ function main(): number {
         json: { type: 'boolean' }, out: { type: 'string' }, title: { type: 'string' }, from: { type: 'string' },
         by: { type: 'string' }, note: { type: 'string' }, file: { type: 'string' }, find: { type: 'string' },
         replace: { type: 'string' }, rationale: { type: 'string' }, finding: { type: 'string' },
+        state: { type: 'string' }, store: { type: 'string' },
       },
     });
   } catch (error) {
@@ -221,7 +256,7 @@ function main(): number {
     return failure.code;
   }
   try {
-    const output = dispatch(parsed.positionals, parsed.values);
+    const output = await dispatch(parsed.positionals, parsed.values);
     console.log(parsed.values.json ? JSON.stringify(output.json, null, 2) : output.text);
     return 0;
   } catch (error) {
@@ -233,4 +268,4 @@ function main(): number {
 
 // Run only as the entry point, also when invoked through a symlink such as node_modules/.bin/rewrite.
 const entry = process.argv[1] ? realpathSync(process.argv[1]) : '';
-if (entry === realpathSync(fileURLToPath(import.meta.url))) process.exitCode = main();
+if (entry === realpathSync(fileURLToPath(import.meta.url))) process.exitCode = await main();
