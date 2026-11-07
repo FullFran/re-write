@@ -2,7 +2,17 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join, resolve } from 'node:path';
 import { Project } from './project.ts';
 
-const BOOK_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+export const BOOK_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+export function slugify(title: string): string {
+  return title
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+}
 
 interface AccessFile {
   books: Record<string, { members: string[] }>;
@@ -51,6 +61,22 @@ export class Library {
   open(book: string, subject: string): Project {
     if (!this.canUse(book, subject)) throw new Error('unknown book');
     return Project.open(this.bookDir(book));
+  }
+
+  /** Creates a new book and grants access to the creator. */
+  createBook(slug: string, title: string, subject: string): { book_id: string; title: string } {
+    if (!BOOK_ID.test(slug)) throw new Error(`invalid book id: ${slug}`);
+    if (!subject) throw new Error('missing user id');
+    const trimmedTitle = title ? title.trim() : '';
+    if (!trimmedTitle) throw new Error('missing title');
+    const dir = this.bookDir(slug);
+    const access = this.access();
+    if (existsSync(dir) || Object.hasOwn(access.books, slug)) {
+      throw new Error(`book already exists: ${slug}`);
+    }
+    Project.init(dir, trimmedTitle);
+    this.grant(slug, subject);
+    return { book_id: slug, title: trimmedTitle };
   }
 
   /** Administrative: run from the server's shell, never reachable from the MCP or the web. */

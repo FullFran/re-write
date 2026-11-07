@@ -1,6 +1,10 @@
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Library } from '../application/library.ts';
+import { slugify, BOOK_ID } from '../application/library.ts';
 import { decide, enforce, ForbiddenError } from '../application/decision.ts';
 import { TokenVerifier } from './auth.ts';
 import { llmsText } from './llms.ts';
@@ -8,7 +12,7 @@ import { buildMcpServer } from './mcp.ts';
 import { REVIEW_CSS, REVIEW_JS, reviewCsp, reviewHtml } from './review-page.ts';
 import { VERDICTS, type VerdictKind } from '../domain/continuity.ts';
 import { HcsFailure } from '../hcs/errors.ts';
-import { REVIEW_DECIDE } from '../hcs/ids.ts';
+import { BOOK_CREATE, REVIEW_DECIDE } from '../hcs/ids.ts';
 import { toProblemDetails } from '../hcs/transport.ts';
 import { productProblem } from './problems.ts';
 
@@ -20,8 +24,16 @@ export interface ServerConfig {
 }
 
 const MAX_BODY_BYTES = 1_048_576;
+const MAX_IMPORT_BODY_BYTES = 10 * 1024 * 1024;
+const MAX_SCENE_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_NOTE = 2_000;
 const READ = 'com.fullfran.rewrite.book.read';
+const IMPORT = 'com.fullfran.rewrite.book.import';
+const SCENE_FILE_NAME = /^[^./][^/]*\.md$/;
+
+function isFsError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && ('code' in error || 'syscall' in error || 'errno' in error);
+}
 
 class HttpError extends Error {
   readonly status: number;
@@ -86,12 +98,12 @@ function hcsProblem(res: ServerResponse, failure: HcsFailure): void {
   res.end(JSON.stringify({ ...body, ...(failure.errors.length > 1 ? { 'x-rewrite-errors': failure.errors } : {}) }));
 }
 
-async function readBody(req: IncomingMessage): Promise<unknown> {
+async function readBody(req: IncomingMessage, maxBytes = MAX_BODY_BYTES): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > MAX_BODY_BYTES) throw new HttpError(413, 'body too large');
+    if (size > maxBytes) throw new HttpError(413, 'body too large');
     chunks.push(chunk as Buffer);
   }
   if (size === 0) return undefined;
@@ -183,13 +195,121 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
       }
     };
     if (parts[0] !== 'books') throw new HttpError(404, 'not found');
-    if (req.method === 'GET' && parts.length === 1) {
-      const books = library.booksFor(subject)
-        .filter((b) => decide({ library, subject, book: b, door: 'review', permission: READ, entry: null }).allow)
-        .map((b) => ({ book_id: b, title: library.open(b, subject).title() }));
-      return json(res, 200, { books });
+    if (parts.length === 1) {
+      if (req.method === 'GET') {
+        const books = library.booksFor(subject)
+          .filter((b) => decide({ library, subject, book: b, door: 'review', permission: READ, entry: null }).allow)
+          .map((b) => ({ book_id: b, title: library.open(b, subject).title() }));
+        return json(res, 200, { books });
+      }
+      if (req.method === 'POST') {
+        enforce({ library, subject, book: null, door: 'review', permission: BOOK_CREATE, entry: null });
+        const body = (await readBody(req) ?? {}) as { title?: unknown; slug?: unknown };
+        if (typeof body.title !== 'string' || !body.title.trim()) {
+          throw new HttpError(400, 'missing title');
+        }
+        const title = body.title.trim();
+        const slug = (typeof body.slug === 'string' && body.slug.trim()) ? body.slug.trim() : slugify(title);
+        if (!BOOK_ID.test(slug)) {
+          throw new HttpError(400, `invalid book slug: ${slug}`);
+        }
+        try {
+          const created = library.createBook(slug, title, subject);
+          return json(res, 201, created);
+        } catch (error) {
+          const msg = library.publicMessage(error);
+          if (msg.includes('already exists')) {
+            return problem(res, 409, msg);
+          }
+          throw error;
+        }
+      }
+      throw new HttpError(404, 'not found');
     }
-    if (req.method === 'GET' && parts.length === 2) return json(res, 200, open(READ).reviewQueue());
+
+    if (parts.length === 2 && req.method === 'GET') {
+      const project = open(READ);
+      return json(res, 200, { ...project.reviewQueue(), scenes: project.scenes() });
+    }
+
+    if (parts.length === 3 && parts[2] === 'scenes' && req.method === 'GET') {
+      return json(res, 200, { scenes: open(READ).scenes() });
+    }
+
+    if (parts.length >= 4 && parts[2] === 'scenes' && req.method === 'GET') {
+      const rawScene = parts.slice(3).join('/');
+      const sceneFile = rawScene.startsWith('scenes/') ? rawScene : `scenes/${rawScene}`;
+      const project = open(READ);
+      let text: string | null = null;
+      try {
+        text = project.readScene(sceneFile);
+      } catch {
+        throw new HttpError(404, 'not found');
+      }
+      if (text === null) throw new HttpError(404, 'not found');
+      const proposals = project.proposals.all()
+        .filter((p) => p.file === sceneFile && p.status === 'proposed')
+        .map((p) => project.showProposal(p.proposal_id));
+      return json(res, 200, { file: sceneFile, text, proposals });
+    }
+
+    if (parts.length === 3 && parts[2] === 'import' && req.method === 'POST') {
+      const project = open(IMPORT);
+      const body = (await readBody(req, MAX_IMPORT_BODY_BYTES) ?? {}) as { files?: unknown };
+      if (!body.files || !Array.isArray(body.files) || body.files.length === 0) {
+        throw new HttpError(400, 'files must be a non-empty array');
+      }
+      const seenNames = new Set<string>();
+      for (const file of body.files as Array<{ name?: unknown; content?: unknown }>) {
+        if (typeof file?.name !== 'string' || typeof file?.content !== 'string') {
+          throw new HttpError(400, 'each file must have a name and content');
+        }
+        if (file.name.includes('\0')) {
+          throw new HttpError(400, 'invalid file name: contains NUL byte');
+        }
+        const base = basename(file.name);
+        if (base.includes('\0')) {
+          throw new HttpError(400, 'invalid file name: contains NUL byte');
+        }
+        if (Buffer.byteLength(base, 'utf8') > 255) {
+          throw new HttpError(400, `file name too long: ${base.slice(0, 30)}... exceeds 255 bytes limit`);
+        }
+        if (!SCENE_FILE_NAME.test(base)) {
+          throw new HttpError(400, `only Markdown (.md) files are supported: ${file.name}`);
+        }
+        if (seenNames.has(base)) {
+          throw new HttpError(400, `duplicate file name in import batch: ${base}`);
+        }
+        seenNames.add(base);
+        if (Buffer.byteLength(file.content, 'utf8') > MAX_SCENE_FILE_BYTES) {
+          throw new HttpError(413, `file too large: ${file.name} exceeds 2 MB limit`);
+        }
+      }
+      const tempDir = mkdtempSync(join(tmpdir(), 'rewrite-import-'));
+      try {
+        const tempPaths: string[] = [];
+        for (const file of body.files as Array<{ name: string; content: string }>) {
+          const tempPath = join(tempDir, basename(file.name));
+          writeFileSync(tempPath, file.content, 'utf8');
+          tempPaths.push(tempPath);
+        }
+        const result = project.importScenes(tempPaths);
+        return json(res, 200, result);
+      } catch (error) {
+        if (error instanceof HttpError || error instanceof HcsFailure) throw error;
+        if (isFsError(error)) {
+          return problem(res, 409, 'file system error during import');
+        }
+        const msg = library.publicMessage(error);
+        if (msg.includes('/tmp') || msg.includes(tmpdir())) {
+          return problem(res, 409, 'file system error during import');
+        }
+        return problem(res, 409, msg);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    }
+
     if (req.method !== 'POST' || parts.length !== 4) throw new HttpError(404, 'not found');
 
     const project = open(REVIEW_DECIDE);

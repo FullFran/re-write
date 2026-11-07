@@ -88,7 +88,8 @@ Capabilities are named by contract, not by package (HCS-0002). Host built-ins ar
 | Permission | Allows | Grantable to an entry |
 | --- | --- | --- |
 | `com.fullfran.rewrite.book.read` | Read books and scenes | yes |
-| `com.fullfran.rewrite.book.import` | Import outside records as proposals | yes |
+| `com.fullfran.rewrite.book.create` | Create a book repository and become its initial member (review door only) | no |
+| `com.fullfran.rewrite.book.import` | Import outside records as proposals (MCP) or scenes directly (review door) | yes |
 | `com.fullfran.rewrite.claims.propose` | Propose claims | yes |
 | `com.fullfran.rewrite.findings.propose` | Propose findings | yes |
 | `com.fullfran.rewrite.revision.propose` | Propose revisions | yes |
@@ -119,7 +120,20 @@ An operation is allowed only when all of these hold, checked when it is dispatch
 
 One function decides this: `decide({ subject, book, door, permission, entry })` in `src/application/decision.ts`. Every MCP tool and every review route that touches a book calls it before doing any work, and it reads people's book access (`access.json`) and package grants (`grants.json`) from disk on every call, so `rewrite revoke` and `rewrite package-revoke` apply to the next call without a restart. A person without access to a book gets the same refusal as for a missing book; a package without a grant gets `permission_denied` (HCS-0005-R001); a permission the door does not offer is `forbidden`. Requests and contribution metadata such as Agent Skills `allowed-tools` never count as grants (HCS-0005-R002, R004).
 
-There are two doors. The MCP door can read and propose. The review door, behind a browser session, is the only way to accept or reject. Review decisions (`com.fullfran.rewrite.review.decide`) are never grantable to a package, and the MCP door refuses them whatever is granted. That is a host-owned setting: generation content cannot add an approve tool, remove the untrusted-text instruction or widen it (HCS-0008-R007). Per-person credentials for projected MCP servers follow [#4](https://github.com/FullFran/re-write/issues/4).
+There are two doors. The MCP door can read and propose. The review door, behind a browser session, is the only way to accept or reject, and provides the writer workspace where authors create books, import Markdown, and inspect scenes without terminal access.
+
+Routes available on the review door (`/review`):
+- `GET /review/api/books`: lists accessible books (`com.fullfran.rewrite.book.read`).
+- `POST /review/api/books`: creates a book and grants access to the creator (`com.fullfran.rewrite.book.create`).
+- `GET /review/api/books/{book}`: reads the review queue and scene list (`com.fullfran.rewrite.book.read`).
+- `GET /review/api/books/{book}/scenes`: lists scene files in the book (`com.fullfran.rewrite.book.read`).
+- `GET /review/api/books/{book}/scenes/{file}`: reads a scene text and lists its pending proposals (`com.fullfran.rewrite.book.read`).
+- `POST /review/api/books/{book}/import`: uploads and commits Markdown scenes (`com.fullfran.rewrite.book.import`).
+- `POST /review/api/books/{book}/claims/{id}`, `/proposals/{id}`, `/findings/{id}`: reviews claims, proposals, and findings (`com.fullfran.rewrite.review.decide`).
+
+Review decisions (`com.fullfran.rewrite.review.decide`) and book creation (`com.fullfran.rewrite.book.create`) are never grantable to a package, and the MCP door refuses them whatever is granted. That is a host-owned setting: generation content cannot add an approve tool, remove the untrusted-text instruction or widen it (HCS-0008-R007). Per-person credentials for projected MCP servers follow [#4](https://github.com/FullFran/re-write/issues/4).
+
+Known limitation: `POST /review/api/books` leaks the existence of an existing book slug via HTTP 409 Conflict when an authenticated subject attempts to create a book whose slug is already owned by another subject. Because sign-up is invite-only via Clerk, unauthenticated actors cannot probe slugs, but authenticated members can determine whether a slug is in use across the instance. Book contents, scene texts, and proposals remain fully isolated (returning 404).
 
 ## 6. Where the planned features fit
 

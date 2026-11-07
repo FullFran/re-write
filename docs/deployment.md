@@ -70,7 +70,9 @@ Clerk browser sessions last 7 days unless a paid plan changes that.
 
 ## 3. Create a book and give access
 
-Nobody has access by default. Clerk says who a person is; `grant` says which book they can open. Find the user id (`user_...`) in the Clerk dashboard, then run this in the container:
+Books can be created directly from the browser at `/review`: any signed-in user can create a book, upload Markdown scenes, and automatically becomes its only member.
+
+Alternatively, an administrator can create a book and manage access via the CLI in the container. Nobody has access by default. Clerk says who a person is; `grant` says which book they can open. Find the user id (`user_...`) in the Clerk dashboard, then run this in the container:
 
 ```bash
 alias rewrite="node /app/src/cli/main.ts"
