@@ -7,6 +7,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Library } from '../src/application/library.ts';
 import { buildMcpServer } from '../src/adapters/mcp.ts';
 import { HcsFailure, hcsError } from '../src/hcs/errors.ts';
+import { REWRITE_CAPABILITIES, REVIEW_DECIDE } from '../src/hcs/ids.ts';
 import { cli, FIXTURES, git, read, tempDir } from './helpers.ts';
 
 const SCENE = 'scenes/escena-01.md';
@@ -22,9 +23,9 @@ function library(): { lib: Library; data: string; book: string } {
   return { lib, data, book };
 }
 
-async function connect(lib: Library, subject: string): Promise<Client> {
+async function connect(lib: Library, subject: string, capabilities?: any): Promise<Client> {
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-  await buildMcpServer(lib, subject).connect(serverSide);
+  await buildMcpServer(lib, subject, capabilities).connect(serverSide);
   const client = new Client({ name: 'test', version: '1' });
   await client.connect(clientSide);
   return client;
@@ -41,6 +42,64 @@ async function call(client: Client, name: string, args: object): Promise<{ isErr
   }
   return { isError: Boolean(result.isError), data, text };
 }
+
+test('MCP pins one snapshot, filters tools, and dispatches draining capabilities', async () => {
+  const { lib } = library();
+  const bookRef = 'com.fullfran.rewrite.book.read@1';
+  const claimRef = 'com.fullfran.rewrite.claims.read@1';
+  let state = { generation: 1, active: new Set([claimRef]), draining: new Set([claimRef]) };
+  let snapshots = 0;
+  const provider = { snapshot: () => { snapshots++; return state; } };
+  const first = await connect(lib, 'user_fran', provider);
+  state = { generation: 2, active: new Set([bookRef]), draining: new Set() };
+  const second = await connect(lib, 'user_fran', provider);
+  assert.equal(snapshots, 2);
+  assert.deepEqual((await first.listTools()).tools.map(t => t.name), ['list_claims']);
+  assert.deepEqual((await second.listTools()).tools.map(t => t.name), ['list_books', 'list_scenes', 'read_scene']);
+  await assert.rejects(first.callTool({ name: 'list_claims', arguments: { book: 'sal' } }), (e: any) => {
+    assert.equal(e.code, -32000);
+    assert.equal(e.data.hcsError.code, 'unsupported_capability');
+    assert.equal(e.data.hcsError.capability, claimRef);
+    assert.equal(e.data.hcsError.requirement, 'HCS-0004-R006');
+    return true;
+  });
+  assert.deepEqual((await call(second, 'list_books', {})).data.books.map((b: any) => b.book_id), ['sal']);
+});
+
+test('MCP rejects colliding tool names and never registers the review capability', async () => {
+  const { lib } = library();
+  const table = [...REWRITE_CAPABILITIES, { ref: 'com.fullfran.rewrite.other@1', mcpTools: ['list_books'] }];
+  assert.throws(() => buildMcpServer(lib, 'user_fran', undefined, table), /list_books/);
+  assert.ok(!REWRITE_CAPABILITIES.some(c => c.ref === REVIEW_DECIDE));
+  const names = (await (await connect(lib, 'user_fran')).listTools()).tools.map(t => t.name);
+  assert.ok(!names.some(name => /accept|approve|reject|decide/.test(name)));
+});
+
+test('MCP refuses an active capability with no tool implementation', () => {
+  const { lib } = library();
+  const ref = 'com.fullfran.rewrite.missing@1';
+  const provider = { snapshot: () => ({ generation: 1, active: new Set([ref]), draining: new Set<string>() }) };
+  assert.throws(() => buildMcpServer(lib, 'user_fran', provider, [{ ref, mcpTools: ['missing_tool'] }]), /missing_tool/);
+});
+
+test('MCP pins snapshot contents even if the provider mutates its sets', async () => {
+  const { lib } = library();
+  const ref = 'com.fullfran.rewrite.book.read@1';
+  const active = new Set([ref, 'com.fullfran.rewrite.claims.read@1']);
+  const provider = { snapshot: () => ({ generation: 1, active, draining: new Set<string>() }) };
+  const first = await connect(lib, 'user_fran', provider);
+  active.delete(ref);
+  const second = await connect(lib, 'user_fran', provider);
+  assert.deepEqual((await first.listTools()).tools.map(t => t.name), ['list_books', 'list_scenes', 'read_scene', 'list_claims']);
+  assert.deepEqual((await second.listTools()).tools.map(t => t.name), ['list_claims']);
+  assert.deepEqual((await call(first, 'list_books', {})).data.books.map((b: any) => b.book_id), ['sal']);
+});
+
+test('MCP lists no tools for an empty capability snapshot', async () => {
+  const { lib } = library();
+  const client = await connect(lib, 'user_fran', { snapshot: () => ({ generation: 1, active: new Set(), draining: new Set() }) });
+  assert.deepEqual(await client.listTools(), { tools: [] });
+});
 
 test('MCP carries an HCS failure as a JSON-RPC error', async () => {
   const { lib } = library();

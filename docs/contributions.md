@@ -81,7 +81,7 @@ These are proposed activation contracts. Paths are relative to the unpacked pack
 | `com.fullfran.rewrite.fixture-annotations` | `x-rewrite-extractor`, providing `com.fullfran.rewrite.claims.extract@1` | `com.fullfran.rewrite.book.read`, `com.fullfran.rewrite.claims.propose` | Move the fixture annotation adapter into a module conforming to the scene-input contract; its current JSON fixture loader will need adaptation. Keep literal quote validation, proposal storage and review in the host. |
 | `com.fullfran.rewrite.knowledge-order` | `x-rewrite-check`, providing `com.fullfran.rewrite.continuity.check@1` | `com.fullfran.rewrite.book.read`, `com.fullfran.rewrite.findings.propose` | Move the knowledge-order heuristic and its private helpers from `src/domain/continuity.ts`; keep shared finding and verdict types, verdict recording and human review in the host. |
 
-These are planned packages, not currently installed contributions. The fixture extractor is deterministic annotation input, not an independent narrative evaluator; neither it nor a continuity finding replaces human editorial authority.
+These are planned packages, not currently installed contributions. The host provides `com.fullfran.rewrite.continuity.check@1` until the knowledge-order package is extracted. The fixture extractor is deterministic annotation input, not an independent narrative evaluator; neither it nor a continuity finding replaces human editorial authority.
 
 ## Supported kinds
 

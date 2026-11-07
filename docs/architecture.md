@@ -78,7 +78,7 @@ Capabilities are named by contract, not by package (HCS-0002). Host built-ins ar
 | `com.fullfran.rewrite.claims.read@1` | 1 | host | Read claims: `list_claims` |
 | `com.fullfran.rewrite.claims.propose@1` | 1 | host | Propose claims: `propose_claims` |
 | `com.fullfran.rewrite.revision.propose@1` | 1 | host | Propose revisions and inspect proposals: `propose_revision`, `list_proposals`, `get_proposal` |
-| `com.fullfran.rewrite.continuity.check@1` | 1 | package (`x-rewrite-check`) | Inspect continuity: `inspect_continuity` |
+| `com.fullfran.rewrite.continuity.check@1` | 1 | host, until extraction to `com.fullfran.rewrite.knowledge-order` | Inspect continuity: `inspect_continuity` |
 | `com.fullfran.rewrite.claims.extract@1` | 1 | package (`x-rewrite-extractor`) | Extract claim candidates: none yet (CLI `extract`) |
 | `com.fullfran.rewrite.entities.read@1` | 1 | host (planned, [#12](https://github.com/FullFran/re-write/issues/12)) | Read entities: none yet |
 | `com.fullfran.rewrite.events.read@1` | 1 | host (planned, [#15](https://github.com/FullFran/re-write/issues/15)) | Read events: none yet |
@@ -102,6 +102,8 @@ A **generation** is the immutable, prepared set of packages of one desired set (
 | --- | --- | --- | --- |
 | Connected MCP clients (ChatGPT, Claude Code, OpenCode, others) | no | Each MCP session's tools, prompts, instructions and skill resources are built from one generation, fixed for the session's life | by analogy: R001-R007, R017; health = first successful call. This case is a gap in HCS, reported there |
 | Embedded engine for writers without their own agent (Pi first) | yes | A per-run projection that points at the generation directory, with RE;write's MCP server as a host-owned server | applies fully, including R013-R016 |
+
+MCP sessions currently expose host built-ins from one capability snapshot pinned when the server is built, and check capability state on dispatch. Package projection into sessions awaits M5.
 
 The model comes from the connected client; only the embedded engine needs one paid by the operator, chosen from a host-owned allowlist ([#5](https://github.com/FullFran/re-write/issues/5)).
 
