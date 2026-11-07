@@ -25,7 +25,7 @@ test('catalog CLI validates, applies, reports status and keeps the previous gene
       assert.equal(built.status, 0, built.stderr);
       const meta = JSON.parse(built.stdout);
       return {
-        id: `dev.example.${p.name}`, version: '0.1.0', contentHash: meta.contentHash, size: meta.size, mediaType: meta.mediaType,
+        id: `com.fullfran.rewrite.${p.name}`, version: '0.1.0', contentHash: meta.contentHash, size: meta.size, mediaType: meta.mediaType,
         locations: [pathToFileURL(join(temp, meta.file)).href],
         contributions: [{ kind: p.kind, path: 'index.mjs', provides: [p.provides] }],
       };
@@ -44,10 +44,17 @@ test('catalog CLI validates, applies, reports status and keeps the previous gene
     assert.equal(invalidJson.status, 1);
     assert.equal(JSON.parse(invalidJson.stderr).code, 'manifest_invalid');
 
+    // The fixture packages request permissions in requests.json; without --grants the state directory holds the grants.
+    for (const [entry, permission] of [
+      ['com.fullfran.rewrite.fixture-annotations', 'com.fullfran.rewrite.book.read'],
+      ['com.fullfran.rewrite.fixture-annotations', 'com.fullfran.rewrite.claims.propose'],
+      ['com.fullfran.rewrite.knowledge-order', 'com.fullfran.rewrite.book.read'],
+      ['com.fullfran.rewrite.knowledge-order', 'com.fullfran.rewrite.findings.propose'],
+    ]) assert.equal(run('package-grant', 'state', entry, permission).status, 0);
     const applied = run('catalog', 'apply', 'catalog.json', '--state', 'state');
     assert.equal(applied.status, 0, applied.stderr);
-    assert.equal(applied.stdout, 'generation 1\n  dev.example.fixture-annotations 0.1.0 active\n  dev.example.knowledge-order 0.1.0 active\n');
-    assert.equal(existsSync(join(temp, 'state/generations/1/entries/dev.example.knowledge-order/index.mjs')), true);
+    assert.equal(applied.stdout, 'generation 1\n  com.fullfran.rewrite.fixture-annotations 0.1.0 active\n  com.fullfran.rewrite.knowledge-order 0.1.0 active\n');
+    assert.equal(existsSync(join(temp, 'state/generations/1/entries/com.fullfran.rewrite.knowledge-order/index.mjs')), true);
 
     const bad = run('catalog', 'apply', 'bad.json', '--state', 'state');
     assert.equal(bad.status, 1); assert.equal(bad.stdout, '');
@@ -57,12 +64,12 @@ test('catalog CLI validates, applies, reports status and keeps the previous gene
     assert.equal(status.status, 0, status.stderr);
     // R003: the entry returns to its previous state; the failed version is reported by the apply error.
     assert.deepEqual(JSON.parse(status.stdout), { generation: 1, entries: [
-      { entry: 'dev.example.fixture-annotations', version: '0.1.0', state: 'active' },
-      { entry: 'dev.example.knowledge-order', version: '0.1.0', state: 'active' },
+      { entry: 'com.fullfran.rewrite.fixture-annotations', version: '0.1.0', state: 'active' },
+      { entry: 'com.fullfran.rewrite.knowledge-order', version: '0.1.0', state: 'active' },
     ] });
     const text = run('catalog', 'status', '--state', 'state');
     assert.equal(text.status, 0);
-    assert.match(text.stdout, /^generation 1\n {2}dev\.example\.fixture-annotations 0\.1\.0 active\n/);
+    assert.match(text.stdout, /^generation 1\n {2}com\.fullfran\.rewrite\.fixture-annotations 0\.1\.0 active\n/);
 
     const empty = run('catalog', 'status', '--state', 'empty');
     assert.deepEqual([empty.status, empty.stdout], [0, 'generation none\n']);
