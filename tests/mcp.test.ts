@@ -164,8 +164,8 @@ test('the MCP offers reading and proposing, and no way to accept or reject', asy
   const client = await connect(lib, 'user_fran');
   const names = (await client.listTools()).tools.map((t) => t.name).sort();
   assert.deepEqual(names, [
-    'get_proposal', 'inspect_continuity', 'list_books', 'list_claims', 'list_proposals', 'list_scenes',
-    'propose_claims', 'propose_revision', 'read_scene',
+    'get_analysis_guide', 'get_proposal', 'inspect_continuity', 'list_books', 'list_claims', 'list_findings', 'list_proposals', 'list_scenes',
+    'propose_claims', 'propose_findings', 'propose_revision', 'read_scene',
   ]);
   assert.ok(!names.some((name) => /review|accept|reject|apply|verdict/.test(name)));
 });
@@ -420,6 +420,8 @@ const BOOK_TOOLS: [string, Record<string, unknown>][] = [
   ['propose_claims', { extractor: 'x', candidates: [candidate] }], ['inspect_continuity', {}],
   ['propose_revision', { file: SCENE, find: 'once años', replace: 'doce años', rationale: 'r' }],
   ['list_proposals', {}], ['get_proposal', { proposal_id: 'p-1' }],
+  ['list_findings', {}],
+  ['propose_findings', { findings: [{ question: 'motivation', kind: 'fact', statement: 's', evidence: [{ file: SCENE, quote: QUOTE }] }] }],
 ];
 
 test('MCP checks the package grant of every tool at dispatch, and a revocation denies the next call (HCS-0005-R001, R003)', async () => {
@@ -428,7 +430,8 @@ test('MCP checks the package grant of every tool at dispatch, and a revocation d
   await assert.rejects(client.callTool({ name: 'list_books', arguments: {} }), deniedBy('permission_denied', READ));
   for (const [name, args] of BOOK_TOOLS) {
     const permission = name === 'propose_claims' ? 'com.fullfran.rewrite.claims.propose'
-      : name === 'propose_revision' ? 'com.fullfran.rewrite.revision.propose' : READ;
+      : name === 'propose_revision' ? 'com.fullfran.rewrite.revision.propose'
+      : name === 'propose_findings' ? 'com.fullfran.rewrite.findings.propose' : READ;
     await assert.rejects(client.callTool({ name, arguments: { book: 'sal', ...args } }), deniedBy('permission_denied', permission), name);
   }
   grantPermission(data, PACKAGE, READ);
@@ -439,6 +442,8 @@ test('MCP checks the package grant of every tool at dispatch, and a revocation d
     deniedBy('permission_denied', 'com.fullfran.rewrite.claims.propose'));
   await assert.rejects(client.callTool({ name: 'propose_revision', arguments: { book: 'sal', ...BOOK_TOOLS[5][1] } }),
     deniedBy('permission_denied', 'com.fullfran.rewrite.revision.propose'));
+  await assert.rejects(client.callTool({ name: 'propose_findings', arguments: { book: 'sal', ...BOOK_TOOLS[9][1] } }),
+    deniedBy('permission_denied', 'com.fullfran.rewrite.findings.propose'));
   assert.equal(git(book, 'status', '--porcelain'), '');
   assert.equal((await call(client, 'list_claims', { book: 'sal' })).data.total, 0, 'a denied proposal stores nothing');
   revokePermission(data, PACKAGE, READ);

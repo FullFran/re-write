@@ -22,7 +22,8 @@ export interface ApplyOptions {
   activator?: Activator;
   // Authorization hook. The default authorizes an entry only when every permission its package
   // requests is granted in `<grantsDir>/grants.json` (HCS-0005); an HcsFailure it throws is reported as is.
-  authorize?: (entry: CatalogEntry) => Promise<boolean>;
+  // The signal aborts when the step exceeds its deadline.
+  authorize?: (entry: CatalogEntry, signal: AbortSignal) => Promise<boolean>;
   // Where the default authorization reads grants; defaults to `stateDir`.
   grantsDir?: string;
   stepDeadlineMs?: number;
@@ -39,10 +40,21 @@ export const DEFAULT_STEP_DEADLINE_MS = 30_000;
 export class HostBusyError extends Error {
   readonly code = 'host_busy';
   readonly holder: number | undefined;
-  constructor(holder: number | undefined) {
-    super(holder === undefined ? 'Host state is locked by another writer' : `Host state is locked by process ${holder}`);
+  constructor(holder: number | undefined, message?: string) {
+    super(message ?? (holder === undefined ? 'Host state is locked by another writer' : `Host state is locked by process ${holder}`));
     this.name = 'HostBusyError';
     this.holder = holder;
+  }
+}
+
+// When a takeover mutex was left by a process that is no longer alive, it must be removed by hand.
+export class HostTakeoverLockError extends HostBusyError {
+  readonly takeoverPath: string;
+  constructor(takeoverPath: string, holder: number | undefined) {
+    const holderMsg = holder === undefined ? 'dead process' : `process ${holder}`;
+    super(holder, `Host lock takeover was abandoned by ${holderMsg}; remove ${takeoverPath} by hand`);
+    this.name = 'HostTakeoverLockError';
+    this.takeoverPath = takeoverPath;
   }
 }
 
@@ -95,25 +107,111 @@ function alive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (error: any) { return error.code === 'EPERM'; }
 }
 
+// The start time of a process (field 22 of /proc/<pid>/stat on Linux), so a reused PID is not
+// mistaken for the writer that left a lock. Undefined where it cannot be read.
+function processStart(pid: number): string | undefined {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    // The command name (field 2) may hold spaces and parentheses; the fields after it follow the last ')'.
+    const start = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+    return start && /^[0-9]+$/.test(start) ? start : undefined;
+  } catch { return undefined; }
+}
+
+// A lock is held while its process is alive and, when both start times are known, is the same process.
+// Locks written before the start time was recorded only have `pid`.
+function held(pid: number, start: string | undefined): boolean {
+  if (!alive(pid)) return false;
+  const current = start === undefined ? undefined : processStart(pid);
+  return current === undefined || current === start;
+}
+
+function checkTakeoverMutex(takeoverPath: string): void {
+  let content: string;
+  try {
+    content = readFileSync(takeoverPath, 'utf8');
+  } catch (error: any) {
+    if (error.code === 'ENOENT') return;
+    throw error;
+  }
+  let pid: number | undefined, start: string | undefined;
+  try {
+    const value = JSON.parse(content);
+    if (Number.isSafeInteger(value.pid) && value.pid > 0) pid = value.pid;
+    if (typeof value.start === 'string') start = value.start;
+  } catch { /* being written */ }
+  if (pid === undefined) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    try {
+      content = readFileSync(takeoverPath, 'utf8');
+      const value = JSON.parse(content);
+      if (Number.isSafeInteger(value.pid) && value.pid > 0) pid = value.pid;
+      if (typeof value.start === 'string') start = value.start;
+    } catch (retryError: any) {
+      if (retryError.code === 'ENOENT') return;
+    }
+  }
+  if (pid !== undefined && held(pid, start)) {
+    throw new HostBusyError(pid);
+  }
+  throw new HostTakeoverLockError(takeoverPath, pid);
+}
+
 // Single writer for the host's installed state (#10). A lock whose process is gone is taken over.
 function acquireLock(stateDir: string): () => void {
   mkdirSync(stateDir, { recursive: true });
   const path = join(stateDir, 'lock');
+  const takeoverPath = join(stateDir, 'lock.takeover');
   for (let attempt = 0; attempt < 3; attempt++) {
+    checkTakeoverMutex(takeoverPath);
     let fd: number;
     try { fd = openSync(path, 'wx', 0o644); } catch (error: any) {
       if (error.code !== 'EEXIST') throw error;
       let content: string;
       try { content = readFileSync(path, 'utf8'); } catch (readError: any) { if (readError.code === 'ENOENT') continue; throw readError; }
-      let pid: number | undefined;
-      try { const value = JSON.parse(content).pid; if (Number.isSafeInteger(value) && value > 0) pid = value; } catch { /* a lock being written */ }
-      if (pid === undefined || alive(pid)) throw new HostBusyError(pid);
-      // Remove the stale lock only if it is still the one that was inspected.
-      try { if (readFileSync(path, 'utf8') === content) unlinkSync(path); } catch (staleError: any) { if (staleError.code !== 'ENOENT') throw staleError; }
+      let pid: number | undefined, start: string | undefined;
+      try {
+        const value = JSON.parse(content);
+        if (Number.isSafeInteger(value.pid) && value.pid > 0) pid = value.pid;
+        if (typeof value.start === 'string') start = value.start;
+      } catch { /* a lock being written */ }
+      if (pid === undefined || held(pid, start)) throw new HostBusyError(pid);
+      // To remove a stale lock, a process must first hold the takeover mutex.
+      let takeoverFd: number;
+      try {
+        takeoverFd = openSync(takeoverPath, 'wx', 0o644);
+      } catch (takeoverError: any) {
+        if (takeoverError.code !== 'EEXIST') throw takeoverError;
+        checkTakeoverMutex(takeoverPath);
+        continue;
+      }
+      const myStart = processStart(process.pid);
+      const takeoverContent = JSON.stringify({ pid: process.pid, ...(myStart === undefined ? {} : { start: myStart }), at: new Date().toISOString() });
+      try { writeSync(takeoverFd, takeoverContent); fsyncSync(takeoverFd); } finally { closeSync(takeoverFd); }
+      try {
+        let currentLock: string | undefined;
+        try { currentLock = readFileSync(path, 'utf8'); } catch (readErr: any) { if (readErr.code !== 'ENOENT') throw readErr; }
+        if (currentLock === content && !held(pid, start)) {
+          unlinkSync(path);
+        }
+      } finally {
+        try {
+          if (readFileSync(takeoverPath, 'utf8') === takeoverContent) {
+            unlinkSync(takeoverPath);
+          }
+        } catch (unlinkErr: any) {
+          if (unlinkErr.code !== 'ENOENT') throw unlinkErr;
+        }
+      }
       continue;
     }
-    try { writeSync(fd, JSON.stringify({ pid: process.pid, at: new Date().toISOString() })); fsyncSync(fd); } finally { closeSync(fd); }
-    return () => rmSync(path, { force: true });
+    const start = processStart(process.pid);
+    const content = JSON.stringify({ pid: process.pid, ...(start === undefined ? {} : { start }), at: new Date().toISOString() });
+    try { writeSync(fd, content); fsyncSync(fd); } finally { closeSync(fd); }
+    // Release only our own lock.
+    return () => {
+      try { if (readFileSync(path, 'utf8') === content) unlinkSync(path); } catch (error: any) { if (error.code !== 'ENOENT') throw error; }
+    };
   }
   throw new HostBusyError(undefined);
 }
@@ -222,7 +320,7 @@ async function transition(catalogBytes: Uint8Array | string, options: ApplyOptio
 
   const denied: HcsError[] = [];
   for (const e of selected) {
-    const result = await runStep(deadline, () => authorize(e));
+    const result = await runStep(deadline, signal => authorize(e, signal));
     const error = !result.ok ? (result.timeout ? stepError('authorize', e.id, result, false)
       : result.error instanceof HcsFailure ? { ...result.error.errors[0], entry: e.id }
       : hcsError('permission_denied', `Authorization failed: ${reason(result.error)}`, { entry: e.id }))
@@ -239,7 +337,7 @@ async function transition(catalogBytes: Uint8Array | string, options: ApplyOptio
   mkdirSync(join(partial, 'entries'), { recursive: true });
   try {
     for (const e of selected) {
-      const result = await runStep(deadline, () => fetchPackageBytes(e, { storeDir }));
+      const result = await runStep(deadline, signal => fetchPackageBytes(e, { storeDir, signal }));
       let error: HcsError | undefined;
       if (!result.ok) error = result.timeout ? stepError('prepare', e.id, result, false) : hcsError('integrity_mismatch', `Package content unavailable: ${reason(result.error)}`, { entry: e.id, requirement: 'HCS-0001-R007' });
       else {

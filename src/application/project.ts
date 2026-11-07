@@ -10,6 +10,10 @@ import {
 } from '../domain/claim.ts';
 import { inspectContinuity, type Finding, type Verdict, type VerdictKind } from '../domain/continuity.ts';
 import { applyChange, proposalId, type Proposal } from '../domain/proposal.ts';
+import {
+  findingId, viewFinding,
+  type FindingCandidate, type FindingRecord, type FindingView,
+} from '../domain/finding.ts';
 
 const SCENES_DIR = 'scenes';
 /** A markdown file directly inside scenes: never the directory itself, which git can also show. */
@@ -25,6 +29,7 @@ export class Project {
   readonly claims: JsonStore<Claim>;
   readonly verdicts: JsonStore<Verdict>;
   readonly proposals: JsonStore<Proposal>;
+  readonly findings: JsonStore<FindingRecord>;
 
   constructor(dir: string) {
     this.dir = resolve(dir);
@@ -32,6 +37,7 @@ export class Project {
     this.claims = new JsonStore<Claim>(this.dir, 'claims');
     this.verdicts = new JsonStore<Verdict>(this.dir, 'verdicts');
     this.proposals = new JsonStore<Proposal>(this.dir, 'proposals');
+    this.findings = new JsonStore<FindingRecord>(this.dir, 'findings');
   }
 
   /** Creates the book repository. Opening an existing book changes nothing. */
@@ -215,6 +221,80 @@ export class Project {
     this.verdicts.put(id, record);
     this.git.commit(`rewrite: ${verdict} finding ${id}`, [STATE_DIR]);
     return record;
+  }
+
+  /**
+   * Proposes narrative findings with literal quotes. Rejects the whole call
+   * naming the offending quote if any quote is not literal in the current scene text.
+   * Repeating a call creates no duplicates.
+   */
+  proposeFindings(
+    candidates: FindingCandidate[],
+    author: string,
+  ): { created: string[]; existing: string[]; findings: FindingView[] } {
+    for (const candidate of candidates) {
+      if (!candidate.evidence?.length) throw new Error('each finding must cite at least one quote');
+      for (const ev of candidate.evidence) {
+        if (!ev.quote) throw new Error('quote is empty');
+        const file = this.scenePath(ev.file);
+        const text = this.readScene(file);
+        if (text === null) throw new Error(`scene not found: ${file} for quote "${ev.quote}"`);
+        try {
+          buildAnchor(text, ev.quote);
+        } catch (error) {
+          throw new Error(`quote not literal in ${file}: "${ev.quote}" (${(error as Error).message})`);
+        }
+      }
+    }
+
+    const revision = this.git.head();
+    const created: string[] = [];
+    const existing: string[] = [];
+
+    for (const candidate of candidates) {
+      const id = findingId(candidate);
+      if (this.findings.get(id)) {
+        existing.push(id);
+        continue;
+      }
+      const record: FindingRecord = {
+        finding_id: id,
+        question: candidate.question,
+        kind: candidate.kind,
+        statement: candidate.statement,
+        ...(candidate.characters?.length ? { characters: candidate.characters } : {}),
+        evidence: candidate.evidence.map((ev) => {
+          const file = this.scenePath(ev.file);
+          const text = this.readScene(file)!;
+          return {
+            file,
+            quote: ev.quote,
+            revision,
+            anchor: buildAnchor(text, ev.quote),
+          };
+        }),
+        status: 'pending',
+        author,
+        created_at: new Date().toISOString(),
+      };
+      this.findings.put(id, record);
+      created.push(id);
+    }
+
+    if (created.length) this.git.commit(`rewrite: propose ${created.length} findings`, [STATE_DIR]);
+    return { created, existing, findings: this.findingViews() };
+  }
+
+  findingViews(): FindingView[] {
+    return this.findings.all().map((f) => {
+      const view = viewFinding(
+        f,
+        (file) => this.readScene(file),
+        (rev, file) => this.git.showAt(rev, file),
+      );
+      const verdict = this.verdicts.get(f.finding_id);
+      return verdict ? { ...view, verdict } : view;
+    });
   }
 
   /** Stores a change for review. It never writes to the scene. */
