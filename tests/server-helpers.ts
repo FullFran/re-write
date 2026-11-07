@@ -24,6 +24,7 @@ export interface Harness {
   data: string;
   bookDir: string;
   config: ServerConfig;
+  library: Library;
   sign: (claims: Record<string, unknown>, options?: { key?: CryptoKey; kid?: string; expires?: string | Date }) => Promise<string>;
   access: (subject?: string, claims?: Record<string, unknown>) => Promise<string>;
   session: (subject?: string, claims?: Record<string, unknown>) => Promise<string>;
@@ -83,6 +84,7 @@ export async function startHarness(): Promise<Harness> {
     data,
     bookDir,
     config,
+    library,
     sign,
     access: (subject = 'user_fran', claims = {}) => sign({ iss: issuer, aud: resource, sub: subject, client_id: 'chatgpt', ...claims }),
     session: (subject = 'user_fran', claims = {}) => sign({ iss: issuer, sub: subject, sid: 'sess_1', azp: base, ...claims }),

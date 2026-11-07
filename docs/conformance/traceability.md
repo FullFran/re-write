@@ -82,11 +82,11 @@ Generated from HCS pin 9f40641ebdff9aae73e797b1223b54bcc43a41b7; do not edit.
 
 | Requirement | Keyword | Status | Where | Issue or reason |
 | --- | --- | --- | --- | --- |
-| HCS-0006-R001 | MUST | planned |  | [#28](https://github.com/FullFran/re-write/issues/28) |
-| HCS-0006-R002 | MUST NOT | planned |  | [#28](https://github.com/FullFran/re-write/issues/28) |
-| HCS-0006-R003 | MUST | planned |  | [#28](https://github.com/FullFran/re-write/issues/28) |
-| HCS-0006-R004 | MUST | planned |  | [#28](https://github.com/FullFran/re-write/issues/28) |
-| HCS-0006-R005 | MUST | planned |  | [#28](https://github.com/FullFran/re-write/issues/28) |
+| HCS-0006-R001 | MUST | implemented | `src/hcs/errors.ts`, `src/hcs/transport.ts`, `tests/hcs-errors.test.ts`, `tests/hcs-transport.test.ts` |  |
+| HCS-0006-R002 | MUST NOT | implemented | `src/hcs/errors.ts`, `tests/hcs-errors.test.ts` |  |
+| HCS-0006-R003 | MUST | implemented | `src/hcs/transport.ts`, `src/adapters/mcp.ts`, `tests/hcs-transport.test.ts`, `tests/mcp.test.ts` |  |
+| HCS-0006-R004 | MUST | implemented | `src/hcs/transport.ts`, `src/adapters/http-server.ts`, `tests/hcs-transport.test.ts`, `tests/auth.test.ts` |  |
+| HCS-0006-R005 | MUST | implemented | `src/hcs/transport.ts`, `src/adapters/http-server.ts`, `tests/hcs-transport.test.ts`, `tests/auth.test.ts` |  |
 
 ## HCS-0007
 

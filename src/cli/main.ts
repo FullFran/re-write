@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
+import { pathToFileURL } from 'node:url';
+import { HcsFailure } from '../hcs/errors.ts';
+import { productProblem, rejectedCandidate } from '../adapters/problems.ts';
 import { ANNOTATION_EXTRACTOR, loadAnnotations } from '../adapters/annotation-extractor.ts';
 import { Library } from '../application/library.ts';
 import { Project, reviewer } from '../application/project.ts';
@@ -23,7 +26,7 @@ const USAGE = `RE;write: narrative memory with evidence and human review.
   rewrite status <dir>                       show the restored project state
   rewrite grant <data-dir> <book> <user-id>  give a person access to a book on a server
 
-Add --json to any command for machine-readable output.`;
+Add --json to any command for machine-readable output. Failures are JSON on stderr.`;
 
 class UsageError extends Error {}
 
@@ -103,7 +106,7 @@ function dispatch(args: string[], values: Record<string, string | boolean | unde
       const result = Project.open(need(dir, '<dir>')).extractClaims(extraction);
       const rejected = result.rejected.map((r) => `\n  rejected: ${r.statement} (${r.reason})`).join('');
       return {
-        json: { extractor: extraction.extractor, ...result },
+        json: { extractor: extraction.extractor, ...result, rejected: result.rejected.map(rejectedCandidate) },
         text: `extractor: ${extraction.extractor}${extraction.extractor === ANNOTATION_EXTRACTOR ? ' (hand annotations, no LLM)' : ''}\ncreated: ${result.created.length}; existing: ${result.existing.length}; rejected: ${result.rejected.length}${rejected}`,
       };
     }
@@ -182,6 +185,13 @@ function dispatch(args: string[], values: Record<string, string | boolean | unde
   }
 }
 
+export function renderFailure(error: unknown, json: boolean, usage = false): { code: number; text: string } {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = usage || error instanceof UsageError ? 2 : 1;
+  if (json) return { code, text: JSON.stringify(error instanceof HcsFailure ? error.errors[0] : productProblem(message, code === 2 ? 400 : 409), null, 2) };
+  return { code, text: code === 2 ? `usage error: ${message}\n\n${USAGE}` : `error: ${message}` };
+}
+
 function main(): number {
   let parsed;
   try {
@@ -194,21 +204,19 @@ function main(): number {
       },
     });
   } catch (error) {
-    console.error(`usage error: ${(error as Error).message}\n\n${USAGE}`);
-    return 2;
+    const failure = renderFailure(error, process.argv.includes('--json'), true);
+    console.error(failure.text);
+    return failure.code;
   }
   try {
     const output = dispatch(parsed.positionals, parsed.values);
     console.log(parsed.values.json ? JSON.stringify(output.json, null, 2) : output.text);
     return 0;
   } catch (error) {
-    if (error instanceof UsageError) {
-      console.error(`usage error: ${error.message}\n\n${USAGE}`);
-      return 2;
-    }
-    console.error(`error: ${(error as Error).message}`);
-    return 1;
+    const failure = renderFailure(error, Boolean(parsed.values.json));
+    console.error(failure.text);
+    return failure.code;
   }
 }
 
-process.exitCode = main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) process.exitCode = main();

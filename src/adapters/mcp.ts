@@ -1,4 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { CallToolRequestSchema, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { HcsFailure } from '../hcs/errors.ts';
+import { toJsonRpcError } from '../hcs/transport.ts';
+import { productProblem, rejectedCandidate } from './problems.ts';
 import { z } from 'zod';
 import type { Library } from '../application/library.ts';
 import { EPISTEMIC_KINDS, type ClaimCandidate } from '../domain/claim.ts';
@@ -54,12 +58,35 @@ function slice<T>(items: T[], offset = 0, limit = DEFAULT_PAGE) {
  */
 export function buildMcpServer(library: Library, subject: string): McpServer {
   const server = new McpServer({ name: 'rewrite', version: '0.1.0' }, { instructions: INSTRUCTIONS });
+  // The SDK converts handler exceptions to tool results. Wrap its public request
+  // handler registration so a private marker can be raised at the RPC boundary.
+  const marker = Symbol('hcs failure');
+  const protocol = server.server;
+  const setRequestHandler = protocol.setRequestHandler.bind(protocol);
+  protocol.setRequestHandler = ((schema: any, handler: any) => setRequestHandler(schema, schema === CallToolRequestSchema
+    ? async (request: any, extra: any) => {
+      const result = await handler(request, extra);
+      const failure = result[marker] as HcsFailure | undefined;
+      if (failure) {
+        const rpc = toJsonRpcError(failure.errors[0], null).error;
+        const error = McpError.fromError(rpc.code, rpc.message, rpc.data);
+        error.message = rpc.message;
+        throw error;
+      }
+      if (result.isError && !result.structuredContent) {
+        const message = result.content?.find((item: any) => item.type === 'text')?.text ?? 'invalid input';
+        return { ...result, structuredContent: productProblem(message, 400, 'invalid-input') };
+      }
+      return result;
+    } : handler)) as typeof protocol.setRequestHandler;
 
   const reply = (run: () => unknown) => {
     try {
       return { content: [{ type: 'text' as const, text: JSON.stringify(run(), null, 2) }] };
     } catch (error) {
-      return { content: [{ type: 'text' as const, text: library.publicMessage(error) }], isError: true };
+      if (error instanceof HcsFailure) return { content: [], [marker]: error };
+      const message = library.publicMessage(error);
+      return { content: [{ type: 'text' as const, text: message }], isError: true, structuredContent: productProblem(message, 400) };
     }
   };
   const reading = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
@@ -119,7 +146,7 @@ export function buildMcpServer(library: Library, subject: string): McpServer {
     );
     return {
       ...result,
-      rejected: result.rejected.map((r) => ({ ...r, reason: library.publicMessage(new Error(r.reason)) })),
+      rejected: result.rejected.map((r) => rejectedCandidate({ ...r, reason: library.publicMessage(new Error(r.reason)) })),
     };
   }));
 
@@ -167,5 +194,6 @@ export function buildMcpServer(library: Library, subject: string): McpServer {
     annotations: reading,
   }, (args) => reply(() => library.open(args.book, subject).showProposal(args.proposal_id)));
 
+  protocol.setRequestHandler = setRequestHandler;
   return server;
 }

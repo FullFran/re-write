@@ -6,6 +6,9 @@ import { llmsText } from './llms.ts';
 import { buildMcpServer } from './mcp.ts';
 import { REVIEW_CSS, REVIEW_JS, reviewCsp, reviewHtml } from './review-page.ts';
 import { VERDICTS, type VerdictKind } from '../domain/continuity.ts';
+import { HcsFailure } from '../hcs/errors.ts';
+import { toProblemDetails } from '../hcs/transport.ts';
+import { productProblem } from './problems.ts';
 
 export interface ServerConfig {
   issuer: string;
@@ -65,6 +68,21 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
+function problem(res: ServerResponse, status: number, detail: string): void {
+  res.statusCode = status;
+  res.setHeader('content-type', 'application/problem+json');
+  res.setHeader('cache-control', 'no-store');
+  res.end(JSON.stringify({ ...productProblem(detail, status), error: detail }));
+}
+
+function hcsProblem(res: ServerResponse, failure: HcsFailure): void {
+  const body = toProblemDetails(failure.errors[0]);
+  res.statusCode = body.status;
+  res.setHeader('content-type', 'application/problem+json');
+  res.setHeader('cache-control', 'no-store');
+  res.end(JSON.stringify({ ...body, ...(failure.errors.length > 1 ? { 'x-rewrite-errors': failure.errors } : {}) }));
+}
+
 async function readBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -102,7 +120,7 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
     const raw = bearerOf(req);
     if (!raw) {
       res.setHeader('www-authenticate', challenge);
-      json(res, 401, { error: 'unauthorized' });
+      problem(res, 401, 'unauthorized');
       return;
     }
     let subject: string;
@@ -111,13 +129,13 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
     } catch (error) {
       console.error(`access token rejected: ${(error as Error).message.slice(0, 120)}`);
       res.setHeader('www-authenticate', `${challenge}, error="invalid_token"`);
-      json(res, 401, { error: 'unauthorized' });
+      problem(res, 401, 'unauthorized');
       return;
     }
     // Stateless, so there is no stream to resume and no session to delete.
     if (req.method !== 'POST') {
       res.setHeader('allow', 'POST');
-      json(res, 405, { error: 'method not allowed' });
+      problem(res, 405, 'method not allowed');
       return;
     }
     const body = await readBody(req);
@@ -141,7 +159,7 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
       subject = await verifier.verifySessionToken(raw);
     } catch (error) {
       console.error(`session token rejected: ${(error as Error).message.slice(0, 120)}`);
-      return json(res, 401, { error: 'unauthorized' });
+      return problem(res, 401, 'unauthorized');
     }
     let parts: string[];
     try {
@@ -153,7 +171,8 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
     const open = () => {
       try {
         return library.open(book, subject);
-      } catch {
+      } catch (error) {
+        if (error instanceof HcsFailure) throw error;
         throw new HttpError(404, 'not found');
       }
     };
@@ -176,8 +195,8 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
       try {
         json(res, 200, run());
       } catch (error) {
-        if (error instanceof HttpError) throw error;
-        json(res, 409, { error: library.publicMessage(error) });
+        if (error instanceof HttpError || error instanceof HcsFailure) throw error;
+        problem(res, 409, library.publicMessage(error));
       }
     };
     if (kind === 'claims') return refusable(() => project.reviewClaim(id, decision(), subject, note));
@@ -234,14 +253,15 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
       throw new HttpError(404, 'not found');
     })().catch((error) => {
       const status = error instanceof HttpError ? error.status : 500;
-      if (status === 500) console.error(library.publicMessage(error));
+      if (status === 500 && !(error instanceof HcsFailure)) console.error(library.publicMessage(error));
       if (res.headersSent) {
         res.destroy();
         return;
       }
       req.resume();
       res.setHeader('connection', 'close');
-      json(res, status, { error: status === 500 ? 'internal error' : (error as Error).message });
+      if (error instanceof HcsFailure) return hcsProblem(res, error);
+      problem(res, status, status === 500 ? 'internal error' : (error as Error).message);
     });
   };
 }
