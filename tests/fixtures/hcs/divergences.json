@@ -21,6 +21,10 @@
     {
       "requirement": "HCS-0005-R015",
       "reason": "re-write never asks a person for a permission decision (grants come only from the server's shell), so answers from a person do not exist"
+    },
+    {
+      "requirement": "HCS-0006-R006",
+      "reason": "re-write has no client that reads an HCS error from a response: it only produces them (HTTP problem documents and MCP tool errors), and its embedded engine and connected agents parse responses with their own code."
     }
   ]
 }
