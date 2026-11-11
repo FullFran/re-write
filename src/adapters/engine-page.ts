@@ -33,6 +33,19 @@ export const ASSISTANT_CSS = `
 .assistant-state.live::before { border-color: var(--accept); background: var(--accept); }
 .assistant-state.fail::before { border-color: var(--reject); background: var(--reject); }
 .assistant-head .close { width: var(--tap); padding: 0; }
+.assistant-head .settings-toggle { padding: 0 var(--space-3); font-size: var(--text-sm); }
+.assistant-head .settings-toggle[hidden] { display: none; }
+.assistant-head .settings-toggle[aria-expanded=true] { border-color: var(--ink); background: var(--pressed); font-weight: 700; }
+/* Settings: a section of the panel under its header, never a dialog. */
+.assistant-settings { display: flex; flex-direction: column; gap: var(--space-3); max-height: 60%; overflow-y: auto; padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--line); background: var(--pressed); font: var(--text-sm)/1.4 var(--font-ui); }
+.assistant-settings[hidden] { display: none; }
+.assistant-settings h3 { margin: 0; font: 700 var(--text-md)/1.3 var(--font-ui); }
+.assistant-settings p { margin: 0; }
+.assistant-settings label { display: flex; flex-direction: column; gap: var(--space-1); color: var(--muted); }
+.assistant-settings select { width: 100%; color: var(--ink); background: var(--paper); }
+.assistant-settings .actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.assistant-forgot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-2) var(--space-3); border: 1px dashed var(--edge); border-radius: var(--radius); }
+.assistant-forgot > p { flex: 1 1 12rem; }
 .assistant-context { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--line); color: var(--muted); font: var(--text-sm)/1.4 var(--font-ui); }
 .assistant-accounts { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--line); color: var(--muted); font: var(--text-sm)/1.4 var(--font-ui); }
 .context-chip { display: inline-flex; align-items: center; max-width: 100%; min-height: var(--space-6); padding: 0 var(--space-2); border: 1px solid var(--edge); border-radius: var(--radius); color: var(--ink); }
@@ -113,7 +126,15 @@ const ASSISTANT_MESSAGES = {
   login_failed: 'No se pudo iniciar la conexión con ChatGPT. Prueba de nuevo.',
   rate_limited: 'Has pedido demasiados códigos seguidos. Espera unos minutos y prueba de nuevo.',
   turn_limit: 'La respuesta se ha detenido porque era demasiado larga o tardaba demasiado.',
+  model_unavailable: 'Ese modelo ya no está disponible para tu cuenta.',
 };
+// The efforts the server accepts, in the words of a writer.
+const EFFORT_LABELS = { low: 'Rápido', medium: 'Equilibrado', high: 'A fondo' };
+const FORGOTTEN = 'El asistente ya no recuerda los mensajes anteriores.';
+// What the writer saw, per book, in this tab only (sessionStorage); never on the server.
+const TRANSCRIPT_KEY = 'rewrite.assistant.';
+const MAX_STORED_TURNS = 200;
+const MAX_STORED_TEXT = 70000;
 const QUICK_PROMPTS = ['Busca incoherencias en el libro', 'Resume los cambios pendientes', '¿Qué hallazgos debería revisar primero?'];
 const SCENE_PROMPT = 'Analiza esta escena';
 // What each kind of item the assistant creates is called in the result line.
@@ -212,7 +233,96 @@ function formatAnswer(text) {
 
 const assistantState = {
   status: { state: 'unknown' }, turns: [], running: false, notice: '', poll: null, item: null, queued: false, opener: null,
+  // The book whose transcript the panel shows.
+  book: null,
+  turnsSent: 0,
+  settings: { open: false, loading: false, data: null, error: '', saved: false },
 };
+
+// ---- The visible transcript, kept per book in sessionStorage ----
+
+function transcriptStore() {
+  try { return window.sessionStorage || null; } catch (error) { return null; }
+}
+
+const storableText = (value) => typeof value === 'string' && value.length <= MAX_STORED_TEXT;
+
+// Only what the page showed: text, the item label, and the validated fields of each step.
+function storedTurn(turn) {
+  if (!turn || typeof turn !== 'object') return null;
+  if (turn.role === 'user' && storableText(turn.text)) return { role: 'user', text: turn.text, about: storableText(turn.about) ? turn.about : '' };
+  if ((turn.role === 'error' || turn.role === 'note') && storableText(turn.text)) return { role: turn.role, text: turn.text };
+  if (turn.role !== 'assistant' || !storableText(turn.text) || !Array.isArray(turn.steps)) return null;
+  const steps = [];
+  for (const step of turn.steps.slice(0, 100)) {
+    if (!step || typeof step.name !== 'string' || !/^[A-Za-z0-9_]{1,128}$/.test(step.name)) continue;
+    // A step still running when the turn ended did not finish.
+    const done = { name: step.name, phase: 'end', ok: step.phase !== 'start' && step.ok === true };
+    if (typeof step.scene === 'string' && step.scene.length <= 120) done.scene = step.scene;
+    if (Number.isInteger(step.count) && step.count >= 0 && step.count <= 999) done.count = step.count;
+    steps.push(done);
+  }
+  return { role: 'assistant', text: turn.text, phase: turn.phase === 'stopped' ? 'stopped' : 'done', steps };
+}
+
+function loadTranscript(book) {
+  const store = transcriptStore();
+  if (!store) return [];
+  try {
+    const value = JSON.parse(store.getItem(TRANSCRIPT_KEY + book) || '[]');
+    return Array.isArray(value) ? value.slice(-MAX_STORED_TURNS).map(storedTurn).filter(Boolean) : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function saveTranscript() {
+  const store = transcriptStore();
+  const book = assistantState.book;
+  if (!store || !book) return;
+  const turns = assistantState.turns.map(storedTurn).filter(Boolean).slice(-MAX_STORED_TURNS);
+  try {
+    if (turns.length) store.setItem(TRANSCRIPT_KEY + book, JSON.stringify(turns));
+    else store.removeItem(TRANSCRIPT_KEY + book);
+  } catch (error) { /* full or blocked: the panel keeps working without it */ }
+}
+
+function clearTranscripts() {
+  const store = transcriptStore();
+  if (!store) return;
+  try {
+    const keys = [];
+    for (let i = 0; i < store.length; i++) {
+      const key = store.key(i);
+      if (key && key.startsWith(TRANSCRIPT_KEY)) keys.push(key);
+    }
+    for (const key of keys) store.removeItem(key);
+  } catch (error) { /* nothing stored */ }
+}
+
+// The page selected another book: show that book's transcript.
+function syncBook() {
+  const book = view && view.book ? view.book : null;
+  if (book === assistantState.book || assistantState.running) return;
+  const first = assistantState.book === null;
+  assistantState.book = book;
+  // A conversation started before the page knew its book belongs to the first one.
+  if (first && book && assistantState.turns.length) saveTranscript();
+  else assistantState.turns = book ? loadTranscript(book) : [];
+  noteForgotten();
+}
+
+// The page shows an earlier conversation the engine process no longer holds (it stopped
+// after a while unused, or restarted): say so once, before anything new.
+function noteForgotten() {
+  const status = assistantState.status;
+  const turns = assistantState.turns;
+  if (assistantState.running || status.state !== 'connected' || status.conversation || !turns.length) return;
+  if (turns[turns.length - 1].role === 'note') return;
+  if (!turns.some((turn) => turn.role === 'user')) return;
+  turns.push({ role: 'note', text: FORGOTTEN });
+  saveTranscript();
+}
 const panel = {};
 
 function assistantButton(label, className, onClick) {
@@ -260,14 +370,22 @@ function pageContext() {
 }
 
 async function refreshAssistantStatus() {
+  const turnsBefore = assistantState.turnsSent;
   const res = await engineApi('GET', '/status');
-  if (res.ok) assistantState.status = await res.json();
+  if (res.ok) {
+    const status = await res.json();
+    // A turn sent meanwhile started a conversation this answer could not know of yet.
+    const sent = assistantState.turnsSent !== turnsBefore && status.state === 'connected';
+    assistantState.status = sent ? Object.assign({}, status, { conversation: true }) : status;
+    noteForgotten();
+  }
   // The engine does not exist for someone who cannot use a book yet.
   else if (res.status === 404) assistantState.status = { state: 'unavailable' };
   if (assistantState.status.state !== 'pending' && assistantState.poll) {
     clearInterval(assistantState.poll);
     assistantState.poll = null;
   }
+  if (assistantState.status.state !== 'connected' && assistantState.settings.open) setSettingsOpen(false);
   renderAssistant();
 }
 
@@ -291,7 +409,120 @@ async function disconnectAssistant() {
   await engineApi('DELETE', '/credential');
   assistantState.turns = [];
   assistantState.notice = '';
+  clearTranscripts();
+  setSettingsOpen(false);
   await refreshAssistantStatus();
+}
+
+// Clears the engine's history and what the page shows, without logging out of ChatGPT.
+async function newConversation() {
+  if (assistantState.running) return;
+  const res = await engineApi('POST', '/reset');
+  if (!res.ok) {
+    assistantState.settings.error = await failureOf(res);
+    renderSettings();
+    return;
+  }
+  assistantState.turns = [];
+  assistantState.notice = '';
+  saveTranscript();
+  setSettingsOpen(false);
+  renderAssistant();
+  if (panel.input) panel.input.focus();
+}
+
+// ---- Settings: model, reasoning effort, new conversation, disconnect ----
+
+async function loadSettings() {
+  const settings = assistantState.settings;
+  settings.loading = true;
+  settings.error = '';
+  renderSettings();
+  try {
+    const res = await engineApi('GET', '/settings');
+    if (res.ok) settings.data = await res.json();
+    else settings.error = await failureOf(res);
+  } catch (error) {
+    settings.error = ASSISTANT_MESSAGES.engine_unavailable;
+  }
+  settings.loading = false;
+  renderSettings();
+}
+
+async function saveSettings(change) {
+  const settings = assistantState.settings;
+  settings.error = '';
+  settings.saved = false;
+  try {
+    const res = await engineApi('PUT', '/settings', change);
+    if (res.ok) {
+      settings.data = await res.json();
+      settings.saved = true;
+    } else {
+      settings.error = await failureOf(res);
+    }
+  } catch (error) {
+    settings.error = ASSISTANT_MESSAGES.engine_unavailable;
+  }
+  renderSettings();
+}
+
+function setSettingsOpen(open) {
+  const settings = assistantState.settings;
+  settings.open = open;
+  settings.saved = false;
+  if (!panel.settings) return;
+  panel.settings.hidden = !open;
+  panel.settingsToggle.setAttribute('aria-expanded', String(open));
+  if (open) loadSettings();
+}
+
+function settingsSelect(label, options, value, onChange) {
+  const field = el('label', label);
+  const select = el('select');
+  for (const [optionValue, text] of options) {
+    const option = el('option', text);
+    option.value = optionValue;
+    select.append(option);
+  }
+  select.value = value;
+  select.addEventListener('change', () => onChange(select.value));
+  field.append(select);
+  return { field, select };
+}
+
+// Rebuilt only when the settings change, never on each streamed delta, so an open
+// list keeps its focus.
+function renderSettings() {
+  const box = panel.settings;
+  if (!box) return;
+  const settings = assistantState.settings;
+  const nodes = [el('h3', 'Ajustes')];
+  if (settings.error) {
+    const alert = el('p', settings.error);
+    alert.setAttribute('role', 'alert');
+    nodes.push(alert);
+  }
+  const data = settings.data;
+  if (settings.loading && !data) nodes.push(el('p', 'Cargando los modelos de tu cuenta…', 'assistant-note'));
+  else if (data && data.models.length === 0) nodes.push(el('p', 'Tu cuenta no tiene ningún modelo disponible aquí.', 'assistant-note'));
+  else if (data) {
+    const model = settingsSelect('Modelo', data.models.map((m) => [m.id, m.name]), data.model || '', (id) => saveSettings({ model: id }));
+    const current = data.models.find((m) => m.id === data.model);
+    const efforts = (data.efforts || []).filter((e) => Object.hasOwn(EFFORT_LABELS, e)).map((e) => [e, EFFORT_LABELS[e]]);
+    const effort = settingsSelect('Razonamiento', efforts, data.effort, (value) => saveSettings({ effort: value }));
+    effort.select.disabled = !current || !current.reasoning;
+    nodes.push(model.field, effort.field);
+    if (effort.select.disabled) nodes.push(el('p', 'Este modelo no tiene niveles de razonamiento.', 'assistant-note'));
+    if (settings.saved) nodes.push(el('p', 'Se usará en tu próximo mensaje.', 'assistant-note'));
+  }
+  const actions = el('div', undefined, 'actions');
+  const fresh = assistantButton('Nueva conversación', '', newConversation);
+  fresh.disabled = assistantState.running;
+  actions.append(fresh, assistantButton('Desconectar ChatGPT', 'reject', disconnectAssistant));
+  nodes.push(actions);
+  panel.newConversation = fresh;
+  box.replaceChildren(...nodes);
 }
 
 function parseEvents(buffer, onEvent) {
@@ -320,11 +551,13 @@ function applyTool(answer, data) {
 async function sendAssistant(text) {
   if (assistantState.running || !String(text).trim()) return;
   assistantState.running = true;
+  assistantState.turnsSent += 1;
   assistantState.notice = '';
   const item = assistantState.item;
   assistantState.turns.push({ role: 'user', text, about: item ? item.label : '' });
   const answer = { role: 'assistant', text: '', steps: [], phase: 'thinking', before: itemIds(latestQueue) };
   assistantState.turns.push(answer);
+  saveTranscript();
   renderAssistant();
   try {
     const context = pageContext();
@@ -360,6 +593,9 @@ async function sendAssistant(text) {
       revealCreated();
     }
     assistantState.running = false;
+    // The engine process now holds this conversation.
+    if (assistantState.status.state === 'connected') assistantState.status = Object.assign({}, assistantState.status, { conversation: true });
+    saveTranscript();
     renderAssistant();
   }
 }
@@ -487,6 +723,11 @@ function turnView(turn) {
     alert.setAttribute('role', 'alert');
     return [alert];
   }
+  if (turn.role === 'note') {
+    const box = el('div', undefined, 'assistant-forgot');
+    box.append(el('p', turn.text, 'assistant-note'), assistantButton('Nueva conversación', '', newConversation));
+    return [box];
+  }
   const nodes = [];
   if (turn.steps.length) nodes.push(stepList(turn.steps));
   if (turn.text) {
@@ -563,6 +804,8 @@ function renderAssistant() {
 
   panel.form.hidden = !connected;
   panel.foot.hidden = !connected;
+  panel.settingsToggle.hidden = !connected;
+  if (panel.newConversation) panel.newConversation.disabled = assistantState.running;
   panel.input.disabled = false;
   panel.submit.textContent = assistantState.running ? 'Detener' : 'Enviar';
   panel.submit.className = assistantState.running ? 'reject' : 'accept';
@@ -587,7 +830,8 @@ function setAssistantOpen(open, quiet) {
   const anchored = anchor && document.getElementById(anchor.id);
   if (anchored) window.scrollBy(0, anchored.getBoundingClientRect().top - anchor.top);
   if (open) {
-    if (assistantState.status.state === 'unknown') refreshAssistantStatus().catch(() => {});
+    // Each opening asks again: the engine process may have stopped since.
+    refreshAssistantStatus().catch(() => {});
     renderAssistant();
     if (!quiet) (assistantState.status.state === 'connected' ? panel.input : panel.title).focus();
   } else if (!quiet && panel.opener && panel.opener.isConnected) {
@@ -637,7 +881,15 @@ function buildAssistant() {
   const state = el('span', '', 'assistant-state');
   const close = assistantButton('✕', 'close', () => setAssistantOpen(false));
   close.setAttribute('aria-label', 'Cerrar el asistente');
-  head.append(title, state, close);
+  const settingsToggle = assistantButton('Ajustes', 'settings-toggle', () => setSettingsOpen(!assistantState.settings.open));
+  settingsToggle.setAttribute('aria-controls', 'assistant-settings');
+  settingsToggle.setAttribute('aria-expanded', 'false');
+  settingsToggle.hidden = true;
+  head.append(title, state, settingsToggle, close);
+  const settings = el('div', undefined, 'assistant-settings');
+  settings.id = 'assistant-settings';
+  settings.setAttribute('aria-label', 'Ajustes del asistente');
+  settings.hidden = true;
   const context = el('div', undefined, 'assistant-context');
   context.setAttribute('aria-label', 'Sobre qué preguntas');
   const accounts = el('div', undefined, 'assistant-accounts');
@@ -673,12 +925,12 @@ function buildAssistant() {
   });
   form.append(input, submit);
   const foot = el('div', undefined, 'assistant-foot');
-  foot.append(assistantButton('Desconectar ChatGPT', '', disconnectAssistant), el('span', 'La conversación no se guarda: se pierde al cerrar la página o tras un rato sin usarla.'));
-  root.append(head, context, accounts, log, form, foot);
+  foot.append(el('span', 'Lo que ves aquí se guarda solo en esta pestaña. Modelo, razonamiento y nueva conversación están en Ajustes.'));
+  root.append(head, settings, context, accounts, log, form, foot);
   root.addEventListener('keydown', (event) => { if (event.key === 'Escape') setAssistantOpen(false); });
   document.body.append(scrim, root, fab);
   if (toggle) toggle.addEventListener('click', () => (root.hidden ? openAssistant(toggle) : setAssistantOpen(false)));
-  Object.assign(panel, { root, scrim, fab, toggle, title, state, context, accounts, log, form, input, submit, foot });
+  Object.assign(panel, { root, scrim, fab, toggle, title, state, settingsToggle, settings, context, accounts, log, form, input, submit, foot });
   // The floating button shrinks to its icon once the reader scrolls down, and moves up
   // over any accept/reject bar that passes under it, stuck or not.
   let placing = false;
@@ -715,6 +967,7 @@ function placeFab() {
 assistant = {
   ask: askAssistantAbout,
   pageChanged() {
+    syncBook();
     revealCreated();
     placeFab();
     if (panel.root && !panel.root.hidden) renderAssistant();
@@ -725,6 +978,7 @@ assistant = {
 function startAssistant() {
   if (panel.root || !document.body.hasAttribute('data-assistant')) return;
   buildAssistant();
+  syncBook();
   // /review/engine sends here with ?asistente=1: open the panel and tidy the address.
   const params = new URLSearchParams(window.location.search);
   if (params.get('asistente') === '1') {
