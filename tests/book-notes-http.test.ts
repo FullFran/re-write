@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { until } from './fixtures/engine/harness.ts';
 import { git } from './helpers.ts';
 import { reviewApi, startHarness, type Harness } from './server-helpers.ts';
 
@@ -74,6 +75,8 @@ test('note routes are logged under their own route names', async (t) => {
   const session = await logged.session();
   await reviewApi(logged, '/books/sal/notes', session);
   await reviewApi(logged, '/books/sal/notes/Elena', session);
+  // The line is written when the response finishes, which can come after the client has the body.
+  await until(() => lines.filter((line) => line.includes('"http.request"')).length >= 2);
   const routes = lines.map((line) => JSON.parse(line)).filter((r) => r.event === 'http.request').map((r) => r.route);
   assert.deepEqual(routes, ['/review/api/books/:book/notes', '/review/api/books/:book/notes/:name']);
 });
