@@ -47,8 +47,7 @@ export class Project {
     if (manifest.get('project')) return { project, created: false };
     mkdirSync(project.dir, { recursive: true });
     project.git.init();
-    manifest.put('project', { title });
-    project.git.commit(`rewrite: create project ${title}`, [STATE_DIR]);
+    project.commitWrites(`rewrite: create project ${title}`, [join(STATE_DIR, 'project.json')], () => manifest.put('project', { title }));
     return { project, created: true };
   }
 
@@ -99,20 +98,20 @@ export class Project {
         }
       }
     }
-    const imported: string[] = [];
+    const copies: [from: string, to: string][] = [];
     const unchanged: string[] = [];
     for (const file of files) {
       const relative = `${SCENES_DIR}/${basename(file)}`;
-      const target = join(this.dir, relative);
-      if (existsSync(target)) {
-        unchanged.push(relative);
-        continue;
-      }
-      mkdirSync(join(this.dir, SCENES_DIR), { recursive: true });
-      copyFileSync(file, target);
-      imported.push(relative);
+      if (existsSync(join(this.dir, relative))) unchanged.push(relative);
+      else copies.push([file, relative]);
     }
-    if (imported.length) this.git.commit(`rewrite: import ${imported.join(', ')}`, imported);
+    const imported = copies.map(([, relative]) => relative);
+    if (imported.length) {
+      this.commitWrites(`rewrite: import ${imported.join(', ')}`, imported, () => {
+        mkdirSync(join(this.dir, SCENES_DIR), { recursive: true });
+        for (const [from, relative] of copies) copyFileSync(from, join(this.dir, relative));
+      });
+    }
     return { imported, unchanged };
   }
 
@@ -139,21 +138,26 @@ export class Project {
     const created: string[] = [];
     const existing: string[] = [];
     const rejected: { statement: string; reason: string }[] = [];
+    const built = new Map<string, Claim>();
     for (const candidate of extraction.candidates) {
       try {
         const id = claimId(candidate);
-        if (this.claims.get(id)) {
+        if (this.claims.get(id) || built.has(id)) {
           existing.push(id);
           continue;
         }
         const claim = this.buildClaim(id, candidate, revision, extraction.extractor);
-        this.claims.put(id, proposedBy ? { ...claim, proposed_by: proposedBy } : claim);
+        built.set(id, proposedBy ? { ...claim, proposed_by: proposedBy } : claim);
         created.push(id);
       } catch (error) {
         rejected.push({ statement: candidate.statement, reason: (error as Error).message });
       }
     }
-    if (created.length) this.git.commit(`rewrite: extract ${created.length} claims`, [STATE_DIR]);
+    if (created.length) {
+      this.saveRecords(`rewrite: extract ${created.length} claims`, created.map((id) => ['claims', id]), () => {
+        for (const [id, claim] of built) this.claims.put(id, claim);
+      });
+    }
     return { created, existing, rejected };
   }
 
@@ -217,7 +221,7 @@ export class Project {
     }
     claim.history.push({ at: new Date().toISOString(), by, from: claim.editorial_status, to: next, ...(note ? { note } : {}) });
     claim.editorial_status = next;
-    this.saveDecision(`rewrite: ${decision} claim ${id}`, [['claims', id]], () => this.claims.put(id, claim));
+    this.saveRecords(`rewrite: ${decision} claim ${id}`, [['claims', id]], () => this.claims.put(id, claim));
     return { claim: this.view(claim), changed: true };
   }
 
@@ -231,17 +235,22 @@ export class Project {
     if (reopenTransition(claim.editorial_status, claim.history, expected) === 'unchanged') return { claim: this.view(claim), changed: false };
     claim.history.push({ at: new Date().toISOString(), by, from: claim.editorial_status, to: 'proposed', ...(note ? { note } : {}), action: 'reopen' });
     claim.editorial_status = 'proposed';
-    this.saveDecision(`rewrite: reopen claim ${id}`, [['claims', id]], () => this.claims.put(id, claim));
+    this.saveRecords(`rewrite: reopen claim ${id}`, [['claims', id]], () => this.claims.put(id, claim));
     return { claim: this.view(claim), changed: true };
   }
 
+  /** Writes records and commits exactly those records (see commitWrites). */
+  private saveRecords(message: string, records: [collection: string, id: string][], write: () => void): void {
+    this.commitWrites(message, records.map(([collection, id]) => recordPath(collection, id)), write);
+  }
+
   /**
-   * Writes the records of one review decision and commits them. When the commit fails, every record
+   * Runs `write`, which may only touch these repository paths, and commits exactly those paths, so
+   * nothing else in the book is swept into the commit. When the write or the commit fails, every path
    * is put back byte for byte (or removed when it did not exist) and unstaged, so the book is exactly
-   * as it was and a retry starts from a clean state.
+   * as it was and a retry starts from a clean state. Every write that commits goes through here.
    */
-  private saveDecision(message: string, records: [collection: string, id: string][], write: () => void): void {
-    const paths = records.map(([collection, id]) => recordPath(collection, id));
+  private commitWrites(message: string, paths: string[], write: () => void): void {
     const before = paths.map((path) => (existsSync(join(this.dir, path)) ? readFileSync(join(this.dir, path)) : null));
     try {
       write();
@@ -308,7 +317,7 @@ export class Project {
       ...(note ? { note } : {}),
       ...(history.length ? { history } : {}),
     };
-    this.saveDecision(`rewrite: ${verdict} finding ${id}`, [['verdicts', id]], () => this.verdicts.put(id, record));
+    this.saveRecords(`rewrite: ${verdict} finding ${id}`, [['verdicts', id]], () => this.verdicts.put(id, record));
     return record;
   }
 
@@ -326,7 +335,7 @@ export class Project {
     if (record.at !== expected) throw new StaleStateError();
     if (record.reopened) return { verdict: record, changed: false };
     record.reopened = { by, at: new Date().toISOString(), ...(note ? { note } : {}) };
-    this.saveDecision(`rewrite: reopen finding ${id}`, [['verdicts', id]], () => this.verdicts.put(id, record));
+    this.saveRecords(`rewrite: reopen finding ${id}`, [['verdicts', id]], () => this.verdicts.put(id, record));
     return { verdict: record, changed: true };
   }
 
@@ -358,9 +367,10 @@ export class Project {
     const created: string[] = [];
     const existing: string[] = [];
 
+    const records = new Map<string, FindingRecord>();
     for (const candidate of candidates) {
       const id = findingId(candidate);
-      if (this.findings.get(id)) {
+      if (this.findings.get(id) || records.has(id)) {
         existing.push(id);
         continue;
       }
@@ -384,11 +394,15 @@ export class Project {
         author,
         created_at: new Date().toISOString(),
       };
-      this.findings.put(id, record);
+      records.set(id, record);
       created.push(id);
     }
 
-    if (created.length) this.git.commit(`rewrite: propose ${created.length} findings`, [STATE_DIR]);
+    if (created.length) {
+      this.saveRecords(`rewrite: propose ${created.length} findings`, created.map((id) => ['findings', id]), () => {
+        for (const [id, record] of records) this.findings.put(id, record);
+      });
+    }
     // Only this call's findings, in the order submitted, so the response does not grow with the book;
     // list_findings reads the rest.
     const own = [...new Set(candidates.map(findingId))].map((id) => this.findings.get(id)!);
@@ -439,8 +453,7 @@ export class Project {
       status: 'proposed',
       history: [],
     };
-    this.proposals.put(id, proposal);
-    this.git.commit(`rewrite: propose ${id}`, [STATE_DIR]);
+    this.saveRecords(`rewrite: propose ${id}`, [['proposals', id]], () => this.proposals.put(id, proposal));
     return { proposal, created: true };
   }
 
@@ -474,12 +487,11 @@ export class Project {
     checkExpected(proposal.status, proposal.history, decision, expected);
     const next = nextEditorialStatus(proposal.status, decision);
     if (next === null) return { proposal, changed: false };
-    const previous = structuredClone(proposal);
     proposal.history.push({ at: new Date().toISOString(), by, from: proposal.status, to: next, ...(note ? { note } : {}) });
     proposal.status = next;
 
     if (decision === 'reject') {
-      this.saveDecision(`rewrite: reject ${id}`, [['proposals', id]], () => this.proposals.put(id, proposal));
+      this.saveRecords(`rewrite: reject ${id}`, [['proposals', id]], () => this.proposals.put(id, proposal));
       return { proposal, changed: true };
     }
 
@@ -488,16 +500,10 @@ export class Project {
     if (current === null || this.git.blobOf(proposal.file) !== proposal.base_blob) {
       throw new Error(`${proposal.file} changed since proposal ${id} was made; nothing was written`);
     }
-    try {
+    this.commitWrites(acceptSubject(id), [proposal.file, recordPath('proposals', id)], () => {
       writeFileSync(path, applyChange(current, proposal.find, proposal.replace));
       this.proposals.put(id, proposal);
-      this.git.commit(acceptSubject(id), [proposal.file, STATE_DIR]);
-    } catch (error) {
-      writeFileSync(path, current);
-      this.proposals.put(id, previous);
-      this.git.tryRun('reset', '-q', '--', proposal.file, recordPath('proposals', id));
-      throw error;
-    }
+    });
     return { proposal, changed: true };
   }
 
@@ -514,7 +520,7 @@ export class Project {
     if (proposal.status === 'accepted') throw new Error(`${id} already changed the text; revert it instead of reopening it`);
     proposal.history.push({ at: new Date().toISOString(), by, from: proposal.status, to: 'proposed', ...(note ? { note } : {}), action: 'reopen' });
     proposal.status = 'proposed';
-    this.saveDecision(`rewrite: reopen ${id}`, [['proposals', id]], () => this.proposals.put(id, proposal));
+    this.saveRecords(`rewrite: reopen ${id}`, [['proposals', id]], () => this.proposals.put(id, proposal));
     return { proposal, changed: true };
   }
 }

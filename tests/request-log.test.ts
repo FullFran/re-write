@@ -244,3 +244,18 @@ test('one minute of polling from one open tab writes one poll line instead of tw
   console.error(`poll log lines for 12 polls: ${pollLines().length}`);
   assert.deepEqual(pollLines().map(line => [line.event, line.status, line.count]), [['http.request', 200, undefined], ['http.poll_summary', 304, 11]]);
 });
+
+test('review actions on one item are logged under their own route, not as unmatched', async (t) => {
+  const lines: string[] = [];
+  t.mock.method(console, 'log', (...args: unknown[]) => lines.push(args.join(' ')));
+  t.mock.method(console, 'warn', () => {});
+  t.mock.method(console, 'error', (...args: unknown[]) => lines.push(args.join(' ')));
+  const h = await startHarness();
+  t.after(() => h.close());
+  const session = await h.session();
+  const actions = [['claims', 'reopen'], ['proposals', 'reopen'], ['findings', 'reopen']];
+  for (const [kind, action] of actions) await reviewApi(h, `/books/sal/${kind}/X-0000000000/${action}`, session, { expected: 0 });
+  await reviewApi(h, '/books/sal/claims/X-0000000000/other', session, { expected: 0 });
+  const routes = lines.map(line => JSON.parse(line)).filter(r => r.event === 'http.request').map(r => r.route);
+  assert.deepEqual(routes, [...actions.map(([kind, action]) => `/review/api/books/:book/${kind}/:id/${action}`), 'unmatched']);
+});
