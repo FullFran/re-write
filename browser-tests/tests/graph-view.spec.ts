@@ -184,7 +184,7 @@ test('desktop: a click on a drawn node chooses its row, and the filters, the loc
   await page.keyboard.press('Home');
   await expect(slider).toHaveAttribute('aria-valuetext', '1 de 2: escena-01');
   await expect(canvas(page)).toHaveAttribute('data-nodes', '6');
-  await expect.poll(rowNames).not.toContain('escena-02');
+  await expect.poll(() => rowNames(page)).not.toContain('escena-02');
   expect(await rowNames(page)).toContain('escena-01');
   await page.keyboard.press('End');
   await expect(canvas(page)).toHaveAttribute('data-nodes', '7');
@@ -289,6 +289,8 @@ test('performance: 2,000 nodes draw and lay out while the table stays responsive
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Profiler.enable');
   await cdp.send('Profiler.start');
+  const traceDone = new Promise<string>((resolve) => cdp.once('Tracing.tracingComplete', (event: any) => resolve(event.stream)));
+  await cdp.send('Tracing.start', { categories: 'devtools.timeline,disabled-by-default-devtools.timeline,blink,gpu,cc,v8', transferMode: 'ReturnAsStream' });
   const opened = Date.now();
   await tool(page, 'Grafo').click();
   await expect(canvas(page)).toHaveAttribute('data-nodes', '2000', { timeout: 30_000 });
@@ -301,6 +303,19 @@ test('performance: 2,000 nodes draw and lay out while the table stays responsive
   await expect(canvas(page)).toHaveAttribute('data-layout', 'done', { timeout: 60_000 });
   const laidOut = Date.now() - opened;
   const { profile } = await cdp.send('Profiler.stop');
+  await cdp.send('Tracing.end');
+  const stream = await traceDone;
+  let raw = '';
+  for (;;) {
+    const chunk: any = await cdp.send('IO.read', { handle: stream, size: 1 << 20 });
+    raw += chunk.base64Encoded ? Buffer.from(chunk.data, 'base64').toString() : chunk.data;
+    if (chunk.eof) break;
+  }
+  const events: any[] = JSON.parse(raw).traceEvents ?? JSON.parse(raw);
+  const main = new Set(events.filter((e) => e.name === 'thread_name' && e.args?.name === 'CrRendererMain').map((e) => `${e.pid}:${e.tid}`));
+  const byName = new Map<string, number>();
+  for (const e of events) if (e.ph === 'X' && main.has(`${e.pid}:${e.tid}`)) byName.set(e.name, (byName.get(e.name) ?? 0) + (e.dur ?? 0) / 1000);
+  console.log('graph trace ' + JSON.stringify([...byName].sort((a, b) => b[1] - a[1]).slice(0, 30).map(([k, ms]) => `${Math.round(ms)}ms ${k}`)));
   const self = new Map<string, number>();
   const byId = new Map(profile.nodes.map((n: any) => [n.id, n]));
   profile.samples!.forEach((id: number, i: number) => {
