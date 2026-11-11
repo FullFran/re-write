@@ -142,6 +142,12 @@ summary { min-height: var(--tap); padding: var(--space-3) 0; color: var(--muted)
 .actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-4); }
 /* Accept and reject: far enough apart that one is never hit for the other. */
 .decision { gap: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--line); }
+/* The way back from a decision sits under the card, quieter than the decision itself. */
+.reconsider { align-items: center; }
+.decision-log { margin: var(--space-3) 0; padding-left: var(--space-5); }
+/* Reverting an applied change is confirmed in place, inside its card. */
+.confirm { margin-top: var(--space-4); padding: var(--space-4); border: 1px solid var(--edge); border-left: 4px solid var(--reject); border-radius: var(--radius); }
+.confirm > h3 { margin-top: 0; }
 .scenes-grid { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-3) 0; }
 .scenes-grid > button { text-align: left; }
 .scene-viewer { margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--line); }
@@ -227,6 +233,12 @@ export const REVIEW_JS = String.raw`
 const app = document.getElementById('app');
 const decidedProposals = new Set();
 const decidedClaims = new Set();
+// Items decided in this tab, as 'claim:<book>/<id>' or 'proposal:<book>/<id>': their card
+// says "Decisión guardada · Deshacer" until the decision is taken back or the page reloads.
+const justDecided = new Set();
+// The book's proposals by id, so a card can tell whether its revert is pending or done.
+let proposalIndex = new Map();
+const STALE_MESSAGE = 'Esta decisión cambió en otra pestaña. Recarga para ver el estado actual.';
 const MAX_NOTE = 2000;
 let nextNoteCounter = 0;
 // Background refresh: the page asks for the queue again every few seconds while it
@@ -287,15 +299,89 @@ function stateBadge(state, stale) {
   return el('span', stale ? 'No aplicable: la escena ha cambiado' : STATE_LABELS[state], 'badge state-badge state-' + state + (stale ? ' badge-stale' : ''));
 }
 
-async function decideCard(path, decision, remembered, key, card, reload) {
-  await api(path, { decision });
-  remembered.add(key);
+// A decision carries the history length this tab saw, so a tab opened before another
+// tab reopened or decided the item is refused (409) instead of deciding on old state.
+async function decideCard(kind, book, id, decision, card, reload, history) {
+  await api('/books/' + book + '/' + kind + 's/' + id, { decision, expected: (history || []).length });
+  (kind === 'claim' ? decidedClaims : decidedProposals).add(book + '/' + id);
+  const key = kind + ':' + book + '/' + id;
+  justDecided.add(key);
   await reload();
-  const updated = document.getElementById(card.id);
-  if (updated) {
-    updated.focus({ preventScroll: true });
-    updated.scrollIntoView({ block: 'nearest' });
+  focusItem(card.id, key);
+}
+
+// Puts focus on an item's card after a re-render: the same card when it is still there,
+// otherwise the first card of the same item (a reopened claim moves out of Canon, a
+// reopened proposal out of Historial). Its folded section opens first.
+function focusItem(cardId, key) {
+  let card = cardId ? document.getElementById(cardId) : null;
+  if (!card && key && app.getElementsByTagName) {
+    const suffix = itemId(key);
+    card = [...app.getElementsByTagName('article')].find((n) => n.id === suffix || n.id.endsWith('-' + suffix)) || null;
   }
+  if (!card) return null;
+  const box = card.closest ? card.closest('section') : null;
+  if (box && box.fold) box.fold.setOpen(true);
+  card.focus({ preventScroll: true });
+  card.scrollIntoView({ block: 'nearest' });
+  return card;
+}
+
+// 'proposal:sal/P-1' -> 'proposal-sal-P-1', the id its card is built with.
+function itemId(key) {
+  return key.replace(':', '-').replace('/', '-');
+}
+
+const when = (at) => new Date(at).toLocaleString('es');
+
+// A link to another item of the book; it moves focus to that item's card.
+function itemLink(kind, book, id) {
+  const link = el('a', id);
+  link.href = '#' + kind + '-' + book + '-' + id;
+  link.addEventListener('click', (event) => {
+    // The address stays as it is: Clerk's components route through the hash.
+    event.preventDefault();
+    focusItem(null, kind + ':' + book + '/' + id);
+  });
+  return link;
+}
+
+// Every decision on a claim or proposal, oldest first. History only grows, so taking a
+// decision back shows as one more line: accepted, revert asked, new decision.
+function decisionLog(kind, book, entries) {
+  const list = el('ol', undefined, 'meta decision-log');
+  list.setAttribute('aria-label', 'Historial de decisiones');
+  for (const entry of entries) {
+    const word = entry.action === 'revert' ? 'Reversión pedida' : entry.action === 'reopen' || entry.to === 'proposed' ? 'Reabierta' : entry.to === 'accepted' ? 'Aceptada' : 'Rechazada';
+    const line = el('li', word + ' por ' + entry.by + ' · ' + when(entry.at));
+    if (entry.action === 'revert' && entry.ref) line.append(document.createTextNode(' · propuesta inversa '), itemLink(kind, book, entry.ref));
+    if (entry.note) line.append(document.createTextNode(' · Nota: "' + entry.note + '"'));
+    list.append(line);
+  }
+  return list;
+}
+
+// The way back from a decision. Right after deciding, the card says the decision is saved
+// and offers "Deshacer" (no timer); otherwise the action is named by what it does.
+// savedKey is the item's key on the card that keeps this tab's decisions, '' elsewhere.
+function reconsiderRow(savedKey, label, run, inHistory) {
+  const row = el('div', undefined, 'actions reconsider');
+  const saved = !inHistory && justDecided.has(savedKey);
+  if (saved) row.append(el('span', 'Decisión guardada ·', 'meta saved'));
+  const shown = saved ? 'Deshacer' : inHistory ? 'Volver a revisar' : label;
+  const action = button(shown, '', run);
+  // The spoken name starts with the visible words, then says what the action does.
+  if (shown !== label) action.setAttribute('aria-label', shown + ': ' + label.toLowerCase());
+  row.append(action);
+  return row;
+}
+
+// Takes back an editorial decision: the item is pending again and the text never changes.
+async function reopenItem(path, expected, key, card, reload) {
+  await api(path + '/reopen', { expected });
+  justDecided.delete(key);
+  await reload();
+  focusItem(card.id, key);
 }
 
 function el(tag, text, className) {
@@ -305,10 +391,22 @@ function el(tag, text, className) {
   return node;
 }
 
-function showError(message) {
+function showError(message, retry) {
   const alert = el('p', message);
   alert.setAttribute('role', 'alert');
+  if (retry) {
+    alert.append(document.createTextNode(' '), button('Recargar', '', async () => {
+      alert.remove();
+      await retry();
+    }));
+  }
   app.prepend(alert);
+}
+
+// Another tab changed the item since this one was rendered: the way out is a reload.
+function errorShown(error) {
+  const stale = error.status === 409 && error.message === STALE_MESSAGE;
+  showError(error.message, stale ? () => renderApp(selectedBook) : undefined);
 }
 
 // The book named in the address (?book=<id>), else the last one chosen in this browser.
@@ -403,7 +501,7 @@ function button(label, className, run) {
     try {
       await run();
     } catch (error) {
-      showError(error.message);
+      errorShown(error);
     } finally {
       // Not every action re-renders the page: a button that stays must work again.
       node.disabled = false;
@@ -436,7 +534,7 @@ function quote(text, detail) {
   return box;
 }
 
-function claimCard(book, claim, reload) {
+function claimCard(book, claim, reload, inSession) {
   const card = el('article');
   card.id = 'claim-' + book + '-' + claim.claim_id;
   card.tabIndex = -1;
@@ -447,12 +545,19 @@ function claimCard(book, claim, reload) {
   if (claim.uncertainty) card.append(el('p', 'Incertidumbre: ' + claim.uncertainty, 'meta'));
   askButton(card, { kind: 'claim', id: claim.claim_id, label: 'Afirmación: ' + shortText(claim.statement) },
     '¿Esta afirmación está bien apoyada por el texto? ¿Contradice algo del libro?');
+  const history = claim.history || [];
+  if (history.length) card.append(decisionLog('claim', book, history));
+  const key = 'claim:' + book + '/' + claim.claim_id;
   if (claim.editorial_status === 'proposed') {
     const actions = el('div', undefined, 'actions decision');
-    const decide = (decision) => () => decideCard('/books/' + book + '/claims/' + claim.claim_id, decision, decidedClaims, book + '/' + claim.claim_id, card, reload);
+    const decide = (decision) => () => decideCard('claim', book, claim.claim_id, decision, card, reload, history);
     if (claim.evidence_status === 'valid') actions.append(button('Aceptar', 'accept', decide('accept')));
     actions.append(button('Rechazar', 'reject', decide('reject')));
     card.append(actions);
+  } else {
+    // Accepting a claim changes no text, so either decision is taken back the same way.
+    card.append(reconsiderRow(inSession ? key : '', 'Deshacer decisión editorial',
+      () => reopenItem('/books/' + book + '/claims/' + claim.claim_id, history.length, key, card, reload)));
   }
   return card;
 }
@@ -516,6 +621,7 @@ function narrativeFindingCard(book, finding, reload, openQuote) {
     if (finding.verdict.note) summary += ' · Nota: "' + finding.verdict.note + '"';
     card.append(el('p', summary, 'meta'));
   }
+  card.append(...findingReconsider(book, finding, reload));
 
   const ratingRow = el('div', undefined, 'form-row actions');
   const noteInput = el('input');
@@ -550,6 +656,20 @@ function narrativeFindingCard(book, finding, reload, openQuote) {
   card.append(ratingRow);
 
   return card;
+}
+
+// A verdict is taken back like any editorial decision. While it is reopened the finding is
+// pending again and the earlier verdict stays in view, so nothing is lost.
+function findingReconsider(book, finding, reload) {
+  const kept = finding.reopened_verdict;
+  if (kept) {
+    return [el('p', 'Valoración reabierta: antes «' + (VERDICTS[kept.verdict] || kept.verdict) + '», por ' + kept.by + ' el ' + when(kept.at) + '. Vuelve a estar pendiente.', 'meta')];
+  }
+  if (!finding.verdict) return [];
+  return [reconsiderRow('', 'Deshacer decisión editorial', async () => {
+    await api('/books/' + book + '/findings/' + finding.finding_id + '/reopen', { expected: finding.verdict.at });
+    await reload();
+  })];
 }
 
 function findingsSection(book, findings, reload, openQuote) {
@@ -613,6 +733,7 @@ function findingCard(book, finding, reload) {
   for (const alternative of finding.alternatives) others.append(el('li', alternative));
   card.append(others);
   if (finding.verdict) card.append(el('p', 'Decisión: ' + (VERDICTS[finding.verdict.verdict] || finding.verdict.verdict), 'meta'));
+  card.append(...findingReconsider(book, finding, reload));
   const actions = el('div', undefined, 'actions');
   for (const [verdict, label] of Object.entries(VERDICTS)) {
     actions.append(button(label, '', () => api('/books/' + book + '/findings/' + finding.finding_id, { verdict }).then(() => reload())));
@@ -653,25 +774,113 @@ function outsideCanonReason(claim) {
   return reasons.join('; ');
 }
 
-function proposalCard(book, { proposal, diff, applicable }, reload) {
+// A line naming the proposal this one comes from, with a link to it.
+function origin(book, text, id, end) {
+  const line = el('p', text, 'meta origin');
+  line.append(itemLink('proposal', book, id), document.createTextNode(end));
+  return line;
+}
+
+// place: 'session' in Cambios propuestos (it keeps this tab's decisions), 'history' in
+// Historial, nothing elsewhere (the scene viewer).
+function proposalCard(book, { proposal, diff, applicable }, reload, place) {
   const card = el('article');
   card.id = 'proposal-' + book + '-' + proposal.proposal_id;
   card.tabIndex = -1;
   card.append(stateBadge(proposal.status, proposal.status === 'proposed' && !applicable));
+  if (proposal.reverts) card.append(origin(book, 'Revierte el cambio aceptado ', proposal.reverts, '. Aceptarla devuelve ese pasaje a como estaba.'));
+  if (proposal.reproposes) card.append(origin(book, 'Vuelve a proponer el cambio ', proposal.reproposes, ', frente al texto actual.'));
   card.append(el('p', proposal.rationale), visualDiff(diff));
   askButton(card, { kind: 'proposal', id: proposal.proposal_id, label: 'Cambio propuesto · ' + String(proposal.file || '').replace(/^scenes\//, '') },
     '¿Qué gana la escena con este cambio? ¿Hay algo que deba revisar antes de aceptarlo?');
+  const history = proposal.history || [];
+  if (history.length) card.append(decisionLog('proposal', book, history));
   if (proposal.status !== 'proposed') {
     if (proposal.result_commit) card.append(el('p', 'Cambio aprobado del manuscrito · versión ' + proposal.result_commit.slice(0, 10), 'meta'));
+    card.append(...proposalReconsider(book, proposal, card, reload, place));
     return card;
   }
   const actions = el('div', undefined, 'actions decision');
-  const decide = (decision) => () => decideCard('/books/' + book + '/proposals/' + proposal.proposal_id, decision, decidedProposals, book + '/' + proposal.proposal_id, card, reload);
+  const decide = (decision) => () => decideCard('proposal', book, proposal.proposal_id, decision, card, reload, history);
   if (applicable) actions.append(button('Aceptar cambio', 'accept', decide('accept')));
   else card.append(el('p', 'La escena ha cambiado desde esta propuesta: ya no se puede aplicar.', 'meta'));
   actions.append(button('Rechazar', 'reject', decide('reject')));
   card.append(actions);
   return card;
+}
+
+// The way back from a decided proposal. A rejection is an editorial decision and is
+// reopened. An accepted change already wrote the text, so it is undone by an inverse
+// proposal a person accepts; once that is accepted, the change can be proposed again.
+function proposalReconsider(book, proposal, card, reload, place) {
+  const key = 'proposal:' + book + '/' + proposal.proposal_id;
+  const savedKey = place === 'session' ? key : '';
+  const inHistory = place === 'history';
+  const path = '/books/' + book + '/proposals/' + proposal.proposal_id;
+  const history = proposal.history || [];
+  if (proposal.status === 'rejected') {
+    return [reconsiderRow(savedKey, 'Deshacer decisión editorial', () => reopenItem(path, history.length, key, card, reload), inHistory)];
+  }
+  const revert = history.filter((entry) => entry.action === 'revert').at(-1);
+  const inverse = revert ? proposalIndex.get(revert.ref) : null;
+  if (inverse && inverse.status === 'proposed') {
+    return [origin(book, 'Reversión pendiente: el texto vuelve atrás cuando una persona acepte la propuesta inversa ', inverse.proposal_id, '.')];
+  }
+  if (inverse && inverse.status === 'accepted') {
+    const again = [...proposalIndex.values()].find((other) => other.reproposes === proposal.proposal_id && other.status !== 'rejected');
+    if (again) return [origin(book, 'Cambio revertido y propuesto de nuevo en ', again.proposal_id, '.')];
+    const row = el('div', undefined, 'actions reconsider');
+    row.append(el('span', 'Cambio revertido.', 'meta'), button('Volver a proponer', '', async () => {
+      const result = await api(path + '/repropose', {});
+      await reload();
+      focusItem(null, 'proposal:' + book + '/' + result.proposal.proposal_id);
+    }));
+    return [row];
+  }
+  // Accepted and not reverted, or its inverse was rejected: a new revert reopens that one.
+  const row = reconsiderRow(savedKey, 'Revertir cambio de texto', () => confirmRevert(book, proposal, card, row.children[row.children.length - 1], reload, key), inHistory);
+  return [row];
+}
+
+// Reverting an applied change asks first and says exactly what will happen. The box is a
+// dialog only while it is open, so the background refresh waits for it and never removes it.
+function confirmRevert(book, proposal, card, opener, reload, key) {
+  if (card.confirming) return;
+  const box = el('div', undefined, 'confirm');
+  box.setAttribute('role', 'dialog');
+  const title = el('h3', 'Revertir cambio de texto');
+  title.id = card.id + '-revert';
+  title.tabIndex = -1;
+  box.setAttribute('aria-labelledby', title.id);
+  box.append(title,
+    el('p', 'Se creará una propuesta inversa que deshace este cambio. El texto no cambia hasta que una persona la acepte en «Cambios propuestos».'),
+    el('p', 'Si después se editó este mismo pasaje, no se puede revertir de forma automática y habrá que proponer el cambio a mano.', 'meta'));
+  const close = () => {
+    box.remove();
+    card.confirming = null;
+  };
+  const cancel = () => {
+    close();
+    opener.focus();
+  };
+  const actions = el('div', undefined, 'actions');
+  actions.append(
+    button('Crear propuesta inversa', 'accept', async () => {
+      const result = await api('/books/' + book + '/proposals/' + proposal.proposal_id + '/revert', { expected: (proposal.history || []).length });
+      close();
+      justDecided.delete(key);
+      await reload();
+      focusItem(null, 'proposal:' + book + '/' + result.proposal.proposal_id);
+    }),
+    button('Cancelar', '', cancel),
+  );
+  box.append(actions);
+  box.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') cancel();
+  });
+  card.append(box);
+  card.confirming = box;
+  title.focus();
 }
 
 function section(title, cards, empty, explanation) {
@@ -1245,7 +1454,8 @@ function bookSections(currentBook, data) {
   const shownClaims = data.claims.filter((c) => pending(c) || decidedClaims.has(currentBook + '/' + c.claim_id));
   const outside = data.claims.filter((c) => c.editorial_status === 'accepted' && !data.canon.some((canonical) => canonical.claim_id === c.claim_id));
   const rejected = data.claims.filter((c) => c.editorial_status === 'rejected');
-  const cards = (list, build) => list.map((item) => build(currentBook, item, reload));
+  const cards = (list, build, place) => list.map((item) => build(currentBook, item, reload, place));
+  proposalIndex = new Map(data.proposals.map((p) => [p.proposal.proposal_id, p.proposal]));
 
   // On a phone only what waits for a decision starts open; tools and reference are
   // one tap away. A section with nothing in it is a single line, so it stays open,
@@ -1258,17 +1468,17 @@ function bookSections(currentBook, data) {
   // Order: first what the writer came to decide (the manuscript, then the analysis
   // of it), then the tools that feed the book, then what is already settled.
   const nodes = [
-    foldable(section('Cambios propuestos', cards(shownProposals, proposalCard), 'Ningún cambio pendiente.', 'Las decisiones de esta sesión permanecen aquí para confirmar su estado.'), 'cambios', true),
+    foldable(section('Cambios propuestos', cards(shownProposals, proposalCard, 'session'), 'Ningún cambio pendiente.', 'Las decisiones de esta sesión permanecen aquí para confirmar su estado.'), 'cambios', true),
     foldable(findingsBox, 'hallazgos', true),
     foldable(section('Posibles problemas', cards(data.findings, findingCard), 'Sin hallazgos, lo que no demuestra que no haya problemas.'), 'problemas', true),
-    foldable(section('Afirmaciones por revisar', cards(shownClaims, claimCard), 'Ninguna pendiente.', 'Las decisiones de esta sesión permanecen aquí para confirmar su estado.'), 'afirmaciones', true),
+    foldable(section('Afirmaciones por revisar', cards(shownClaims, claimCard, true), 'Ninguna pendiente.', 'Las decisiones de esta sesión permanecen aquí para confirmar su estado.'), 'afirmaciones', true),
     foldable(importSection(currentBook, reload), 'importar', !phone || !hasScenes),
     foldable(notionImportSection(currentBook, reload), 'notion', !phone),
     scenesBox,
     foldable(section('Canon', cards(data.canon, claimCard), 'El canon está vacío.', 'Solo hechos narrados aceptados por una persona y con evidencia válida. Aceptar un cambio de texto no aprueba sus afirmaciones.'), 'canon', reference(data.canon.length)),
     foldable(section('Afirmaciones fuera del Canon', cards(outside, claimCard), 'Ninguna afirmación aceptada fuera del Canon.', 'Una afirmación aceptada puede seguir fuera del Canon por su tipo o por su evidencia.'), 'fuera-del-canon', reference(outside.length)),
     foldable(section('Afirmaciones rechazadas', cards(rejected, claimCard), 'Ninguna afirmación rechazada.', 'Las afirmaciones rechazadas no forman parte del Canon.'), 'rechazadas', reference(rejected.length)),
-    foldable(section('Historial de cambios del manuscrito', cards(decided, proposalCard), 'Sin decisiones todavía.', 'Aceptar una propuesta cambia el manuscrito, pero no convierte sus afirmaciones en Canon. Las propuestas rechazadas no cambian el texto.'), 'historial', reference(decided.length)),
+    foldable(section('Historial de cambios del manuscrito', cards(decided, proposalCard, 'history'), 'Sin decisiones todavía.', 'Aceptar una propuesta cambia el manuscrito, pero no convierte sus afirmaciones en Canon. Las propuestas rechazadas no cambian el texto.'), 'historial', reference(decided.length)),
   ];
   const counts = {
     cambios: proposed.length,

@@ -106,12 +106,22 @@ the selected rating has `aria-pressed`.
   screen while its card is being read. It is opaque, it never contains a text field,
   and it only appears once 120 px of its card are visible (`--peek`).
 - Every control has a visible label or an `aria-label`; focus is always visible
-  (`:focus-visible`).
+  (`:focus-visible`). An `aria-label` starts with the visible words
+  ("Deshacer: revertir cambio de texto"), so speech control finds the button by what it shows.
+- Taking a decision back has two names, because the two do different things.
+  **Deshacer decisión editorial** reopens a claim, a finding verdict or a rejected
+  proposal: nothing in the text changes. **Revertir cambio de texto** undoes an applied
+  change through an inverse proposal a person must accept, and is confirmed first in a
+  box inside the card (`.confirm`, `role="dialog"` only while open). Right after a
+  decision the card reads "Decisión guardada · Deshacer", with no timer; in Historial
+  the same action is **Volver a revisar**. These buttons are outlined, below the card's
+  content, never in the sticky `.decision` bar.
 
 ## Messages
 
 - An error is `role="alert"`; the newest one stays at the top of the screen, below
-  the section navigation.
+  the section navigation. When another tab changed the item (409), the error carries a
+  **Recargar** button.
 - News that cannot be shown yet is a floating `role="status"` box (`.notice`), also
   below the navigation. It is in
   the page from the start, empty, and gets its text when there is news, so screen
