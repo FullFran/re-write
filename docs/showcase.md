@@ -30,7 +30,7 @@ three nights later Clara finds it there, and Elena, who said it, turns out not t
 | Tomás | The guard of scene 1. Spreads the rumour, later holds the bridge. |
 | Anselmo | The salt-tax collector. Keeps the ledger and forged Bruno's debts to take the floodgate. |
 | Padre Damián | The priest. Helped Bruno hide the key, then told Anselmo under pressure. |
-| Inés | The ferrywoman of Ribera. The go-between: she crosses the river and both stories. |
+| Inés | The ferrywoman of Ribera. She crosses the river every day and hides the answer to the mystery. |
 | Marcos Ferrer | Lord of Ribera, who wants the floodgate for his own pans. |
 
 ### Places and objects
@@ -91,3 +91,76 @@ Problems for a reader or the assistant, which no rule in RE;write checks today:
 
 The mystery: where Bruno is. Nothing before scene 14 says it, and no who-knows-what edge about it
 exists before that scene.
+
+## What the graph shows
+
+Measured on the book and pinned in `fixtures/la-puerta-de-sal/expected.json`:
+
+- **Communities.** Louvain in the Grafo panel draws four groups: the bridge (Elena, Tomás, the
+  bridge, the tavern, the rumour thread), the ledger (Bruno, Anselmo, the ledger, the Casa del
+  Peso, its thread), the chapel (Clara, the key, the chapel, Padre Damián) and Ribera (Marcos
+  Ferrer, Inés, Ribera, the flood thread). Bruno and Clara are go-betweens: Bruno joins the
+  ledger and the chapel almost equally.
+- **Top bridge.** Elena has the highest betweenness, degree and PageRank: the story passes
+  through her.
+- **A shortest path.** Marcos Ferrer and Padre Damián never share a scene; the path between them
+  goes through Anselmo, the one person who deals with both.
+- **Orphans.** `Salina Vieja` and `Canción de la barquera`, two notes nothing links.
+- **An unresolved link.** `[[Salinas del Norte]]` in scene 15.
+- **Who knows what.** 19 `knows` edges from the claims. With the scene cut at scene 13 there is
+  no edge about where Bruno is; at scene 14 there are two, from Elena and from Inés.
+
+## Load it
+
+The loader uses the product's application layer (`Project.init`, `importScenes`, `proposeNote`
+and `reviewProposal`, `extractClaims`, `reviewClaim`) and writes only inside the data directory
+it is given. It refuses a book that already exists, so it never changes a book someone has worked
+on.
+
+```bash
+node scripts/load-showcase.ts <data-dir> [--book <id>] [--user <subject>] [--json]
+```
+
+It creates `books/<id>` (default `la-puerta-de-sal`) with the 20 scenes, the 20 notes (each one
+proposed and accepted, so the review history shows how a note arrives), and the 34 claims from
+`annotations.json`: the 25 narrated facts are accepted and form Canon, and the 9 beliefs and
+rumours wait in the review queue. `--user` gives that person (their Clerk user id) access.
+
+To browse it in the review page, point a server at the same data directory (`REWRITE_DATA_DIR`,
+see [deployment](deployment.md)). The server always needs a Clerk instance: there is no local
+mode without sign-in. Loading the showcase into production is a separate decision for the owner;
+the loader has no option that reaches a server. Without a server, the CLI reads the same book:
+
+```bash
+node src/cli/main.ts canon <data-dir>/books/la-puerta-de-sal
+node src/cli/main.ts check <data-dir>/books/la-puerta-de-sal
+```
+
+## A guided tour
+
+1. **Concentración.** Open scene 4, *El paño seco*, in Concentración and read it with the links
+   shown as text; switch to the source mode to see `[[Padre Damián|padre Damián]]`.
+2. **Follow a link.** Open `Clara` from the scene. Her note lists its linked mentions (scenes 2,
+   4, 6, 9, ...) and the unlinked ones, where her name appears as plain text.
+3. **The graph.** Open the Grafo panel and the drawing: four colours, one per community. Turn on
+   the orphans: two notes float alone.
+4. **No spoilers.** Slide the scene cut to scene 8: Bruno's note is there, but nothing says where
+   he is. Ask for the who-knows-what edges: none about Bruno's whereabouts until scene 14.
+5. **A path.** Find the path from Marcos Ferrer to Padre Damián: it goes through Anselmo.
+6. **Findings.** Run the continuity check (`check`, or `inspect_continuity` from the assistant):
+   three possible contradictions, A, B and C above. A is the honest case for a verdict: scene 11
+   says Elena guessed, a reading the finding already lists. B and C are real slips to fix.
+7. **A proposal, undo and revert.** Accept a fix for C (for example, make Tomás only suspect in
+   scene 8), then revert it from the review page and see the scene come back.
+8. **Ask the assistant.** "¿Dónde está Bruno?" with the cut at scene 10, then without the cut.
+   Then "¿Cuántos años lleva Elena en el puente?": Canon holds both answers (D), and a careful
+   reader, or the assistant, should notice.
+
+## Tests and eval
+
+`tests/showcase.test.ts` loads the book and checks: every annotation quote is literal and
+appears once; every link resolves except the planted one; the orphans, the shortest path, the top
+bridge and the designed communities (loosely: their modularity is clearly positive and above any
+shuffle of the same group sizes); no who-knows-what edge about the mystery before its scene; and
+the continuity check reports exactly A, B and C. D and E are in Canon with their literal quotes;
+no rule checks them yet. The eval journey `showcase-tour` drives the MCP tools over the book.

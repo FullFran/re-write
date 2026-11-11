@@ -1,0 +1,76 @@
+{
+  "about": "What the showcase book should show, checked by tests/showcase.test.ts. See docs/showcase.md.",
+  "counts": { "scenes": 20, "notes": 20, "accepted_claims": 25 },
+  "unresolved_link": { "target": "Salinas del Norte", "scene": "scenes/015-la-crecida.md" },
+  "orphans": ["Canción de la barquera", "Salina Vieja"],
+  "shortest_path": {
+    "from": "Marcos Ferrer",
+    "to": "Padre Damián",
+    "path": ["Marcos Ferrer", "Anselmo", "Padre Damián"],
+    "why": "They never share a scene; Anselmo is the only person who deals with both."
+  },
+  "top_bridge": "Elena",
+  "communities": {
+    "el puente": ["Elena", "Tomás", "Puente de Sal", "Taberna del Ancla", "La venta de la llave"],
+    "las cuentas": ["Bruno", "Anselmo", "Libro de cuentas", "Casa del Peso", "Las cuentas falsas"],
+    "la capilla": ["Clara", "Llave del puente", "Capilla de San Telmo", "Padre Damián"],
+    "Ribera": ["Marcos Ferrer", "Inés", "Ribera", "La crecida"]
+  },
+  "communities_why": "The groups Louvain draws in the browser. Bruno and Clara are go-betweens: Bruno joins the ledger and the chapel almost equally, Clara reads the ledger.",
+  "mystery": {
+    "question": "Where is Bruno?",
+    "fact": "bruno-in-ribera",
+    "subject": "Bruno",
+    "reveal_scene": "scenes/014-la-otra-orilla.md",
+    "before_reveal": "scenes/013-antes-de-la-lluvia.md",
+    "knowers": ["Elena", "Inés"]
+  },
+  "continuity": {
+    "knowledge_order": [
+      {
+        "id": "A",
+        "holder": "Elena",
+        "fact": "key-under-altar",
+        "shown": { "scene": "scenes/001-la-puerta-de-sal.md", "quote": "La llave está bajo la losa del altar", "story_time": 1 },
+        "learned": { "scene": "scenes/002-el-altar.md", "quote": "Elena, que hasta esa noche no había sabido nada del escondite", "story_time": 4 },
+        "why": "Elena says where the key is three days before she learns it. Scene 11 explains it as a guess, a reading the finding already lists."
+      },
+      {
+        "id": "B",
+        "holder": "Marcos Ferrer",
+        "fact": "key-under-altar",
+        "shown": { "scene": "scenes/007-el-senor-de-ribera.md", "quote": "duerme bajo una piedra de altar, en la capilla de los de Sal", "story_time": 8 },
+        "learned": { "scene": "scenes/010-el-trato.md", "quote": "¿Bajo el altar? ¿Estás seguro?", "story_time": 11 },
+        "why": "Marcos speaks of the altar on day 8, but Anselmo tells him on day 11, and he is surprised."
+      },
+      {
+        "id": "C",
+        "holder": "Tomás",
+        "fact": "ledger-forged",
+        "shown": { "scene": "scenes/008-la-ronda-de-noche.md", "quote": "Las firmas del libro las puso él, el recaudador, con su mano.", "story_time": 9 },
+        "learned": { "scene": "scenes/012-la-verguenza-de-tomas.md", "quote": "¿Las deudas de Bruno son falsas?", "story_time": 13 },
+        "why": "Tomás says the signatures are forged on day 9, and on day 13 he swears he knew nothing about them."
+      }
+    ],
+    "for_a_reader": [
+      {
+        "id": "D",
+        "kind": "age",
+        "quotes": [
+          { "scene": "scenes/001-la-puerta-de-sal.md", "quote": "Elena llevaba once años custodiando el puente de Sal" },
+          { "scene": "scenes/019-la-medida-de-la-sal.md", "quote": "que llevaba nueve años en el puente" }
+        ],
+        "why": "Eleven years on the bridge in scene 1, nine in scene 19. No rule in RE;write compares durations today."
+      },
+      {
+        "id": "E",
+        "kind": "place",
+        "quotes": [
+          { "scene": "scenes/006-la-casa-del-peso.md", "quote": "estaba en la orilla de Sal, en la plaza, frente a la fuente de los tres caños" },
+          { "scene": "scenes/017-la-puerta.md", "quote": "al otro lado del río, en Ribera, a recoger el libro" }
+        ],
+        "why": "The Casa del Peso stands on the Sal bank in scene 6 and in Ribera in scene 17. No rule in RE;write compares places today."
+      }
+    ]
+  }
+}
