@@ -20,12 +20,15 @@ export interface EngineHarness {
   received: () => string[];
   /** The MCP bearer the last started fake engine process was given. */
   childToken: () => string;
+  childPid: () => number;
+  /** Where the fake engine program, its scenario and its records live. */
+  dir: string;
   setScenario: (scenario: object) => void;
   close: () => void;
 }
 
 /** The real server with the engine enabled, and a fake engine process behind it. */
-export async function startEngineHarness(scenario: object = {}, settings: Partial<EngineSettings> = {}): Promise<EngineHarness> {
+export async function startEngineHarness(scenario: object = {}, settings: Partial<EngineSettings> = {}, options: { publicResource?: string } = {}): Promise<EngineHarness> {
   const h = await startHarness();
   const dir = tempDir();
   writeFileSync(join(dir, 'main.ts'), `import ${JSON.stringify(join(import.meta.dirname, 'fake-child.ts'))};\n`);
@@ -36,8 +39,10 @@ export async function startEngineHarness(scenario: object = {}, settings: Partia
   await new Promise<void>((resolve) => app.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${(app.address() as AddressInfo).port}`;
   const key = randomBytes(32);
-  const engine = new EngineManager({ key, dataDir: h.data, entry: join(dir, 'main.ts'), mcpUrl: `${base}/mcp`, maxProcesses: 2, idleMs: 60_000, ...settings });
-  app.on('request', createHandler({ ...h.config, resource: `${base}/mcp`, reviewOrigin: base }, h.library, engine));
+  const engineSettings: EngineSettings = { key, dataDir: h.data, entry: join(dir, 'main.ts'), mcpUrl: `${base}/mcp`, maxProcesses: 2, idleMs: 60_000, ...settings };
+  const engine = new EngineManager(engineSettings);
+  // With `publicResource` the server has a public name, as in production, and the engine dials loopback.
+  app.on('request', createHandler({ ...h.config, resource: options.publicResource ?? `${base}/mcp`, reviewOrigin: base, engine: engineSettings }, h.library, engine));
 
   return {
     h,
@@ -52,9 +57,11 @@ export async function startEngineHarness(scenario: object = {}, settings: Partia
     }),
     received: () => existsSync(join(dir, 'received.log')) ? readFileSync(join(dir, 'received.log'), 'utf8').trim().split('\n') : [],
     childToken: () => readFileSync(join(dir, 'token.txt'), 'utf8'),
+    childPid: () => Number(readFileSync(join(dir, 'pid.txt'), 'utf8')),
+    dir,
     setScenario,
     close: () => {
-      engine.close();
+      void engine.close();
       app.closeAllConnections();
       app.close();
       h.close();

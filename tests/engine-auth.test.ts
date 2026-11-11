@@ -85,7 +85,7 @@ test('an engine token is only honoured on a direct loopback connection', () => {
   assert.equal(isDirectLoopback('::ffff:127.0.0.1', {}), true);
   assert.equal(isDirectLoopback('10.0.0.7', {}), false);
   assert.equal(isDirectLoopback(undefined, {}), false);
-  for (const header of ['forwarded', 'x-forwarded-for', 'x-real-ip']) {
+  for (const header of ['forwarded', 'via', 'x-real-ip', 'cf-connecting-ip', 'true-client-ip', 'x-forwarded-for', 'x-forwarded-proto', 'X-Forwarded-Host']) {
     assert.equal(isDirectLoopback('127.0.0.1', { [header]: '203.0.113.9' }), false, header);
   }
 });

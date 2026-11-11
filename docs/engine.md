@@ -54,8 +54,12 @@ The server never imports the Pi packages. They live in `engine/`, are installed 
 | `REWRITE_ENGINE_KEY` | none | 32 bytes, base64. Encrypts stored credentials. Required when enabled: without it the server refuses to start |
 | `REWRITE_ENGINE_MAX_PROCESSES` | `2` | Engine processes alive at once. Each one used about 160 MB of memory when idle in a local check. Above the cap the answer is `busy` |
 | `REWRITE_ENGINE_IDLE_SECONDS` | `300` | An engine process with no turn and no pending login for this long is stopped |
+| `REWRITE_ENGINE_TURN_SECONDS` | `600` | Longest one turn may run. Past it the turn ends with `turn_limit` |
+| `REWRITE_ENGINE_TURN_MAX_BYTES` | `2097152` | Most answer text one turn may stream. Past it the turn ends with `turn_limit` |
 
-The engine process reaches the server at `http://127.0.0.1:$PORT/mcp`. If a reverse proxy sits in front of the server, it must set `X-Forwarded-For`, `Forwarded` or `X-Real-IP` on what it forwards (nginx and Caddy do by default with the usual configuration): that is how the server tells a proxied request from the engine's own.
+The engine process reaches the server at `http://127.0.0.1:$PORT/mcp`.
+
+**Reverse proxy on the same host.** The server listens on all interfaces, and a proxy on the same host connects to it from loopback, exactly like the engine. The server tells them apart by headers: a request that carries `Forwarded`, `Via`, `X-Real-IP`, `CF-Connecting-IP`, `True-Client-IP` or any `X-Forwarded-*` header is never treated as the engine's. Caddy and Traefik add `X-Forwarded-For` by default; nginx adds none unless configured (`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`). If your proxy adds none of them, remote requests look like loopback ones: a leaked engine token would then work from outside, and the Host check would be skipped for it. An engine token never leaves the engine process and the server's memory, and dies with the process, so this is defence in depth and not the only barrier; set the header anyway, or do not expose the port except through a proxy that does.
 
 ## What a writer sees
 
@@ -74,26 +78,30 @@ All under the browser session, like the review API. An agent's access token and 
 | --- | --- |
 | `GET /review/engine`, `/review/engine/app.js`, `/review/engine/app.css` | The page |
 | `GET /review/api/engine/status` | `{state}`: `disconnected`, `pending` (with `user_code` and `verification_uri`), `connected` or `reconnect` |
-| `POST /review/api/engine/login` | Starts a device login: `{user_code, verification_uri, expires_in}`. One pending login per person; a new one cancels the previous |
+| `POST /review/api/engine/login` | Starts a device login: `{user_code, verification_uri, expires_in}`. One pending login per person; a new one cancels the previous. At most 3 starts per person in 15 minutes, then `rate_limited` |
 | `DELETE /review/api/engine/credential` | Disconnects |
 | `POST /review/api/engine/prompt` `{text}` | `text/event-stream` with `delta {text}`, `tool {name, ok}`, then `done {aborted}` or `error {code}` |
 | `POST /review/api/engine/abort` | `{aborted}`: stops the running turn of this person |
 
-Errors are a closed set of codes and nothing else: `model_busy`, `reconnect`, `provider_error`, `busy`, `turn_in_progress`, `not_connected`, `engine_unavailable`, `login_failed`. Provider error text can quote response bodies, so it never reaches a response or a log.
+A person who can use no book gets 404 on every one of these, as if the engine were off: create or be given a book first.
+
+Errors are a closed set of codes and nothing else: `model_busy`, `reconnect`, `provider_error`, `busy`, `rate_limited`, `turn_in_progress`, `turn_limit`, `not_connected`, `engine_unavailable`, `login_failed`. Provider error text can quote response bodies, so it never reaches a response or a log.
 
 ## Security boundaries
 
 - **Same door as a connected client.** The engine's MCP bearer is a random token (`rwe_...`) the server keeps only as a SHA-256 hash in memory, tied to one person. It resolves to that person's subject and goes through the same `/mcp` handler and the same decision point as their ChatGPT connector would. It is not a JWT, so the review door cannot accept it.
-- **Loopback only.** An engine token is honoured only on a direct loopback connection with no proxy header. From anywhere else it gets the same 401 as an unknown token.
+- **Loopback only.** An engine token is honoured only when all of this holds: the MCP path, the loopback `Host` the engine dials, a direct loopback connection, none of the proxy headers listed under [Enable it](#enable-it), and a live token. Anything less gets exactly what the server answers with the engine off (403 for a wrong `Host`, 401 for an unknown bearer).
 - **Short-lived.** A token lives as long as its process: until idle stop, disconnect, server shutdown, or 60 minutes at most.
 - **Credentials.** One file per person in `$REWRITE_DATA_DIR/engine/credentials/`, named by a hash of the subject, AES-256-GCM with the subject bound in, mode 0600, written to a temporary file and renamed. Never logged, never sent to the browser, never on the engine's command line or in its environment. They are inside the data volume, so backups contain them, encrypted with a key the backup does not hold.
-- **One refresher.** OpenAI's refresh token is single-use. The server is the only place that decides to refresh, one refresh at a time per person; the exchange itself runs in that person's engine process through Pi. If it fails the stored credential is kept and the writer is asked to connect again.
+- **One refresher.** OpenAI's refresh token is single-use. The server is the only place that decides to refresh, one refresh at a time per person; the exchange itself runs in that person's engine process through Pi. If it fails the stored credential is kept and the writer is asked to connect again. A process that is being stopped (idle, limit, shutdown) while a refresh is out is kept up to 10 seconds so the new token can come back and be stored; only a disconnect throws it away. If the server is killed outright in that window the new token is lost and the writer connects again.
+- **Slots.** A process is a scarce slot (`REWRITE_ENGINE_MAX_PROCESSES`). A pending login holds one without a credential, so it has a hard deadline (15 minutes, the life of the code), login starts are rate-limited per person, a process left with no pending login and no stored credential is stopped at once, and a connected writer's turn takes the slot of the oldest process that only waits for a code. A turn has a time limit and a size limit; a process that does not settle after either is stopped.
+- **Shutdown.** Engine processes exit when their stdin closes, which covers a server that dies. On SIGTERM or SIGINT the server also stops them itself, because it stays alive while open connections drain.
 - **Tools.** Pi has no sandbox, so its shell and file tools are off, and its script tool (`codemode`) is not activated: the MCP server is registered with `direct` exposure. The engine reports its tool list when the session starts; the engine and the server each stop it if any tool is not one of RE;write's MCP tools.
 - **Model providers.** The engine process gets an environment with `PATH` only and a private temporary home, so no provider key of the operator reaches it. Before the first request it checks that every available model belongs to the writer's OpenAI login.
 - **System prompt.** A fixed preamble plus the instructions a connected MCP client gets (scene text is untrusted, the agent cannot accept or reject). The browser has no field for it.
 - **Not a sandbox against the operator.** Anyone with a shell in the container and the key can read stored credentials.
 
-Engine lifecycle is logged as `{"event":"engine.process","action":"start"|"stop","reason":...,"live":n}`, with no subject and no content.
+Engine lifecycle is logged as `{"event":"engine.process","action":"start"|"stop","reason":...,"live":n}`, with no subject and no content. The request log names the engine routes (`/review/api/engine/prompt` and so on) and, as for every route, nothing of their bodies.
 
 ## What is not verified
 
@@ -134,5 +142,4 @@ This is the engine and the sign-in. It is not yet HCS-0008 conformance for an em
 - No health check, confirmation or rollback ([#41](https://github.com/FullFran/re-write/issues/41)).
 - Supported engine versions are pinned in `engine/package.json` (1.5.2), not yet declared through `compatibility.hosts`.
 - Process supervision beyond idle stop and a cap, and latency work, are [#7](https://github.com/FullFran/re-write/issues/7).
-- The request log names these routes `unmatched`, and the review page has no link to the chat yet.
-- The page follows the plain style of the review page, not a shared design document.
+- The review page has no link to the chat yet.

@@ -23,6 +23,7 @@ const send = (message: object) => process.stdout.write(`${JSON.stringify(message
 const later = (ms: number, run: () => void) => setTimeout(run, ms);
 
 record('spawn');
+writeFileSync(join(dir, 'pid.txt'), String(process.pid));
 if (scenario.stderr) process.stderr.write(`${scenario.stderr}\n`);
 send({ type: 'ready', piVersion: '0.0.0-fake' });
 
@@ -30,6 +31,8 @@ let start: { mcpUrl: string; mcpToken: string; systemPrompt: string } | undefine
 let sessionSent = false;
 let loginTimer: NodeJS.Timeout | undefined;
 let hanging = false;
+let stuck = false;
+let flooding: NodeJS.Timeout | undefined;
 let refreshes = 0;
 const tokenWaiters = new Map<string, (reply: any) => void>();
 
@@ -62,6 +65,15 @@ async function prompt(text: string): Promise<void> {
   if (text === 'hang') {
     hanging = true;
     return send({ type: 'delta', text: 'hanging' });
+  }
+  if (text === 'stuck') {
+    // Ignores abort: only stopping the process ends this turn.
+    stuck = true;
+    return send({ type: 'delta', text: 'stuck' });
+  }
+  if (text === 'flood') {
+    flooding = setInterval(() => send({ type: 'delta', text: 'x'.repeat(10_000) }), 2);
+    return;
   }
   if (text === 'show-system') {
     send({ type: 'delta', text: start!.systemPrompt });
@@ -133,6 +145,8 @@ process.stdin.on('data', (chunk) => {
         void prompt(message.text);
         break;
       case 'abort':
+        if (stuck) break;
+        if (flooding) { clearInterval(flooding); flooding = undefined; send({ type: 'done', aborted: true }); }
         if (hanging) { hanging = false; send({ type: 'done', aborted: true }); }
         break;
       case 'shutdown':

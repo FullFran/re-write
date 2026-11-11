@@ -10,7 +10,7 @@
 /** The only error texts that may reach a browser or a log. */
 export const ENGINE_ERROR_CODES = [
   'model_busy', 'reconnect', 'provider_error', 'busy', 'turn_in_progress',
-  'not_connected', 'engine_unavailable', 'login_failed',
+  'not_connected', 'engine_unavailable', 'login_failed', 'rate_limited', 'turn_limit',
 ] as const;
 export type EngineErrorCode = typeof ENGINE_ERROR_CODES[number];
 

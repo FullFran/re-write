@@ -127,14 +127,19 @@ export function looksLikeEngineToken(token: string | null): boolean {
 }
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-const PROXY_HEADERS = ['forwarded', 'x-forwarded-for', 'x-real-ip'];
+const PROXY_HEADERS = new Set(['forwarded', 'via', 'x-real-ip', 'cf-connecting-ip', 'true-client-ip']);
 
 /**
  * An engine token is only honoured on a direct loopback connection. A reverse proxy on
- * the same host also connects from loopback, so a request that carries any proxy header
- * is treated as coming from outside.
+ * the same host also connects from loopback, so a request that carries any header a
+ * proxy adds is treated as coming from outside. Header names are compared in lower
+ * case, which is how Node delivers them. A proxy that adds none of these cannot be told
+ * apart from the engine: docs/engine.md says what that exposes.
  */
 export function isDirectLoopback(remoteAddress: string | undefined, headers: IncomingHttpHeaders): boolean {
   if (!remoteAddress || !LOOPBACK.has(remoteAddress)) return false;
-  return PROXY_HEADERS.every((name) => headers[name] === undefined);
+  return Object.keys(headers).every((name) => {
+    const lower = name.toLowerCase();
+    return !PROXY_HEADERS.has(lower) && !lower.startsWith('x-forwarded-');
+  });
 }

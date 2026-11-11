@@ -106,6 +106,8 @@ function readEngineSettings(env: Record<string, string | undefined>, dataDir: st
     mcpUrl: `http://127.0.0.1:${port}${resourcePath}`,
     maxProcesses: positive('REWRITE_ENGINE_MAX_PROCESSES', 2),
     idleMs: positive('REWRITE_ENGINE_IDLE_SECONDS', 300) * 1000,
+    turnTimeoutMs: positive('REWRITE_ENGINE_TURN_SECONDS', 600) * 1000,
+    turnMaxBytes: positive('REWRITE_ENGINE_TURN_MAX_BYTES', 2 * 1024 * 1024),
   };
 }
 
@@ -271,7 +273,20 @@ export function createHandler(
     bearer_methods_supported: ['header'],
   };
 
-  const serveMcp = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  /**
+   * The person an engine process acts for, or null. All of these must hold: the MCP path,
+   * the loopback Host the engine dials, a direct loopback connection with no header a
+   * proxy adds, and a bearer that is a live engine token. Anything less is an ordinary
+   * request and gets what it would get with the engine off.
+   */
+  const engineSubjectOf = (req: IncomingMessage, path: string): string | null => {
+    if (!engine || engineHost === null || path !== resourcePath || req.headers.host !== engineHost) return null;
+    const raw = bearerOf(req);
+    if (!looksLikeEngineToken(raw) || !isDirectLoopback(req.socket.remoteAddress, req.headers)) return null;
+    return engine.tokens.resolve(raw!);
+  };
+
+  const serveMcp = async (req: IncomingMessage, res: ServerResponse, engineSubject: string | null): Promise<void> => {
     const challenge = `Bearer resource_metadata="${metadataUrl}"`;
     const raw = bearerOf(req);
     if (!raw) {
@@ -282,10 +297,9 @@ export function createHandler(
     }
     let subject: string;
     try {
-      // An engine token counts only on a direct loopback connection. Anywhere else it is
-      // just a string that is not a valid access token, and is refused like any other.
-      subject = (engine && isDirectLoopback(req.socket.remoteAddress, req.headers) ? engine.tokens.resolve(raw) : null)
-        ?? await verifier.verifyAccessToken(raw);
+      // An engine token that did not meet every condition above is just a string that is
+      // not a valid access token, and is refused like any other.
+      subject = engineSubject ?? await verifier.verifyAccessToken(raw);
       recordSubject(subject);
     } catch (error) {
       recordAuthenticationFailure(error);
@@ -646,6 +660,10 @@ export function createHandler(
       recordAuthenticationFailure(error);
       return problem(res, 401, 'unauthorized');
     }
+    // The engine is for people who can use a book. For anyone else it does not exist,
+    // which also keeps a signed-in stranger from taking a process slot.
+    const member = library.booksFor(subject).some((b) => decide({ library, subject, book: b, door: 'review', permission: READ, entry: null }).allow);
+    if (!member) throw new HttpError(404, 'not found');
     const route = `${req.method} ${path.slice('/review/api/engine/'.length)}`;
     try {
       if (route === 'GET status') return json(res, 200, manager.status(subject));
@@ -710,12 +728,10 @@ export function createHandler(
       // Container health checks arrive by address, so this comes before the host check.
       if (path === '/health' && req.method === 'GET') return json(res, 200, { status: 'ok' });
       // Defence against DNS rebinding: only the public name of this server is served.
-      // An engine process dials loopback, so its Host is not the public name. That is let
-      // through only for the MCP path on a direct loopback connection with an engine-shaped
-      // bearer; whether the bearer is live is decided where every MCP token is.
-      const fromEngine = engine !== undefined && path === resourcePath && req.headers.host === engineHost
-        && looksLikeEngineToken(bearerOf(req)) && isDirectLoopback(req.socket.remoteAddress, req.headers);
-      if (req.headers.host !== allowedHost && !fromEngine) throw new HttpError(403, 'invalid host');
+      // An engine process dials loopback, so its Host is not the public name. Only a
+      // request that is an engine's in every respect is let past the Host check.
+      const engineSubject = engineSubjectOf(req, path);
+      if (req.headers.host !== allowedHost && engineSubject === null) throw new HttpError(403, 'invalid host');
       if (req.method === 'GET' && (path === new URL(metadataUrl).pathname || path === '/.well-known/oauth-protected-resource')) {
         return json(res, 200, metadata);
       }
@@ -730,7 +746,7 @@ export function createHandler(
         res.end(llmsText(config.resource));
         return;
       }
-      if (path === resourcePath) return await serveMcp(req, res);
+      if (path === resourcePath) return await serveMcp(req, res, engineSubject);
       if (path === '/review/engine' || path.startsWith('/review/engine/') || path.startsWith('/review/api/engine/')) {
         // With the engine off these addresses do not exist, for anyone.
         if (!engine) throw new HttpError(404, 'not found');

@@ -149,3 +149,4 @@ Do these with the synthetic book only.
 - **Coauthors of one book see all of it.** Permissions are per book, not per scene.
 - **Book text goes to each person's model provider** when their agent reads it.
 - **With the embedded engine enabled, the server stores each connected writer's ChatGPT credential**, encrypted with `REWRITE_ENGINE_KEY`, inside the data volume. Whoever holds the volume and the key holds those logins. See [engine.md](engine.md#security-boundaries).
+- **The server listens on all interfaces.** With the embedded engine enabled, a reverse proxy on the same host must add a forwarding header (`X-Forwarded-For`, `Forwarded`, `Via` or `X-Real-IP`) to what it forwards. Without one, a request from outside looks to the server like its own engine process on loopback, and a leaked engine token would work remotely. See [engine.md](engine.md#enable-it).
