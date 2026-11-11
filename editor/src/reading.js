@@ -2,6 +2,7 @@
 // Scene text only ever becomes text nodes; nothing in it is parsed as HTML, and links keep
 // their words but never become links.
 import { parser } from './markdown.js';
+import { wikilinksIn } from './wikilinks.js';
 
 // Syntax that is not shown when the text is read.
 const MARKS = new Set(['HeaderMark', 'EmphasisMark', 'QuoteMark', 'ListMark', 'CodeMark', 'LinkMark', 'URL', 'LinkTitle', 'LinkLabel', 'StrikethroughMark', 'CodeInfo']);
@@ -37,6 +38,17 @@ function inline(node, text, range = { from: node.from, to: node.to }) {
       out.push({ tag: 'br', children: [] });
     } else if (name === 'Escape') {
       push(text.slice(child.from + 1, child.to));
+    } else if (name === 'Image' && text.startsWith('![[', child.from) && text.startsWith(']]', child.to - 2)) {
+      // An embed ![[...]] is not a link (as on the server): it stays as written.
+      push(text.slice(child.from, child.to));
+    } else if (name === 'Link' && text[child.from - 1] === '[' && text[child.to] === ']' && wikilinksIn(text.slice(child.from - 1, child.to + 1), 0).length) {
+      // A wikilink: lezer reads its inner brackets as a link; the reader sees the link's text.
+      const link = wikilinksIn(text.slice(child.from - 1, child.to + 1), child.from - 1)[0];
+      const last = out[out.length - 1];
+      if (typeof last === 'string') out[out.length - 1] = last.slice(0, -1);
+      if (out[out.length - 1] === '') out.pop();
+      out.push({ tag: 'span', children: [text.slice(link.shownFrom, link.shownTo)] });
+      pos = child.to + 1;
     } else if (name === 'Link' || name === 'Image') {
       const words = linkWords(child);
       out.push({ tag: 'span', children: words ? inline(child, text, words) : [text.slice(child.from, child.to)] });

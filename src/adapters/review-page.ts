@@ -190,6 +190,41 @@ body[data-mode=focus] .toolbar, body[data-mode=help] .toolbar { margin-bottom: v
 .desk-help h2 { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-lg); }
 .desk-help h3 { margin-top: var(--space-5); }
 .desk-help .ask-scene { width: 100%; }
+/* Notas and Grafo (issue #115): panels over the desk's text, which stays mounted behind them. */
+.desk-tools { display: flex; gap: var(--space-1); }
+.desk-tools > button { min-height: var(--tap); padding: 0 var(--space-4); }
+.desk-tools > button[aria-expanded=true] { background: var(--pressed); }
+.desk-status { flex: 1 1 100%; margin: 0; }
+.desk-status:empty { display: none; }
+body[data-mode] .desk[data-panel] .desk-body, body[data-mode] .desk[data-panel] .desk-panes { display: none; }
+.desk-panel { margin: var(--space-3) 0 var(--space-6); }
+.panel-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.panel-head > h2 { margin: var(--space-3) 0; font-size: var(--text-xl); }
+.panel-head > h2:focus { outline: none; }
+.notes-group h3 { margin: var(--space-5) 0 var(--space-2); font-size: var(--text-lg); }
+.notes-list, .mentions, .graph-neighbours { list-style: none; margin: 0; padding: 0; }
+.notes-list > li, .graph-neighbours > li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); margin: var(--space-1) 0; }
+.note-open, .graph-neighbour, .mention-source { min-height: var(--tap); text-align: left; }
+.note-backlinks { margin: var(--space-5) 0; padding-top: var(--space-3); border-top: 1px solid var(--line); }
+.note-backlinks h3 { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-lg); }
+.mentions > li { margin: var(--space-3) 0; }
+.mention-context { margin: var(--space-1) 0 0; font-family: var(--font-prose); color: var(--ink); }
+.graph-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-5); margin: var(--space-3) 0; }
+.graph-controls label { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--tap); }
+.graph-controls input[type=checkbox] { width: 22px; height: 22px; min-height: 0; padding: 0; }
+.graph-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.graph-table caption { text-align: left; font-weight: 700; padding: var(--space-2) 0; }
+.graph-table th, .graph-table td { padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--line); text-align: left; }
+.graph-table td:nth-child(3), .graph-table td:nth-child(4) { text-align: right; }
+.graph-sort { min-height: var(--tap); width: 100%; border-color: transparent; background: transparent; text-align: inherit; font-weight: 700; padding: 0 var(--space-1); }
+.graph-sort::after { content: ''; margin-left: var(--space-1); color: var(--muted); }
+th[aria-sort=ascending] .graph-sort::after { content: '▲'; }
+th[aria-sort=descending] .graph-sort::after { content: '▼'; }
+.graph-node { min-height: var(--tap); width: 100%; text-align: left; border-color: transparent; background: transparent; }
+.graph-table tr.selected { background: var(--pressed); }
+.graph-table tr.selected .graph-node { font-weight: 700; }
+.graph-detail { margin: var(--space-4) 0; padding: var(--space-3) var(--space-4); border: 1px solid var(--line); border-radius: var(--radius); }
+.graph-detail h3 { margin-top: 0; }
 .help-status:empty { display: none; }
 /* Concentración keeps the assistant one tap away, quietly: outlined, never the loudest thing on screen. */
 body[data-mode=focus] .assistant-fab { border-color: var(--edge); background: var(--paper); color: var(--ink); box-shadow: none; }
@@ -1556,9 +1591,22 @@ function lineEndings(text) {
   return crlf === cr && crlf === lf ? 'crlf' : 'mixed';
 }
 
+// A note is a file in notas/ (issue #115): it opens in the same editor, saved through the same
+// code below, to its own route. The note's name is its file name without .md.
+const isNoteFile = (file) => /^notas\//.test(String(file));
+const noteFile = (name) => 'notas/' + name + '.md';
+const noteName = (file) => String(file).replace(/^notas\//, '').replace(/\.md$/, '');
+function docPath(book, file) {
+  return isNoteFile(file)
+    ? '/books/' + book + '/notes/' + encodeURIComponent(noteName(file))
+    : '/books/' + book + '/scenes/' + encodeURIComponent(file);
+}
+
 // onText runs after every change of the text, by the person or by loading a saved version.
-function sceneEditor(book, scene, close, editorLib, onText) {
+// links ({ notes, onOpenNote }) are the book's notes for wikilinks and what following one does.
+function sceneEditor(book, scene, close, editorLib, onText, links) {
   const file = scene.file;
+  const isNote = isNoteFile(file);
   // The text as the field shows it: every line break as \n.
   const shown = (text) => text.replace(/\r\n?/g, '\n');
   let endings = 'lf';
@@ -1568,9 +1616,10 @@ function sceneEditor(book, scene, close, editorLib, onText) {
   let saving = false;
   const stored = (value) => endings === 'crlf' ? value.replace(/\n/g, '\r\n') : value;
   const box = el('div', undefined, 'scene-editor');
-  const surfaceOptions = { text: '', label: 'Texto de la escena ' + file, onChange: () => remember(), onSave: () => save() };
+  const surfaceOptions = { text: '', label: (isNote ? 'Texto de la nota ' + noteName(file) : 'Texto de la escena ' + file), onChange: () => remember(), onSave: () => save() };
+  const linkOptions = links ? { notes: links.notes || [], onOpenNote: links.onOpenNote } : {};
   const area = editorLib
-    ? editorLib.createSceneEditor({ ...surfaceOptions, view: readView(), onViewChange: writeView })
+    ? editorLib.createSceneEditor({ ...surfaceOptions, ...linkOptions, view: readView(), onViewChange: writeView })
     : plainSurface(surfaceOptions);
   box.focusEditor = () => area.focus();
   const mixedNote = el('p', 'Esta escena mezcla finales de línea (de Windows y de otros sistemas). Para no cambiarlos sin querer, solo se puede leer aquí.', 'meta');
@@ -1633,7 +1682,9 @@ function sceneEditor(book, scene, close, editorLib, onText) {
   }
 
   const showConflict = (current) => {
-    status.textContent = 'No se guardó: la escena cambió mientras editabas. Tu versión sigue en el editor.';
+    status.textContent = isNote
+      ? 'No se guardó: la nota cambió mientras editabas. Tu versión sigue en el editor.'
+      : 'No se guardó: la escena cambió mientras editabas. Tu versión sigue en el editor.';
     const useSaved = button('Usar la versión guardada', '', async () => {
       conflict.hidden = true;
       conflict.replaceChildren();
@@ -1665,7 +1716,7 @@ function sceneEditor(book, scene, close, editorLib, onText) {
     try {
       let result;
       try {
-        result = await apiSave('/books/' + book + '/scenes/' + encodeURIComponent(file), { base_blob: base, text: stored(value) });
+        result = await apiSave(docPath(book, file), { base_blob: base, text: stored(value) });
       } catch {
         status.textContent = 'Error: no se pudo conectar. Tu texto sigue aquí sin guardar.';
         return;
@@ -1702,6 +1753,7 @@ function sceneEditor(book, scene, close, editorLib, onText) {
     dom: area.dom,
     getValue: () => area.getValue(),
     select: (from, to) => area.select(from, to),
+    setNotes: (notes) => { if (area.setNotes) area.setNotes(notes); },
     base: () => base,
     dirty,
     // Loads the saved version the person asked for, as "Usar la versión guardada" does.
@@ -1831,6 +1883,245 @@ function quoteRange(text, quote, near) {
   return best === -1 ? null : { from: best, to: best + wanted.length };
 }
 
+// The editor position of a 1-based line and column (UTF-16 units, as the server counts them) in
+// the editor's text, where every line break is \n. null when the text has fewer lines.
+function offsetAt(text, line, column) {
+  let pos = 0;
+  for (let n = 1; n < line; n += 1) {
+    pos = text.indexOf('\n', pos) + 1;
+    if (pos === 0) return null;
+  }
+  return Math.min(pos + column - 1, text.length);
+}
+
+// The note types of docs/notes-and-graph.md, as the Notas list groups them.
+const NOTE_GROUPS = [['personaje', 'Personajes'], ['lugar', 'Lugares'], ['objeto', 'Objetos'], ['trama', 'Tramas'], ['otra', 'Otras']];
+const NOTE_TYPES = { personaje: 'Personaje', lugar: 'Lugar', objeto: 'Objeto', trama: 'Trama', otra: 'Otra' };
+const groupOf = (note) => (NOTE_TYPES[note.type] && note.type !== 'otra' ? note.type : 'otra');
+
+function notesGroups(notes, onOpen) {
+  if (!notes.length) return [el('p', 'Este libro aún no tiene notas. El asistente puede proponerlas y tú las aceptas en Revisión.', 'meta')];
+  const out = [];
+  for (const [type, label] of NOTE_GROUPS) {
+    const group = notes.filter((note) => groupOf(note) === type);
+    if (!group.length) continue;
+    const section = el('section', undefined, 'notes-group');
+    const list = el('ul', undefined, 'notes-list');
+    for (const note of group) {
+      const item = el('li');
+      const open = el('button', note.name, 'note-open');
+      open.type = 'button';
+      open.addEventListener('click', () => onOpen(note.name));
+      item.append(open);
+      if (note.aliases && note.aliases.length) item.append(el('span', ' también: ' + note.aliases.join(', '), 'meta'));
+      list.append(item);
+    }
+    section.append(el('h3', label + ' (' + group.length + ')'), list);
+    out.push(section);
+  }
+  return out;
+}
+
+const graphNodeName = (node) => (node.kind === 'scene' ? deskSceneName(node.name) : node.name);
+const graphNodeType = (node) => (node.kind === 'scene' ? 'Escena' : NOTE_TYPES[node.type] || 'Sin tipo');
+const countLabel = (n, one, many) => n.toLocaleString('es') + ' ' + (n === 1 ? one : many);
+
+// How a neighbour is joined to the chosen node, in words.
+function relationText(edge, selected) {
+  if (edge.kind === 'link') return edge.from === selected ? 'la enlaza' : 'la enlaza a ella';
+  if (edge.kind === 'cooccurs') return 'coinciden en ' + countLabel(edge.weight, 'escena', 'escenas');
+  return edge.from === selected ? 'la menciona ' + countLabel(edge.weight, 'vez', 'veces') : 'aparece ' + countLabel(edge.weight, 'vez', 'veces');
+}
+
+/**
+ * The story graph as an accessible list (issue #115): a table of nodes sortable by its column
+ * headers, and the neighbours of the chosen node. It never depends on a canvas, works from the
+ * keyboard (arrows move between nodes) and is the view phones start with. onOpen(id) opens a
+ * note or a scene in the editor. Returns { node, select(id) }.
+ */
+function graphList(book, onOpen) {
+  const box = el('div', undefined, 'graph-list');
+  const st = { data: null, sort: 'degree', desc: true, scenes: false, asOf: '', selected: null, rows: new Map() };
+  const controls = el('div', undefined, 'graph-controls');
+  const scenesLabel = el('label');
+  const scenesBox = el('input');
+  scenesBox.type = 'checkbox';
+  scenesLabel.append(scenesBox, document.createTextNode(' Mostrar escenas'));
+  const asOfLabel = el('label', 'Hasta ');
+  const asOf = el('select');
+  asOfLabel.append(asOf);
+  controls.append(scenesLabel, asOfLabel);
+  const live = el('p', '', 'meta graph-live');
+  live.setAttribute('role', 'status');
+  const table = el('table', undefined, 'graph-table');
+  const thead = el('thead');
+  const headRow = el('tr');
+  const COLUMNS = [['name', 'Nodo'], ['type', 'Tipo'], ['degree', 'Grado'], ['scenes', 'Escenas']];
+  const heads = COLUMNS.map(([key, label]) => {
+    const th = el('th');
+    th.setAttribute('scope', 'col');
+    const sort = el('button', label, 'graph-sort');
+    sort.type = 'button';
+    sort.addEventListener('click', () => {
+      if (st.sort === key) st.desc = !st.desc;
+      else {
+        st.sort = key;
+        st.desc = key === 'degree' || key === 'scenes';
+      }
+      renderRows();
+    });
+    th.append(sort);
+    return { key, th };
+  });
+  headRow.append(...heads.map((head) => head.th));
+  thead.append(headRow);
+  const tbody = el('tbody');
+  table.append(el('caption', 'Nodos del grafo'), thead, tbody);
+  const detail = el('section', undefined, 'graph-detail');
+  detail.setAttribute('aria-label', 'Vecinos del nodo elegido');
+  detail.hidden = true;
+  box.append(el('p', 'Cada nota del libro con sus conexiones. El grado cuenta las notas y escenas distintas con las que conecta; Escenas, las escenas que la mencionan. Elige un nodo para ver sus vecinos.', 'meta'),
+    controls, live, table, detail);
+
+  const shown = (node) => st.scenes || node.kind !== 'scene';
+  const nodeById = () => new Map(st.data.nodes.map((node) => [node.id, node]));
+  function compare(a, b) {
+    const name = graphNodeName(a).localeCompare(graphNodeName(b), 'es');
+    let by = 0;
+    if (st.sort === 'name') by = name;
+    else if (st.sort === 'type') by = graphNodeType(a).localeCompare(graphNodeType(b), 'es');
+    else if (st.sort === 'degree') by = a.degree - b.degree;
+    else by = (a.scenes === null ? -1 : a.scenes) - (b.scenes === null ? -1 : b.scenes);
+    return (st.desc ? -by : by) || name;
+  }
+
+  function renderRows() {
+    for (const head of heads) head.th.setAttribute('aria-sort', head.key === st.sort ? (st.desc ? 'descending' : 'ascending') : 'none');
+    st.rows = new Map();
+    const nodes = st.data.nodes.filter(shown).sort(compare);
+    tbody.replaceChildren(...nodes.map((node) => {
+      const row = el('tr');
+      const cell = el('td');
+      const pick = el('button', graphNodeName(node), 'graph-node');
+      pick.type = 'button';
+      pick.setAttribute('aria-pressed', String(node.id === st.selected));
+      pick.addEventListener('click', () => select(node.id));
+      cell.append(pick);
+      row.append(cell, el('td', graphNodeType(node)), el('td', String(node.degree)), el('td', node.scenes === null ? '—' : String(node.scenes)));
+      if (node.id === st.selected) row.className = 'selected';
+      st.rows.set(node.id, { row, pick });
+      return row;
+    }));
+    if (!nodes.length) {
+      const row = el('tr');
+      const cell = el('td', 'Este libro aún no tiene notas.');
+      cell.setAttribute('colspan', '4');
+      row.append(cell);
+      tbody.replaceChildren(row);
+    }
+  }
+
+  // Up and Down move between the nodes of the table, Home and End to the first and the last.
+  tbody.addEventListener('keydown', (event) => {
+    const buttons = Array.from(tbody.getElementsByTagName('button'));
+    const at = buttons.indexOf(document.activeElement);
+    if (at === -1) return;
+    const next = { ArrowDown: buttons[at + 1], ArrowUp: buttons[at - 1], Home: buttons[0], End: buttons[buttons.length - 1] }[event.key];
+    if (!next) return;
+    event.preventDefault();
+    next.focus();
+  });
+
+  function renderDetail() {
+    const byId = nodeById();
+    const node = byId.get(st.selected);
+    if (!node) {
+      detail.hidden = true;
+      detail.replaceChildren();
+      return;
+    }
+    const joined = new Map();
+    for (const edge of st.data.edges) {
+      const other = edge.from === node.id ? edge.to : edge.to === node.id ? edge.from : null;
+      if (other === null) continue;
+      if (!joined.has(other)) joined.set(other, []);
+      joined.get(other).push(relationText(edge, node.id));
+    }
+    const neighbours = [...joined.keys()].map((id) => byId.get(id)).filter(Boolean);
+    const visible = neighbours.filter(shown).sort((a, b) => b.degree - a.degree || graphNodeName(a).localeCompare(graphNodeName(b), 'es'));
+    const hiddenScenes = neighbours.length - visible.length;
+    const openIt = el('button', 'Abrir ' + graphNodeName(node));
+    openIt.type = 'button';
+    openIt.addEventListener('click', () => onOpen(node.id));
+    const list = el('ul', undefined, 'graph-neighbours');
+    for (const other of visible) {
+      const item = el('li');
+      const pick = el('button', graphNodeName(other), 'graph-neighbour');
+      pick.type = 'button';
+      pick.addEventListener('click', () => select(other.id, true));
+      item.append(pick, el('span', ' ' + graphNodeType(other) + ' · ' + joined.get(other.id).join(', '), 'meta'));
+      list.append(item);
+    }
+    const children = [el('h3', 'Vecinos de ' + graphNodeName(node) + ' (' + neighbours.length + ')'), openIt];
+    children.push(visible.length ? list : el('p', neighbours.length ? '' : 'No conecta con ninguna nota ni escena.', 'meta'));
+    if (hiddenScenes) children.push(el('p', 'Y ' + countLabel(hiddenScenes, 'escena oculta', 'escenas ocultas') + ' (marca «Mostrar escenas»).', 'meta'));
+    detail.replaceChildren(...children);
+    detail.hidden = false;
+  }
+
+  // Chooses a node: its row is marked and its neighbours listed, and the choice is announced.
+  function select(id, focusRow) {
+    const node = st.data && nodeById().get(id);
+    if (!node) return;
+    if (!shown(node)) {
+      st.scenes = true;
+      scenesBox.checked = true;
+    }
+    st.selected = id;
+    renderRows();
+    renderDetail();
+    live.textContent = 'Elegido: ' + graphNodeName(node) + ', ' + graphNodeType(node).toLowerCase() + ', grado ' + node.degree + '.';
+    const row = st.rows.get(id);
+    if (focusRow && row) row.pick.focus();
+  }
+
+  async function load() {
+    live.textContent = 'Cargando el grafo…';
+    let data;
+    try {
+      data = await api('/books/' + book + '/graph' + (st.asOf ? '?as_of_scene=' + encodeURIComponent(st.asOf) : ''));
+    } catch (error) {
+      live.textContent = error.message;
+      return;
+    }
+    st.data = data;
+    if (!asOf.children.length) {
+      const all = el('option', 'el final del libro');
+      all.value = '';
+      asOf.append(all, ...data.scenes.map((file) => {
+        const option = el('option', 'la escena ' + deskSceneName(file));
+        option.value = file;
+        return option;
+      }));
+    }
+    const notes = data.nodes.filter((node) => node.kind === 'note').length;
+    live.textContent = countLabel(notes, 'nota', 'notas') + ' y ' + countLabel(data.nodes.length - notes, 'escena', 'escenas') + (st.asOf ? ' hasta ' + deskSceneName(st.asOf) : '') + '.';
+    renderRows();
+    renderDetail();
+  }
+  scenesBox.addEventListener('change', () => {
+    st.scenes = scenesBox.checked;
+    renderRows();
+    renderDetail();
+  });
+  asOf.addEventListener('change', () => {
+    st.asOf = asOf.value;
+    load();
+  });
+  load();
+  return { node: box, select };
+}
+
 function createDesk() {
   const node = el('section', undefined, 'desk');
   node.id = 'desk';
@@ -1851,7 +2142,26 @@ function createDesk() {
   scenes.append(prev, picker, next);
   const title = el('h2', '', 'desk-title');
   const words = el('p', '', 'meta desk-count');
-  head.append(scenes, title, words);
+  // Notas and Grafo (issue #115): the book's notes and its story graph, shown over the text,
+  // which stays in its editor behind them.
+  const tools = el('div', undefined, 'desk-tools');
+  tools.setAttribute('role', 'group');
+  tools.setAttribute('aria-label', 'Notas y grafo del libro');
+  const notesTool = el('button', 'Notas');
+  notesTool.type = 'button';
+  const graphTool = el('button', 'Grafo');
+  graphTool.type = 'button';
+  for (const tool of [notesTool, graphTool]) {
+    tool.setAttribute('aria-expanded', 'false');
+    tool.setAttribute('aria-controls', 'desk-panel');
+  }
+  tools.append(notesTool, graphTool);
+  const deskStatus = el('p', '', 'meta desk-status');
+  deskStatus.setAttribute('role', 'status');
+  head.append(scenes, tools, title, words, deskStatus);
+  const panel = el('section', undefined, 'desk-panel');
+  panel.id = 'desk-panel';
+  panel.hidden = true;
   // Said when the open scene was saved somewhere else; the editor itself is never touched.
   const banner = el('div', undefined, 'desk-banner');
   const bannerText = el('p');
@@ -1874,9 +2184,9 @@ function createDesk() {
   const help = el('aside', undefined, 'desk-help');
   help.setAttribute('aria-label', 'Ayuda para esta escena');
   bodyBox.append(slot, help);
-  node.append(head, banner, panes, bodyBox);
+  node.append(head, banner, panes, panel, bodyBox);
 
-  const state = { book: null, file: null, scenes: [], editor: null, saved: null, pane: 'text', opening: 0, statsQueued: false };
+  const state = { book: null, file: null, scenes: [], editor: null, saved: null, pane: 'text', opening: 0, statsQueued: false, notes: null, lib: null, panel: null };
 
   const sceneKey = (book) => 'rewrite:desk-scene:' + (personKey || '') + ':' + book;
   function rememberScene(book, file) {
@@ -1902,12 +2212,21 @@ function createDesk() {
   helpPane.addEventListener('click', () => setPane('help'));
 
   function fillPicker() {
-    picker.replaceChildren(...state.scenes.map((file) => {
+    const options = state.scenes.map((file) => {
       const option = el('option', deskSceneName(file));
       option.value = file;
       option.selected = file === state.file;
       return option;
-    }));
+    });
+    // With a note open the picker names it, and choosing a scene goes back to the scenes.
+    if (isNoteFile(state.file)) {
+      const current = el('option', 'Nota: ' + noteName(state.file));
+      current.value = '';
+      current.selected = true;
+      current.disabled = true;
+      options.unshift(current);
+    }
+    picker.replaceChildren(...options);
     const at = state.scenes.indexOf(state.file);
     prev.disabled = at <= 0;
     next.disabled = at === -1 || at >= state.scenes.length - 1;
@@ -1925,7 +2244,7 @@ function createDesk() {
     state.statsQueued = false;
     if (!state.editor) return;
     const text = state.editor.getValue();
-    title.textContent = sceneTitle(text, state.file);
+    title.textContent = isNoteFile(state.file) ? noteName(state.file) : sceneTitle(text, state.file);
     const count = wordCount(text);
     words.textContent = count.toLocaleString('es') + (count === 1 ? ' palabra' : ' palabras');
     showBanner();
@@ -1961,34 +2280,72 @@ function createDesk() {
     banner.hidden = true;
   }
 
-  // Opens a scene in the editor. Unsaved text of the scene left behind stays as its draft.
-  async function open(file, focus) {
+  // The book's notes ({ name, type, aliases }), asked for again each time they are needed, so a
+  // note accepted meanwhile resolves.
+  async function loadNotes() {
+    const book = state.book;
+    const data = await api('/books/' + book + '/notes');
+    if (book !== state.book) return state.notes || [];
+    state.notes = data.notes;
+    if (state.editor) state.editor.setNotes(state.notes);
+    return state.notes;
+  }
+
+  // A followed wikilink: the note it names, resolved by the server's rules (the editor module's
+  // noteIndex); a link that names no note, or more than one, says so instead.
+  function followLink(target) {
+    const lib = state.lib;
+    const found = lib && lib.noteIndex ? lib.noteIndex(state.notes || []).resolve(target) : { status: 'unresolved' };
+    if (found.status === 'resolved') {
+      deskStatus.textContent = '';
+      return open(noteFile(found.note), true).catch((error) => showError(error.message));
+    }
+    deskStatus.textContent = found.status === 'ambiguous'
+      ? '«' + target + '» puede ser más de una nota: ' + found.candidates.join(', ') + '.'
+      : 'Ninguna nota se llama «' + target + '». El asistente puede proponerla.';
+    return undefined;
+  }
+
+  // Opens a scene or a note in the editor. Unsaved text of the one left behind stays as its draft.
+  // at ({ line, column, length }, 1-based like the server's mentions) selects that text.
+  async function open(file, focus, at) {
     const seq = ++state.opening;
     const book = state.book;
+    const isNote = isNoteFile(file);
     dropEditor();
+    if (state.panel) setPanel(null);
     state.file = file;
-    rememberScene(book, file);
+    if (!isNote) rememberScene(book, file);
     fillPicker();
-    title.textContent = deskSceneName(file);
+    title.textContent = isNote ? noteName(file) : deskSceneName(file);
     words.textContent = '';
-    slot.replaceChildren(el('p', 'Cargando escena…', 'meta'));
+    deskStatus.textContent = '';
+    slot.replaceChildren(el('p', isNote ? 'Cargando nota…' : 'Cargando escena…', 'meta'));
     let data;
     try {
-      data = await api('/books/' + book + '/scenes/' + encodeURIComponent(file));
+      data = await api(docPath(book, file));
     } catch (error) {
       if (seq === state.opening) slot.replaceChildren(el('p', error.message, 'meta'));
       return;
     }
     const lib = await loadEditorModule();
+    // Without the editor module there are no links to resolve.
+    if (lib) await loadNotes().catch(() => {});
     if (seq !== state.opening || book !== state.book) return;
-    const box = sceneEditor(book, data, () => closed(book, file), lib, queueStats);
+    state.lib = lib;
+    // Following a link replaces this editor, so it waits until the editor's own event is over.
+    const links = { notes: state.notes || [], onOpenNote: (target) => setTimeout(() => followLink(target), 0) };
+    const box = sceneEditor(book, data, () => closed(book, file), lib, queueStats, links);
     state.box = box;
     state.editor = box.editor;
     state.saved = { blob: data.blob, text: data.text };
     slot.replaceChildren(box);
+    if (isNote && data.backlinks) slot.append(backlinksNode(data));
     updateStats();
     renderHelp();
-    if (focus) box.focusEditor();
+    const from = at ? offsetAt(state.editor.getValue(), at.line, at.column) : null;
+    if (from !== null) state.editor.select(from, from + at.length);
+    else if (focus) box.focusEditor();
   }
 
   // "Cerrar editor": back to the review, at the scene that was open.
@@ -1997,8 +2354,98 @@ function createDesk() {
     state.file = null;
     slot.replaceChildren();
     await setMode('review');
-    if (showSceneInReview && book === selectedBook) await showSceneInReview(file);
+    if (!isNoteFile(file) && showSceneInReview && book === selectedBook) await showSceneInReview(file);
   }
+
+  // A note's backlinks: where it is linked, with the sentence, and where its name or an alias
+  // appears without a link. Each one opens that scene or note with the mention selected.
+  function backlinksNode(note) {
+    const box = el('section', undefined, 'note-backlinks');
+    box.setAttribute('aria-label', 'Menciones de ' + note.name);
+    const found = note.backlinks;
+    box.append(el('h3', 'Menciones enlazadas (' + found.linked_total + ')'),
+      mentionList(found.linked, (m) => m.raw, 'Nada enlaza esta nota todavía.'));
+    box.append(el('h3', 'Menciones sin enlazar (' + found.unlinked_total + ')'),
+      mentionList(found.unlinked, (m) => m.text, 'Su nombre no aparece sin enlace.'));
+    if (found.linked.length < found.linked_total || found.unlinked.length < found.unlinked_total) {
+      box.append(el('p', 'Se muestran las primeras ' + found.linked.length.toLocaleString('es') + ' de cada tipo.', 'meta'));
+    }
+    return box;
+  }
+  function mentionList(mentions, textOf, empty) {
+    if (!mentions.length) return el('p', empty, 'meta');
+    const list = el('ul', undefined, 'mentions');
+    for (const mention of mentions) {
+      const where = mention.source_kind === 'scene' ? deskSceneName(mention.source) : mention.source;
+      const target = mention.source_kind === 'scene' ? mention.source : noteFile(mention.source);
+      const item = el('li');
+      const go = el('button', where + ', línea ' + mention.line, 'mention-source');
+      go.type = 'button';
+      go.setAttribute('aria-label', 'Ir a la mención en ' + where + ', línea ' + mention.line);
+      go.addEventListener('click', () => open(target, true, { line: mention.line, column: mention.column, length: textOf(mention).length })
+        .catch((error) => showError(error.message)));
+      item.append(go, el('p', mention.context, 'mention-context'));
+      list.append(item);
+    }
+    return list;
+  }
+
+  function setPanel(which) {
+    state.panel = which;
+    panel.hidden = !which;
+    if (which) node.setAttribute('data-panel', which);
+    else node.removeAttribute('data-panel');
+    notesTool.setAttribute('aria-expanded', String(which === 'notes'));
+    graphTool.setAttribute('aria-expanded', String(which === 'graph'));
+  }
+  function closePanel() {
+    setPanel(null);
+    if (state.editor && state.box) state.box.focusEditor();
+  }
+  function panelHead(name) {
+    const row = el('div', undefined, 'panel-head');
+    const heading = el('h2', name);
+    heading.tabIndex = -1;
+    const back = el('button', 'Volver al texto');
+    back.type = 'button';
+    back.addEventListener('click', closePanel);
+    row.append(heading, back);
+    return row;
+  }
+  function focusPanel() {
+    const heading = panel.getElementsByTagName('h2')[0];
+    if (heading && heading.focus) heading.focus();
+  }
+
+  // "Notas": every note of the book by type, each one opening in the editor.
+  async function showNotes() {
+    setPanel('notes');
+    panel.replaceChildren(panelHead('Notas'), el('p', 'Cargando notas…', 'meta'));
+    focusPanel();
+    let notes;
+    try {
+      notes = await loadNotes();
+    } catch (error) {
+      if (state.panel === 'notes') panel.replaceChildren(panelHead('Notas'), el('p', error.message, 'meta'));
+      return;
+    }
+    if (state.panel !== 'notes') return;
+    panel.replaceChildren(panelHead('Notas'), ...notesGroups(notes, (name) => open(noteFile(name), true).catch((error) => showError(error.message))));
+    focusPanel();
+  }
+
+  // "Grafo": the story graph as a sortable table with each node's neighbours.
+  function showGraph() {
+    setPanel('graph');
+    const list = graphList(state.book, (id) => {
+      const file = id.replace(/^(note|scene):/, '');
+      return open(id.startsWith('note:') ? noteFile(file) : file, true).catch((error) => showError(error.message));
+    });
+    panel.replaceChildren(panelHead('Grafo'), list.node);
+    focusPanel();
+  }
+  notesTool.addEventListener('click', () => (state.panel === 'notes' ? closePanel() : showNotes()));
+  graphTool.addEventListener('click', () => (state.panel === 'graph' ? closePanel() : showGraph()));
 
   // A quote of the help column: its text is selected in the editor and scrolled to.
   async function reveal(file, quoteText, anchor) {
@@ -2053,9 +2500,9 @@ function createDesk() {
         return card;
       }), claims.filter((c) => c.editorial_status === 'proposed').length],
     ];
-    const heading = el('h2', 'Ayuda para esta escena');
+    const heading = el('h2', isNoteFile(file) ? 'Ayuda para esta nota' : 'Ayuda para esta escena');
     const children = [heading];
-    if (assistant) {
+    if (assistant && !isNoteFile(file)) {
       const ask = el('button', 'Preguntar al asistente por esta escena', 'ask-scene');
       ask.type = 'button';
       ask.addEventListener('click', () => assistant.ask({ kind: 'scene', id: file, label: 'Escena: ' + deskSceneName(file) },
@@ -2121,6 +2568,11 @@ function createDesk() {
     },
     async show(file, focus) {
       if (state.book !== selectedBook) this.update(selectedBook, latestQueue || {});
+      // A note stays open across modes, as a scene does.
+      if (!file && state.editor && isNoteFile(state.file)) {
+        renderHelp();
+        return undefined;
+      }
       const remembered = rememberedScene(state.book);
       const wanted = file || state.file || remembered;
       const target = state.scenes.includes(wanted) ? wanted : state.scenes[0];
@@ -2133,7 +2585,7 @@ function createDesk() {
     async checkScene() {
       const editor = state.editor;
       if (mode === 'review' || !editor) return;
-      const data = await api('/books/' + state.book + '/scenes/' + encodeURIComponent(state.file));
+      const data = await api(docPath(state.book, state.file));
       if (editor !== state.editor) return;
       state.saved = { blob: data.blob, text: data.text };
       showBanner();

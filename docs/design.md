@@ -206,9 +206,44 @@ in the same page and over the same text:
 - **The assistant**: switching to Concentración closes the panel; its button stays, outlined
   instead of filled. In Ayuda, **Preguntar al asistente por esta escena** opens it with the
   scene as the item.
-- The editor module exposes `select(from, to)` for this; new editor behaviour (wikilinks,
-  for example) belongs in its own CodeMirror extension module in `editor/src/`, added to the
-  editor's extension list as `live-preview.js` is.
+- The editor module exposes `select(from, to)` for this; new editor behaviour belongs in its
+  own CodeMirror extension module in `editor/src/`, added to the editor's extension list as
+  `live-preview.js` and `wikilinks.js` are.
+
+## Notes, wikilinks and the graph list
+
+Issue #115, slice 2 ([notes and graph](notes-and-graph.md)).
+
+- **Wikilinks in the editor.** In **Vista previa en vivo** `[[Nota]]`, `[[Nota|texto]]` and
+  `[[Nota#Sección]]` show only the text a reader sees (the text after `|`, else the note name),
+  underlined in `--accept`; the brackets come back on the lines the cursor touches, like every
+  other marker. A link that names no note (or more than one) is `--muted` with a dashed
+  underline. **Markdown** shows links raw; **Lectura** shows their text. A click on a link shown
+  as text, Ctrl/Cmd+click anywhere on a link, or Enter (or Ctrl/Cmd+Enter) with the cursor
+  between its brackets opens the note. A link that resolves to nothing says so in the desk's
+  status line (`role="status"`) instead of opening anything.
+- **`[[` completes** note names and aliases, with case and accents ignored (the server's
+  folding); prefix matches first. An alias inserts `Nota|alias`, so the link shows the alias and
+  still names the note; `]]` is added unless it is already there. Each option is at least
+  `--tap` high.
+- **Notas** and **Grafo**, a group (`aria-label="Notas y grafo del libro"`) in the desk's head in
+  both writing modes, show a panel over the text (`aria-expanded`, `aria-controls="desk-panel"`);
+  the editor stays mounted behind it, so text, cursor and undo history stay. **Volver al texto**
+  closes it. The panel's heading takes the focus when it opens.
+- **Notas** groups the notes by type (Personajes, Lugares, Objetos, Tramas, Otras, with counts)
+  and lists each note's aliases. A note opens in the same editor as a scene, with the same views,
+  draft, save, conflict and banner rules; the scene list then reads **Nota: <name>**.
+- **A note's backlinks** sit under its editor: **Menciones enlazadas (n)** and **Menciones sin
+  enlazar (n)**, each with the place (scene or note and line) and the sentence. The place opens
+  that scene or note with the mention selected.
+- **Grafo** is first a table (`caption` **Nodos del grafo**): Nodo, Tipo, Grado, Escenas, sorted
+  by degree; each header is a button that sorts by it (`aria-sort`). Each node is a button:
+  Up/Down move between nodes, Home/End to the first and the last, Enter chooses one. The chosen
+  row is marked, a live line (`role="status"`) says **Elegido: <nodo>, <tipo>, grado <n>.**, and
+  **Vecinos de <nodo> (n)** lists its neighbours with how they are joined (link, shared scenes,
+  mentions) and **Abrir <nodo>**. **Mostrar escenas** (off by default) adds the scenes;
+  **Hasta** cuts the graph at a scene. This table is the way to the graph data that never needs a
+  canvas, and the view phones start with.
 
 ## Messages
 
