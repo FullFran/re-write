@@ -233,7 +233,7 @@ th[aria-sort=descending] .graph-sort::after { content: '▼'; }
 .graph-controls select { min-height: var(--tap); }
 .graph-view { margin: var(--space-3) 0 var(--space-5); }
 .graph-view-controls > button { min-height: var(--tap); }
-.graph-canvas { position: relative; height: min(60vh, 640px); border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); touch-action: none; overflow: hidden; }
+.graph-canvas { position: relative; height: min(60vh, 640px); border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); overflow: hidden; }
 .graph-legend { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); margin: var(--space-2) 0; padding: 0; font-size: var(--text-sm); }
 .graph-swatch { display: inline-block; width: 12px; height: 12px; margin-right: var(--space-1); border-radius: 50%; vertical-align: baseline; }
 .graph-analysis { margin: var(--space-4) 0; padding: var(--space-2) var(--space-4); border: 1px solid var(--line); border-radius: var(--radius); }
@@ -1940,6 +1940,8 @@ function notesGroups(notes, onOpen) {
   return out;
 }
 
+// One collator for every graph sort: localeCompare with a locale builds one per call.
+const GRAPH_COLLATOR = new Intl.Collator('es');
 const graphNodeName = (node) => (node.kind === 'scene' ? deskSceneName(node.name) : node.name);
 const graphNodeType = (node) => (node.kind === 'scene' ? 'Escena' : NOTE_TYPES[node.type] || 'Sin tipo');
 const countLabel = (n, one, many) => n.toLocaleString('es') + ' ' + (n === 1 ? one : many);
@@ -2122,10 +2124,10 @@ function graphList(book, onOpen, current) {
   }
   const shown = (node) => st.scenes || node.kind !== 'scene';
   function compare(a, b) {
-    const name = graphNodeName(a).localeCompare(graphNodeName(b), 'es');
+    const name = GRAPH_COLLATOR.compare(graphNodeName(a), graphNodeName(b));
     let by = 0;
     if (st.sort === 'name') by = name;
-    else if (st.sort === 'type') by = graphNodeType(a).localeCompare(graphNodeType(b), 'es');
+    else if (st.sort === 'type') by = GRAPH_COLLATOR.compare(graphNodeType(a), graphNodeType(b));
     else if (st.sort === 'degree') by = a.degree - b.degree;
     else by = (a.scenes === null ? -1 : a.scenes) - (b.scenes === null ? -1 : b.scenes);
     return (st.desc ? -by : by) || name;
@@ -2185,7 +2187,7 @@ function graphList(book, onOpen, current) {
       joined.get(other).push(relationText(edge, node.id));
     }
     const neighbours = [...joined.keys()].map((id) => byId.get(id)).filter(Boolean);
-    const visible = neighbours.filter(shown).sort((a, b) => b.degree - a.degree || graphNodeName(a).localeCompare(graphNodeName(b), 'es'));
+    const visible = neighbours.filter(shown).sort((a, b) => b.degree - a.degree || GRAPH_COLLATOR.compare(graphNodeName(a), graphNodeName(b)));
     const hiddenScenes = neighbours.length - visible.length;
     const openIt = el('button', 'Abrir ' + graphNodeName(node));
     openIt.type = 'button';

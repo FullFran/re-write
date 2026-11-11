@@ -149,6 +149,7 @@ test('desktop: a click on a drawn node chooses its row, and the filters, the loc
   await page.getByRole('checkbox', { name: 'Solo huérfanas' }).check();
   await expect(canvas(page)).toHaveAttribute('data-nodes', '1');
   await expect.poll(() => rowNames(page)).toEqual(['Brújula']);
+  await canvas(page).scrollIntoViewIfNeeded();
   await page.waitForTimeout(500);
   const box = (await canvas(page).boundingBox())!;
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
@@ -284,6 +285,10 @@ test('performance: 2,000 nodes draw and lay out while the table stays responsive
     (window as any).longTasks = [];
     new PerformanceObserver((list) => list.getEntries().forEach((entry) => (window as any).longTasks.push(entry.duration))).observe({ type: 'longtask', buffered: true });
   });
+  // A CPU profile of the whole run, summarised by self time, so a slow step can be named.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Profiler.enable');
+  await cdp.send('Profiler.start');
   const opened = Date.now();
   await tool(page, 'Grafo').click();
   await expect(canvas(page)).toHaveAttribute('data-nodes', '2000', { timeout: 30_000 });
@@ -295,6 +300,15 @@ test('performance: 2,000 nodes draw and lay out while the table stays responsive
   const answered = Date.now() - clicked;
   await expect(canvas(page)).toHaveAttribute('data-layout', 'done', { timeout: 60_000 });
   const laidOut = Date.now() - opened;
+  const { profile } = await cdp.send('Profiler.stop');
+  const self = new Map<string, number>();
+  const byId = new Map(profile.nodes.map((n: any) => [n.id, n]));
+  profile.samples!.forEach((id: number, i: number) => {
+    const frame = (byId.get(id) as any).callFrame;
+    const key = `${frame.functionName || '(anon)'} ${frame.url.split('/').pop()}:${frame.lineNumber}:${frame.columnNumber}`;
+    self.set(key, (self.get(key) ?? 0) + profile.timeDeltas![i] / 1000);
+  });
+  console.log('graph profile ' + JSON.stringify([...self].sort((a, b) => b[1] - a[1]).slice(0, 25).map(([k, ms]) => `${Math.round(ms)}ms ${k}`)));
   const longTasks: number[] = await page.evaluate(() => (window as any).longTasks);
   const longest = Math.round(Math.max(0, ...longTasks));
   const metrics = { nodes: 2000, edges: JSON.parse(data).edges.length, drawnMs: drawn, laidOutMs: laidOut, selectionMs: answered, longestTaskMs: longest, longTasks: longTasks.length };

@@ -19,6 +19,7 @@ const PALETTE = {
 const TYPES = [['personaje', 'Personaje'], ['lugar', 'Lugar'], ['objeto', 'Objeto'], ['trama', 'Trama'], ['otra', 'Otra']];
 const METRICS = [['degree', 'Grado'], ['pagerank', 'PageRank'], ['betweenness', 'Intermediación']];
 const TOP = 10;
+const COLLATOR = new Intl.Collator('es');
 const LIST_CAP = 50;
 
 // Positions survive closing the panel and changing the filters, so a node stays where the person
@@ -163,7 +164,13 @@ export function createGraphView({ book, onSelect = () => {}, onPath = () => {}, 
     try {
       st.sigma = new Sigma(st.graph, canvas, {
         nodeReducer, edgeReducer,
-        settings: { allowInvalidContainer: true, labelRenderedSizeThreshold: 9, minCameraRatio: 0.05, maxCameraRatio: 10, stagePadding: 24 },
+        settings: {
+          // One finger or the wheel scrolls the page; two fingers, or Ctrl/Cmd with the wheel, move the drawing.
+          gestureTarget: 'shared',
+          sharedGestureWheelMessage: 'Usa Ctrl + rueda para acercar el grafo',
+          sharedGestureAppleWheelMessage: 'Usa ⌘ + rueda para acercar el grafo',
+          sharedGestureTouchMessage: 'Usa dos dedos para mover el grafo',
+          allowInvalidContainer: true, labelRenderedSizeThreshold: 9, minCameraRatio: 0.05, maxCameraRatio: 10, stagePadding: 24 },
       });
     } catch {
       st.failed = true;
@@ -354,7 +361,7 @@ export function createGraphView({ book, onSelect = () => {}, onPath = () => {}, 
 
     const pathSection = el('section', undefined, 'graph-op');
     pathSection.setAttribute('aria-label', 'Camino más corto');
-    const choices = graph.nodes().map((id) => [id, labelOf(id)]).sort((a, b) => a[1].localeCompare(b[1], 'es'));
+    const choices = graph.nodes().map((id) => [id, labelOf(id)]).sort((a, b) => COLLATOR.compare(a[1], b[1]));
     if (!pathState.from || !graph.hasNode(pathState.from)) pathState.from = st.selected && graph.hasNode(st.selected) ? st.selected : (choices[0] || [''])[0];
     if (!pathState.to || !graph.hasNode(pathState.to)) pathState.to = (choices.find(([id]) => id !== pathState.from) || [''])[0];
     const from = select('Desde', choices, pathState.from, (value) => (pathState.from = value));
