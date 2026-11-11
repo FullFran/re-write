@@ -1,14 +1,12 @@
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { gunzipSync } from 'node:zlib';
 import { evaluate, readRequestDocument, type Grant, type PermissionRequest } from './authority.ts';
 import type { CatalogEntry } from './catalog.ts';
 import { writeDecisionRecord } from './decision-records.ts';
 import { HcsFailure, hcsError } from './errors.ts';
 import { isDottedId, REWRITE_PERMISSIONS } from './ids.ts';
-import { fetchPackageBytes, verifyPackage } from './package.ts';
-import { readTar } from './tar.ts';
+import { fetchPackageBytes, readPackageMembers, verifyPackage } from './package.ts';
 
 // Grants held by the host, one record per entry and permission (HCS-0005). They live in
 // `<data-dir>/grants.json` and are read again on every check, so a revocation applies to the next
@@ -77,10 +75,11 @@ export function revokePermission(dataDir: string, entry: string, permission: str
   }
 }
 
-// The permissions a verified package requests. No package code runs: the archive is only read.
+// The permissions a verified package requests. No package code runs: the archive is only read. An
+// archive that cannot be read is refused like when unpacking it (`integrity_mismatch`).
 export function packageRequests(bytes: Uint8Array, entry: CatalogEntry): PermissionRequest[] {
   verifyPackage(bytes, entry);
-  const members = readTar(gunzipSync(bytes, { maxOutputLength: MAX_PACKAGE_BYTES }))
+  const members = readPackageMembers(bytes, MAX_PACKAGE_BYTES)
     .filter(member => posix.normalize(member.name).replace(/\/$/, '') === REQUEST_DOCUMENT);
   if (members.length === 0) return [];
   if (members.length > 1 || members[0].type !== '0') throw new Error('Invalid request document');

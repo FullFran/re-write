@@ -1,10 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { gzipSync } from 'node:zlib';
 import { join } from 'node:path';
 import { evaluate } from '../src/hcs/authority.ts';
 import { DECISIONS_FILE, readDecisionRecords, validateDecisionRecord } from '../src/hcs/decision-records.ts';
-import { grantPermission, readGrants, revokePermission } from '../src/hcs/grants.ts';
+import { grantPermission, packageRequests, readGrants, revokePermission } from '../src/hcs/grants.ts';
+import { writeTar } from '../src/hcs/tar.ts';
 import { REWRITE_PERMISSIONS } from '../src/hcs/ids.ts';
 import { tempDir } from './helpers.ts';
 
@@ -62,4 +65,16 @@ test('a revocation that cannot be recorded still removes the grant and reports t
   mkdirSync(join(dir, DECISIONS_FILE));
   assert.throws(() => revokePermission(dir, entry, permission), /decision record/);
   assert.deepEqual(readGrants(dir), []);
+});
+
+test('reading the requests of a malformed archive is refused as integrity_mismatch', () => {
+  const tar = writeTar([{ name: 'requests.json', data: Buffer.from('{}') }]); tar[0] ^= 1;
+  for (const [reason, bytes] of [['invalid checksum', gzipSync(tar)], ['invalid gzip stream', Buffer.from('not gzip')]] as const) {
+    const catalogEntry = { id: entry, version: '1', size: bytes.length, contentHash: `sha256:${createHash('sha256').update(bytes).digest('hex')}`, mediaType: 'application/vnd.oci.image.layer.v1.tar+gzip', contributions: [] };
+    assert.throws(() => packageRequests(bytes, catalogEntry as any), (e: any) => {
+      assert.equal(e.errors?.[0]?.code, 'integrity_mismatch', String(e));
+      assert.deepEqual(e.errors[0].details, { 'x-rewrite-archive': 'malformed', 'x-rewrite-reason': reason });
+      return true;
+    }, reason);
+  }
 });

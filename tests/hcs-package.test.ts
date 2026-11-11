@@ -83,6 +83,70 @@ test('unpack enforces limits, seals files and directories, and requires a fresh 
   assert.throws(() => unpackPackage(bytes, expected(bytes), target));
 }));
 
+// Writes `text` into a header field of the first member and fixes the checksum.
+function patched(start: number, text: string): Buffer {
+  const tar = writeTar([{ name: 'file', data: Buffer.from('hello') }]);
+  tar.fill(0, start, start + 12); tar.write(text, start, 'ascii'); tar.fill(32, 148, 156);
+  tar.write(tar.subarray(0, 512).reduce((a, b) => a + b, 0).toString(8).padStart(6, '0') + '\0 ', 148, 8, 'ascii');
+  return tar;
+}
+function refused(archive: string, reason: string) {
+  return (e: any) => {
+    mismatch(e); assert.deepEqual(e.errors[0].details, { 'x-rewrite-archive': archive, 'x-rewrite-reason': reason }, reason);
+    assert.equal(e.errors[0].requirement, undefined); return true;
+  };
+}
+
+test('a malformed archive is refused as integrity_mismatch and leaves nothing behind', scratch(dir => {
+  const valid = () => writeTar([{ name: 'file', data: Buffer.from('hello') }]);
+  const checksum = valid(); checksum[0] ^= 1;
+  const terminator = valid(); terminator[terminator.length - 1] = 1;
+  const cases: [string, Buffer][] = [
+    ['invalid checksum', gzipSync(checksum)], ['truncated archive', gzipSync(valid().subarray(0, 1023))],
+    ['invalid terminator', gzipSync(terminator)], ['missing terminator', gzipSync(valid().subarray(0, 1024))],
+    ['invalid numeric field', gzipSync(patched(124, 'zz'))], ['truncated member', gzipSync(patched(124, '7777'))],
+    ['invalid gzip stream', Buffer.from('not gzip')],
+  ];
+  for (const [reason, bytes] of cases) {
+    assert.throws(() => unpackPackage(bytes, expected(bytes), join(dir, 'out')), refused('malformed', reason));
+    assert.deepEqual(readdirSync(dir), [], reason);
+  }
+}));
+
+test('a package over the unpack limits is refused as integrity_mismatch and leaves nothing behind', scratch(dir => {
+  const bytes = gzipSync(writeTar([{ name: 'd/', type: 'directory' }, { name: 'd/f', data: Buffer.from('hello') }]));
+  const big = gzipSync(writeTar([{ name: 'f', data: Buffer.alloc(4096) }]));
+  for (const [reason, data, limits] of [
+    ['size limit', bytes, { maxBytes: 4 }], ['member limit', bytes, { maxMembers: 1 }],
+    ['uncompressed size limit', big, { maxBytes: 0, maxMembers: 0 }],
+  ] as const) {
+    assert.throws(() => unpackPackage(data, expected(data), join(dir, 'out'), limits), refused('limit-exceeded', reason));
+    assert.deepEqual(readdirSync(dir), [], reason);
+  }
+}));
+
+test('a member below a regular file is an unsafe member, in either order', scratch(dir => {
+  const tar = writeTar([{ name: 'a', data: Buffer.from('file') }, { name: 'a/child', data: Buffer.from('x') }]);
+  const reversed = Buffer.concat([tar.subarray(1024, 2048), tar.subarray(0, 1024), tar.subarray(2048)]);
+  for (const archive of [tar, reversed]) {
+    const bytes = gzipSync(archive);
+    assert.throws(() => unpackPackage(bytes, expected(bytes), join(dir, 'out')), (e: any) => {
+      mismatch(e); assert.deepEqual(e.errors[0].details, { 'x-rewrite-archive': 'unsafe-member', 'x-rewrite-member': 'a/child', 'x-rewrite-reason': 'path conflict' }); return true;
+    });
+    assert.deepEqual(readdirSync(dir), []);
+  }
+}));
+
+test('refusals that are the host\'s own fault stay plain errors', scratch(dir => {
+  const bytes = gzipSync(writeTar([{ name: 'f', data: Buffer.from('x') }]));
+  const target = join(dir, 'out'); mkdirSync(target);
+  const plain = (pattern: RegExp, type: Function = Error) => (e: any) => { assert.ok(e instanceof type && !('errors' in e), String(e)); assert.match(e.message, pattern); return true; };
+  assert.throws(() => unpackPackage(bytes, expected(bytes), target), plain(/target already exists/));
+  assert.throws(() => unpackPackage(bytes, expected(bytes), join(dir, 'other'), { maxBytes: -1 }), plain(/Invalid package limits/, RangeError));
+  assert.throws(() => buildPackage(join(dir, 'missing')), plain(/ENOENT/));
+  writeFileSync(join(dir, 'file'), 'x'); assert.throws(() => buildPackage(join(dir, 'file')), plain(/must be a directory/));
+}));
+
 // Replaces global fetch while `fn` runs; `handler` sees each requested URL and its abort signal.
 async function withFetch(handler: (url: string, signal: AbortSignal) => Promise<Response>, fn: () => Promise<void>) {
   const original = globalThis.fetch;

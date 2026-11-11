@@ -7,7 +7,9 @@ import { syncBuiltinESMExports } from 'node:module';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { buildPackage } from '../src/hcs/package.ts';
+import { writeTar } from '../src/hcs/tar.ts';
 import { validateEntryStatus } from '../src/hcs/lifecycle.ts';
 import { HcsFailure } from '../src/hcs/errors.ts';
 import { grantPermission, revokePermission } from '../src/hcs/grants.ts';
@@ -439,6 +441,29 @@ test('by default an entry is authorized only when every permission its package r
     unseal(dir); rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a malformed or unsafe archive fails its entry with integrity_mismatch in the authorize or prepare step', fixture(async ({ stateDir, storeDir, entry, catalog }) => {
+  await applyDesiredSet(catalog(entry('a')), { stateDir, storeDir });
+  const before = treeHash(join(stateDir, 'generations/1'));
+  const checksum = writeTar([{ name: 'data', data: Buffer.from('payload') }]); checksum[0] ^= 1;
+  const conflict = writeTar([{ name: 'data', data: Buffer.from('payload') }, { name: 'data/child', data: Buffer.from('x') }]);
+  for (const [archive, bytes] of [['malformed', gzipSync(checksum)], ['unsafe-member', gzipSync(conflict)]] as const) {
+    const contentHash = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    writeFileSync(join(storeDir, 'sha256', contentHash.slice(7)), bytes);
+    const bad = entry('bad', { contentHash, size: bytes.length });
+    // The default authorizer reads the archive first; an authorizer that does not leaves it to the prepare step.
+    for (const authorize of [undefined, async () => true]) {
+      const label = `${archive}, ${authorize ? 'prepare' : 'authorize'}`;
+      await assert.rejects(applyDesiredSet(catalog(entry('a'), bad), { stateDir, storeDir, authorize }), failure(e => {
+        assert.deepEqual(e.errors.map(x => [x.code, x.entry, x.details?.['x-rewrite-archive']]), [['integrity_mismatch', 'dev.test.bad', archive]], label);
+      }));
+      assert.equal(pointer(stateDir), 1, label);
+      assert.deepEqual(states(stateDir), [['dev.test.a', 'active', null], ['dev.test.bad', 'failed', 'integrity_mismatch']], label);
+      assert.deepEqual(readdirSync(join(stateDir, 'generations')), ['1'], label);
+      assert.equal(treeHash(join(stateDir, 'generations/1')), before, label);
+    }
+  }
+}));
 
 for (const content of ['', '{invalid']) {
   test(`incomplete takeover content is retryable: ${JSON.stringify(content)}`, fixture(async ({ stateDir, storeDir, entry, catalog }) => {

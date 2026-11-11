@@ -3,15 +3,23 @@ import { chmodSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync,
 import { dirname, join, posix } from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { HcsFailure, hcsError } from './errors.ts';
-import { readTar, writeTar, TarUnsafeNameError, type TarInput } from './tar.ts';
+import { readTar, writeTar, TarFormatError, TarUnsafeNameError, type TarInput, type TarMember } from './tar.ts';
 
 export interface PackageExpected { size: number; contentHash: string; contentId?: string }
 export interface PackageLimits { maxBytes?: number; maxMembers?: number }
 const mediaType = 'application/vnd.oci.image.layer.v1.tar+gzip';
 const hashPattern = /^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128})$/;
 function failure(message: string): never { throw new HcsFailure([hcsError('integrity_mismatch', message, { requirement: 'HCS-0001-R007' })]); }
+// Every refusal caused by the package's bytes is an `integrity_mismatch`: the bytes are not the
+// package the catalog promised a host can unpack. `x-rewrite-archive` says which kind of refusal.
 function unsafe(name: string, reason: string): never {
   throw new HcsFailure([hcsError('integrity_mismatch', 'Unsafe archive member', { details: { 'x-rewrite-archive': 'unsafe-member', 'x-rewrite-member': name, 'x-rewrite-reason': reason } })]);
+}
+function malformed(reason: string, message: string): never {
+  throw new HcsFailure([hcsError('integrity_mismatch', `Malformed package archive: ${message}`, { details: { 'x-rewrite-archive': 'malformed', 'x-rewrite-reason': reason } })]);
+}
+function overLimit(reason: string, message: string): never {
+  throw new HcsFailure([hcsError('integrity_mismatch', message, { details: { 'x-rewrite-archive': 'limit-exceeded', 'x-rewrite-reason': reason } })]);
 }
 export function buildPackage(dir: string) {
   const members: TarInput[] = [];
@@ -53,6 +61,26 @@ export function verifyPackage(bytes: Uint8Array, expected: PackageExpected, limi
   if (!Number.isSafeInteger(max) || max < 0) throw new RangeError('Invalid package limits');
   verifyTransportAndIdentity(bytes, expected, Math.min(max, 0x7fffffff));
 }
+/**
+ * The members of the archive in package bytes whose size and digest were already verified, read
+ * without unpacking anything. `tar` is the stream when it was already decompressed (a declared
+ * `contentId` was verified). A refusal caused by the bytes (not gzip, over `maxUncompressedBytes`,
+ * a malformed tar, a name with bytes after NUL) is an HcsFailure with `integrity_mismatch`.
+ */
+export function readPackageMembers(bytes: Uint8Array, maxUncompressedBytes: number, tar?: Buffer): TarMember[] {
+  let stream = tar;
+  if (stream === undefined) {
+    try { stream = gunzipSync(bytes, { maxOutputLength: Math.max(1, maxUncompressedBytes) }); } catch (error: any) {
+      if (error?.code === 'ERR_BUFFER_TOO_LARGE') overLimit('uncompressed size limit', 'Package cannot be decompressed within the limit');
+      malformed('invalid gzip stream', 'Package is not a gzip stream');
+    }
+  }
+  try { return readTar(stream); } catch (error) {
+    if (error instanceof TarUnsafeNameError) unsafe(error.memberName, 'invalid path');
+    if (error instanceof TarFormatError) malformed(error.reason, error.message);
+    throw error;
+  }
+}
 export function sealTree(dir: string): void {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
@@ -78,24 +106,25 @@ export function unpackPackage(bytes: Uint8Array, expected: PackageExpected, targ
   const verifiedTar = verifyTransportAndIdentity(bytes, expected, cap);
   if (!validLimits) throw new RangeError('Invalid package limits');
   if (taken(targetDir)) throw new Error('Package target already exists');
-  let members: ReturnType<typeof readTar>;
-  try { members = readTar(verifiedTar ?? gunzipSync(bytes, { maxOutputLength: Math.max(1, cap) })); }
-  catch (error) {
-    if (error instanceof TarUnsafeNameError) unsafe(error.memberName, 'invalid path');
-    throw error;
-  }
-  if (members.length > maxMembers) throw new Error('Package member limit exceeded');
-  let total = 0; const names = new Set<string>();
+  const members = readPackageMembers(bytes, cap, verifiedTar);
+  if (members.length > maxMembers) overLimit('member limit', 'Package member limit exceeded');
+  let total = 0; const names = new Set<string>(), files = new Set<string>();
   for (const member of members) {
     const name = member.name;
     if (!name || name.startsWith('/') || name.includes('\\') || name.includes('\0') || name.split('/').includes('..')) unsafe(name, 'invalid path');
     const normalized = posix.normalize(name).replace(/\/$/, '');
     if (!normalized || normalized === '.' || names.has(normalized)) unsafe(name, 'duplicate or empty path');
     names.add(normalized);
+    if (member.type === '0') files.add(normalized);
     if (name.split('/').some(part => part.startsWith('.wh.'))) unsafe(name, 'whiteout');
     if (member.type !== '0' && member.type !== '5') unsafe(name, 'unsupported type');
     if (member.type === '5' && member.size !== 0) unsafe(name, 'directory data');
-    total += member.size; if (total > maxBytes) throw new Error('Package size limit exceeded');
+    total += member.size; if (total > maxBytes) overLimit('size limit', 'Package size limit exceeded');
+  }
+  // A member below a regular file cannot be written, whichever comes first in the archive.
+  for (const member of members) {
+    const parts = posix.normalize(member.name).replace(/\/$/, '').split('/');
+    for (let i = 1; i < parts.length; i++) if (files.has(parts.slice(0, i).join('/'))) unsafe(member.name, 'path conflict');
   }
   const partial = `${targetDir}.partial-${randomBytes(16).toString('hex')}`;
   mkdirSync(partial, { mode: 0o700 });
