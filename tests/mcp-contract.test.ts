@@ -36,8 +36,10 @@ test('MCP public contract matches the unchanged baseline', async (t) => {
   t.after(() => client.close());
 
   const actual = {
-    tools: (await client.listTools()).tools.map(({ name, description, inputSchema, annotations }) => ({ name, description, inputSchema, annotations })),
+    // Every field an assistant reads: ChatGPT shows the title and uses the annotations and outputSchema.
+    tools: (await client.listTools()).tools.map(({ name, title, description, inputSchema, outputSchema, annotations }) => ({ name, title, description, inputSchema, outputSchema, annotations })),
     instructions: client.getInstructions(),
+    books: await client.callTool({ name: 'list_books', arguments: {} }),
     read: await client.callTool({ name: 'read_scene', arguments: { book: 'example', file: 'scenes/scene.md' } }),
     propose: await client.callTool({ name: 'propose_claims', arguments: {
       book: 'example', extractor: 'test', candidates: [{
@@ -46,5 +48,8 @@ test('MCP public contract matches the unchanged baseline', async (t) => {
       }],
     } }),
   };
-  assert.deepEqual(actual, JSON.parse(readFileSync(fixture, 'utf8')));
+  // After a deliberate contract change, regenerate with UPDATE_MCP_BASELINE=1 and review the fixture diff.
+  if (process.env.UPDATE_MCP_BASELINE === '1') writeFileSync(fixture, `${JSON.stringify(actual, null, 2)}\n`);
+  // Compared as JSON, the form a client receives, so a missing outputSchema is absent rather than undefined.
+  assert.deepEqual(JSON.parse(JSON.stringify(actual)), JSON.parse(readFileSync(fixture, 'utf8')));
 });

@@ -23,6 +23,8 @@ export const RESULTS_SCHEMA = 'rewrite.eval-results/v1';
 const PERSON = 'user_eval';
 const RESOURCE = 'https://rewrite.invalid/mcp';
 const EVIDENCE_CHARS = 160;
+/** The review page the served MCP names, built from the configured origin as the HTTP server does. */
+const REVIEW_URL = `${new URL(RESOURCE).origin}/review`;
 
 export type Status = 'PASS' | 'FAIL' | 'SKIP';
 
@@ -35,7 +37,7 @@ export interface Build {
 
 export const inMemoryBuild: Build = {
   name: 'in-memory',
-  server: (library, subject) => buildMcpServer(library, subject),
+  server: (library, subject) => buildMcpServer(library, subject, undefined, undefined, null, REVIEW_URL),
   llms: llmsText,
 };
 
@@ -64,7 +66,7 @@ export interface RunResults {
   journeys: JourneyResult[];
 }
 
-const MATCHERS = ['equals', 'not_equals', 'matches', 'none_match', 'contains', 'not_contains'] as const;
+const MATCHERS = ['equals', 'not_equals', 'matches', 'none_match', 'contains', 'not_contains', 'at_most'] as const;
 type Matcher = (typeof MATCHERS)[number];
 const ACTIONS = ['read_onboarding', 'list_tools', 'call', 'person_edits_scene', 'person_reviews_claim', 'book_state'] as const;
 type Action = (typeof ACTIONS)[number];
@@ -206,6 +208,9 @@ function mismatch(matcher: Matcher, actual: unknown, expected: unknown): string 
       if (matcher === 'contains') return has ? '' : `expected it to contain ${show(expected)}`;
       return has ? `expected it not to contain ${show(expected)}` : '';
     }
+    case 'at_most':
+      if (typeof actual !== 'number' || typeof expected !== 'number') return 'at_most needs two numbers';
+      return actual <= expected ? '' : `expected at most ${expected}`;
   }
 }
 
@@ -250,8 +255,19 @@ async function perform(step: Step, world: World, context: Record<string, unknown
   switch (step.do) {
     case 'read_onboarding':
       return readOnboarding(world.build);
-    case 'list_tools':
-      return { names: (await world.client.listTools()).tools.map((tool) => tool.name).sort() };
+    case 'list_tools': {
+      // What an assistant such as ChatGPT reads before its first call: metadata, its size and the instructions.
+      const { tools } = await world.client.listTools();
+      const names = (keep: (tool: (typeof tools)[number]) => boolean) => tools.filter(keep).map((tool) => tool.name).sort();
+      return {
+        names: names(() => true),
+        missing_title: names((tool) => !tool.title),
+        missing_when: names((tool) => !tool.description?.startsWith('Use this ')),
+        writes: names((tool) => tool.annotations?.readOnlyHint !== true),
+        bytes: Buffer.byteLength(JSON.stringify(tools)),
+        instructions_head: (world.client.getInstructions() ?? '').slice(0, 512),
+      };
+    }
     case 'call':
       return callTool(world.client, text(fields.tool, 'tool'), isObject(fields.args) ? fields.args : {});
     case 'person_edits_scene': {

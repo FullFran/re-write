@@ -8,7 +8,7 @@ Three ways in share one core:
 - **`/review`**: a page where people accept or reject.
 - **CLI**: local use and server administration.
 
-`/llms.txt` tells an assistant how to guide a new user through connecting.
+`/llms.txt` tells an assistant how to guide a new user through connecting. [docs/chatgpt.md](docs/chatgpt.md) covers using RE;write from ChatGPT, with a manual test.
 
 The walkthrough below uses hand annotations and rules, with no LLM. See [what this does and does not prove](docs/mvp-design.md#what-this-proves). To run the server, see [deployment](docs/deployment.md).
 

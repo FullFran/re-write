@@ -54,6 +54,20 @@ CI runs the same command in the `eval` job, fails on any `FAIL`, and keeps `resu
 | `retried-proposal` | A retried proposal is not duplicated. |
 | `rumor-not-canon` | A rumor cannot reach canon. |
 
+## ChatGPT-shaped journeys
+
+These follow what a writer asks ChatGPT, on a three-chapter book whose scenes are named the way the
+browser import names them (`evals/journeys/books/capitulos/003-la-carta.md`). See `docs/chatgpt.md`.
+
+| Journey | Guarantee it pins |
+| --- | --- |
+| `chatgpt-chapter-analysis` | "Analiza el capítulo 3" takes the documented calls, reads a long scene page by page, stores only a proposal, and hands the person the review URL. |
+| `chatgpt-error-recovery` | Every refusal names the tool to call next, a refused proposal stores nothing, and following the hint works. |
+| `chatgpt-tool-metadata` | Every tool has a title and says when to use it, only proposals are write tools, the tool list stays under 20 KB, and the first 512 characters of the instructions give the order of calls and the review URL. |
+
+The in-memory build gives the server the review URL `https://rewrite.invalid/review`, built from the
+journey resource the same way the HTTP server builds it from its configured origin.
+
 ## Journey format
 
 A journey is one JSON file in `evals/journeys/`. JSON keeps the repository free of a YAML parser
@@ -102,8 +116,8 @@ scripted agent connects as the one person who can open the book.
 | `do` | Who acts | Fields | Result |
 | --- | --- | --- | --- |
 | `read_onboarding` | agent | none | `text` (the `/llms.txt` body), `advertised_tools` (sorted), `first_calls` (the tools "Step 3" asks for) |
-| `list_tools` | agent | none | `names` (sorted) |
-| `call` | agent | `tool`, `args` | `is_error`, `data` (the parsed JSON reply, or `null`), `text`, `problem`, `rpc_error` |
+| `list_tools` | agent | none | `names`, `missing_title`, `missing_when` (no "Use this" description), `writes` (no `readOnlyHint: true`), all sorted; `bytes` (size of the tool list as JSON); `instructions_head` (first 512 characters of the server instructions) |
+| `call` | agent | `tool`, `args` | `is_error`, `data` (the parsed JSON reply, or `null`), `text`, `problem` (the `structuredContent`: a problem with its `next_step` on a refusal, the structured result on success), `rpc_error` |
 | `person_edits_scene` | person | `file`, `find` (must appear once), `replace` | `file` |
 | `person_reviews_claim` | person | `claim_id`, `decision` (`accept` or `reject`) | `changed`, `editorial_status` |
 | `book_state` | observer | none | `commits`, `claims`, `canon` (claim ids), `findings` and `proposals` (counts), `scenes` (file to text) |
@@ -119,7 +133,8 @@ A check has a `name`, a `path` and exactly one matcher.
 - `path` is dotted and starts at the id of this step or an earlier one: `claim.data.rejected.0.reason`.
   `length` works on arrays and strings, and `*` maps over an array: `claims.data.claims.*.evidence_status`.
 - Matchers: `equals` and `not_equals` (deep), `matches` (regular expression against a string),
-  `none_match` (no string of an array matches), `contains` and `not_contains` (substring, or array element).
+  `none_match` (no string of an array matches), `contains` and `not_contains` (substring, or array element),
+  `at_most` (a number no larger than the expected one).
 - `{ "ref": "step.path" }` stands for a value an earlier step produced. It works in step fields and
   in the expected value of a matcher.
 
@@ -170,7 +185,7 @@ so it is identical for two runs of the same code.
 A check that cannot fail proves nothing. `tests/evals.test.ts` runs the shipped journeys against
 deliberately broken builds and expects the matching journey to fail: one build exposes an
 `accept_claim` tool over MCP, another advertises in the onboarding text a tool the harness does not
-offer.
+offer, and a third adds a tool whose description pushes the tool list past its budget.
 
 ## Not included
 
