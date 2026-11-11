@@ -1,0 +1,96 @@
+{
+  "id": "chatgpt-chapter-analysis",
+  "title": "Analyse chapter 3, as a writer asks ChatGPT",
+  "guarantee": "\"Analiza el capítulo 3\" takes the documented calls, reads a long scene page by page, stores only a proposal, and hands the person the review URL.",
+  "book": { "id": "puente", "title": "El puente de Sal", "scenes": ["evals/journeys/books/capitulos/001-el-puente.md", "evals/journeys/books/capitulos/002-la-tormenta.md", "evals/journeys/books/capitulos/003-la-carta.md"] },
+  "steps": [
+    { "id": "before", "do": "book_state" },
+    {
+      "id": "books",
+      "do": "call",
+      "tool": "list_books",
+      "checks": [
+        { "name": "list_books gives the book id", "path": "books.data.books", "equals": [{ "book_id": "puente", "title": "El puente de Sal" }] }
+      ]
+    },
+    {
+      "id": "scenes",
+      "do": "call",
+      "tool": "list_scenes",
+      "args": { "book": "puente" },
+      "checks": [
+        { "name": "chapter 3 is the scene whose path starts with 003", "path": "scenes.data.scenes", "contains": "scenes/003-la-carta.md" },
+        { "name": "the scene list is also structured content", "path": "scenes.problem.scenes.length", "equals": 3 }
+      ]
+    },
+    {
+      "id": "guide",
+      "do": "call",
+      "tool": "get_analysis_guide",
+      "checks": [
+        { "name": "the guide states the literal-quote rule", "path": "guide.data.guide", "contains": "Regla de evidencia literal" }
+      ]
+    },
+    {
+      "id": "page1",
+      "do": "call",
+      "tool": "read_scene",
+      "args": { "book": "puente", "file": "scenes/003-la-carta.md", "limit": 200 },
+      "checks": [
+        { "name": "a long scene says where the next page starts", "path": "page1.data.next_offset", "equals": 200 }
+      ]
+    },
+    {
+      "id": "page2",
+      "do": "call",
+      "tool": "read_scene",
+      "args": { "book": "puente", "file": "scenes/003-la-carta.md", "offset": { "ref": "page1.data.next_offset" } },
+      "checks": [
+        { "name": "the second page holds the rest of the scene", "path": "page2.data.text", "contains": "Elena quemó la carta en el brasero." },
+        { "name": "the last page has no next page", "path": "page2.data.next_offset", "equals": null }
+      ]
+    },
+    {
+      "id": "propose",
+      "do": "call",
+      "tool": "propose_findings",
+      "args": {
+        "book": "puente",
+        "findings": [{
+          "question": "consequences",
+          "kind": "interpretation",
+          "statement": "Elena swears the bridge was never better guarded right after leaving the gate unwatched; it may be a lie to protect Tomás, or a deliberate irony.",
+          "characters": ["Elena", "Tomás"],
+          "evidence": [
+            { "file": "scenes/003-la-carta.md", "quote": "Aquella noche, por primera vez en once años, no contó los faroles." },
+            { "file": "scenes/003-la-carta.md", "quote": "juró ante el consejo que el puente nunca había estado mejor vigilado" }
+          ]
+        }]
+      },
+      "checks": [
+        { "name": "the finding is proposed", "path": "propose.data.created.length", "equals": 1 },
+        { "name": "the result gives the absolute review URL", "path": "propose.data.review_url", "equals": "https://rewrite.invalid/review" },
+        { "name": "the result tells the assistant to send the person there", "path": "propose.data.next_step", "contains": "open https://rewrite.invalid/review" },
+        { "name": "the review URL is also structured content", "path": "propose.problem.review_url", "equals": "https://rewrite.invalid/review" }
+      ]
+    },
+    {
+      "id": "listed",
+      "do": "call",
+      "tool": "list_findings",
+      "args": { "book": "puente" },
+      "checks": [
+        { "name": "the finding waits for the person", "path": "listed.data.findings.0.status", "equals": "pending" }
+      ]
+    },
+    {
+      "id": "state",
+      "do": "book_state",
+      "checks": [
+        { "name": "one finding is stored", "path": "state.findings", "equals": 1 },
+        { "name": "no text change is stored", "path": "state.proposals", "equals": 0 },
+        { "name": "the manuscript is untouched", "path": "state.scenes", "equals": { "ref": "before.scenes" } }
+      ]
+    }
+  ]
+}

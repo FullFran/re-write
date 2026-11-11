@@ -1,0 +1,71 @@
+{
+  "id": "chatgpt-error-recovery",
+  "title": "Recover from the usual mistakes of an assistant",
+  "guarantee": "Every refusal names the tool to call next, a refused proposal stores nothing, and following the hint works.",
+  "book": { "id": "puente", "title": "El puente de Sal", "scenes": ["evals/journeys/books/capitulos/001-el-puente.md", "evals/journeys/books/capitulos/002-la-tormenta.md", "evals/journeys/books/capitulos/003-la-carta.md"] },
+  "steps": [
+    {
+      "id": "bare_path",
+      "do": "call",
+      "tool": "read_scene",
+      "args": { "book": "puente", "file": "003-la-carta.md" },
+      "checks": [
+        { "name": "a path without scenes/ is refused", "path": "bare_path.is_error", "equals": true },
+        { "name": "the refusal points to list_scenes", "path": "bare_path.problem.next_step", "matches": "list_scenes" }
+      ]
+    },
+    {
+      "id": "title_as_book",
+      "do": "call",
+      "tool": "list_scenes",
+      "args": { "book": "El puente de Sal" },
+      "checks": [
+        { "name": "a title instead of a book id is refused", "path": "title_as_book.is_error", "equals": true },
+        { "name": "the refusal points to list_books", "path": "title_as_book.problem.next_step", "matches": "list_books" }
+      ]
+    },
+    {
+      "id": "paraphrase",
+      "do": "call",
+      "tool": "propose_findings",
+      "args": {
+        "book": "puente",
+        "findings": [{
+          "question": "knowledge",
+          "kind": "fact",
+          "statement": "Tomás asks Elena to leave the gate open.",
+          "evidence": [{ "file": "scenes/003-la-carta.md", "quote": "Deja la puerta abierta la noche de luna nueva" }]
+        }]
+      },
+      "checks": [
+        { "name": "a paraphrased quote is refused", "path": "paraphrase.is_error", "equals": true },
+        { "name": "the refusal says to read the scene and copy the passage", "path": "paraphrase.problem.next_step", "matches": "read_scene" },
+        { "name": "the refusal text carries the same next step", "path": "paraphrase.text", "contains": "Next step: Read the scene again with read_scene" }
+      ]
+    },
+    {
+      "id": "nothing",
+      "do": "book_state",
+      "checks": [
+        { "name": "the refused proposal stored nothing", "path": "nothing.findings", "equals": 0 }
+      ]
+    },
+    {
+      "id": "literal",
+      "do": "call",
+      "tool": "propose_findings",
+      "args": {
+        "book": "puente",
+        "findings": [{
+          "question": "knowledge",
+          "kind": "fact",
+          "statement": "Tomás asks Elena to leave the gate open.",
+          "evidence": [{ "file": "scenes/003-la-carta.md", "quote": "Deja la verja abierta la noche de la luna nueva" }]
+        }]
+      },
+      "checks": [
+        { "name": "the literal quote is accepted as a proposal", "path": "literal.data.created.length", "equals": 1 }
+      ]
+    }
+  ]
+}

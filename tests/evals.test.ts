@@ -51,15 +51,15 @@ function results(...journeys: JourneyResult[]): RunResults {
 test('the shipped journeys cover the first set and all pass against this build, identically on every run', async () => {
   const first = await runJourneys();
   assert.deepEqual(first.journeys.map((item) => item.id), [
-    'agent-cannot-approve', 'fabricated-quote', 'literal-quote-claim', 'onboarding',
-    'retried-proposal', 'rumor-not-canon', 'stale-evidence',
+    'agent-cannot-approve', 'chatgpt-chapter-analysis', 'chatgpt-error-recovery', 'chatgpt-tool-metadata',
+    'fabricated-quote', 'literal-quote-claim', 'onboarding', 'retried-proposal', 'rumor-not-canon', 'stale-evidence',
   ]);
   assert.deepEqual(resultRows(first).filter((row) => row.status !== 'PASS'), []);
   assert.equal(first.schema, RESULTS_SCHEMA);
   assert.equal(first.version, JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.json'), 'utf8')).version);
   assert.match(first.commit, /^([0-9a-f]{40}|unknown)$/);
   assert.equal(first.build, 'in-memory');
-  assert.deepEqual(first.summary.journeys, { pass: 7, fail: 0 });
+  assert.deepEqual(first.summary.journeys, { pass: 10, fail: 0 });
   assert.equal(first.summary.checks.pass, resultRows(first).length);
   for (const item of first.journeys) {
     assert.ok(item.guarantee, item.id);
@@ -85,15 +85,40 @@ test('runner self-test: a build that allows approval over MCP fails the approval
     },
   };
   const broken = await runJourneys({ build: approving });
-  // The onboarding journey also notices a tool the public guide does not advertise.
-  assert.deepEqual(failing(broken), ['agent-cannot-approve', 'onboarding']);
+  // The onboarding journey also notices a tool the public guide does not advertise, and the metadata
+  // journey an untitled write tool.
+  assert.deepEqual(failing(broken), ['agent-cannot-approve', 'chatgpt-tool-metadata', 'onboarding']);
   assert.equal(broken.build, 'approval-over-mcp');
   const approval = broken.journeys.find((item) => item.id === 'agent-cannot-approve')!;
   assert.deepEqual(approval.checks.filter((check) => check.status === 'FAIL').map((check) => check.check), [
     'no tool accepts, rejects or reviews', 'accept_claim is refused', 'the claim is still proposed', 'nothing reached canon',
   ]);
   assert.match(approval.checks[1].note, /accept_claim/);
-  assert.deepEqual(broken.summary.journeys, { pass: 5, fail: 2 });
+  const metadata = broken.journeys.find((item) => item.id === 'chatgpt-tool-metadata')!;
+  assert.deepEqual(metadata.checks.filter((check) => check.status === 'FAIL').map((check) => check.check), [
+    'every tool has a title', 'every description starts with Use this', 'only the three proposal tools are write tools',
+  ]);
+  assert.deepEqual(broken.summary.journeys, { pass: 7, fail: 3 });
+});
+
+test('runner self-test: a tool list that grows past its budget fails the metadata journey', async () => {
+  const bloated: Build = {
+    ...inMemoryBuild,
+    name: 'bloated-tool-list',
+    server(library, subject) {
+      const server = inMemoryBuild.server(library, subject);
+      server.registerTool('list_more', {
+        title: 'Ver más', description: `Use this ${'never '.repeat(1000)}`, annotations: { readOnlyHint: true },
+      }, () => ({ content: [{ type: 'text' as const, text: '{}' }] }));
+      return server;
+    },
+  };
+  const outcome = await runJourneys({ build: bloated });
+  assert.deepEqual(failing(outcome), ['chatgpt-tool-metadata', 'onboarding']);
+  const metadata = outcome.journeys.find((item) => item.id === 'chatgpt-tool-metadata')!;
+  assert.deepEqual(metadata.checks.filter((check) => check.status === 'FAIL').map((check) => `${check.check}: ${check.note}`), [
+    'the tool list stays under 20 KB: expected at most 20000',
+  ]);
 });
 
 test('runner self-test: onboarding text that names a tool the harness does not offer fails the onboarding journey', async () => {
@@ -173,12 +198,12 @@ test('npm run eval writes results.json, prints the table, and exits 1 only when 
   const passing = evalCli('--out', out);
   assert.equal(passing.code, 0, passing.stderr);
   assert.match(passing.stdout, /^\| journey +\| check +\| status \| note \|$/m);
-  assert.match(passing.stdout, /^\| agent-cannot-approve \| accept_claim is refused +\| PASS +\|/m);
-  assert.ok(passing.stdout.includes('journeys: 7 passed, 0 failed; checks: '));
+  assert.match(passing.stdout, /^\| agent-cannot-approve +\| accept_claim is refused +\| PASS +\|/m);
+  assert.ok(passing.stdout.includes('journeys: 10 passed, 0 failed; checks: '));
   assert.ok(passing.stdout.includes(`results: ${out}`));
   const written = JSON.parse(readFileSync(out, 'utf8'));
   assert.equal(written.schema, RESULTS_SCHEMA);
-  assert.deepEqual(written.summary.journeys, { pass: 7, fail: 0 });
+  assert.deepEqual(written.summary.journeys, { pass: 10, fail: 0 });
   assert.equal(JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.json'), 'utf8')).scripts.eval, 'node scripts/eval.ts');
 
   const dir = journeyDir({ broken: journey('broken', [{ id: 'books', do: 'call', tool: 'list_books', checks: [{ name: 'no book is listed', path: 'books.data.books', equals: [] }] }]) });
