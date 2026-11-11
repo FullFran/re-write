@@ -432,6 +432,7 @@ export function createHandler(
             note: f.verdict.note,
             history: (f.verdict as any).history,
           } : undefined,
+          reopened_verdict: f.reopened_verdict,
         })),
       };
       res.setHeader('content-disposition', `attachment; filename="findings-${book}.json"`);
@@ -614,7 +615,7 @@ export function createHandler(
       // Reopening takes back a decision, so it carries the state the person saw: the history length
       // of a claim or proposal, the time of a finding's verdict. A different state is refused.
       if (kind === 'findings') {
-        if (typeof body.expected !== 'string') throw new HttpError(400, 'expected must be the time of the verdict being reopened');
+        if (typeof body.expected !== 'string' || body.expected === '') throw new HttpError(400, 'expected must be the time of the verdict being reopened');
         const expected = body.expected;
         return refusable(() => project.reopenFinding(id, subject, expected, note));
       }
@@ -624,8 +625,13 @@ export function createHandler(
       if (kind === 'proposals') return refusable(() => project.reopenProposal(id, subject, expected, note));
       throw new HttpError(404, 'not found');
     }
-    if (kind === 'claims') return refusable(() => project.reviewClaim(id, decision(), subject, note));
-    if (kind === 'proposals') return refusable(() => project.reviewProposal(id, decision(), subject, note));
+    // Optional on accept and reject: the history length the person saw, refused when it changed since.
+    if (body.expected !== undefined && (!Number.isSafeInteger(body.expected) || (body.expected as number) < 0)) {
+      throw new HttpError(400, 'expected must be the history length the decision was made on');
+    }
+    const seen = body.expected as number | undefined;
+    if (kind === 'claims') return refusable(() => project.reviewClaim(id, decision(), subject, note, seen));
+    if (kind === 'proposals') return refusable(() => project.reviewProposal(id, decision(), subject, note, seen));
     if (kind === 'findings') {
       const verdict = body.verdict as VerdictKind;
       if (!VERDICTS.includes(verdict)) throw new HttpError(400, 'unknown verdict');

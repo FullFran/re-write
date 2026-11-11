@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, normalize, resolve } from 'node:path';
 import { Git } from '../adapters/git.ts';
 import { JsonStore, STATE_DIR } from '../adapters/json-store.ts';
@@ -8,7 +8,7 @@ import {
   claimId, EPISTEMIC_KINDS, isCanon, nextEditorialStatus, reopenTransition, StaleStateError,
   type Claim, type ClaimCandidate, type ClaimView, type Decision,
 } from '../domain/claim.ts';
-import { activeVerdict, CONTINUITY_VERDICTS, InvalidFindingVerdictError, inspectContinuity, type Finding, type Verdict, type VerdictHistoryEntry, type VerdictKind } from '../domain/continuity.ts';
+import { verdictFields, CONTINUITY_VERDICTS, InvalidFindingVerdictError, inspectContinuity, type Finding, type Verdict, type VerdictHistoryEntry, type VerdictKind } from '../domain/continuity.ts';
 import { applyChange, proposalId, type Proposal } from '../domain/proposal.ts';
 import {
   NARRATIVE_VERDICTS, findingId, viewFinding,
@@ -205,9 +205,10 @@ export class Project {
     return this.claimViews().filter(isCanon);
   }
 
-  reviewClaim(id: string, decision: Decision, by: string, note?: string): { claim: ClaimView; changed: boolean } {
+  reviewClaim(id: string, decision: Decision, by: string, note?: string, expected?: number): { claim: ClaimView; changed: boolean } {
     const claim = this.claims.get(id);
     if (!claim) throw new Error(`unknown claim: ${id}`);
+    checkExpected(claim.editorial_status, claim.history, decision, expected);
     const next = nextEditorialStatus(claim.editorial_status, decision);
     if (next === null) return { claim: this.view(claim), changed: false };
     const current = this.view(claim);
@@ -216,8 +217,7 @@ export class Project {
     }
     claim.history.push({ at: new Date().toISOString(), by, from: claim.editorial_status, to: next, ...(note ? { note } : {}) });
     claim.editorial_status = next;
-    this.claims.put(id, claim);
-    this.git.commit(`rewrite: ${decision} claim ${id}`, [STATE_DIR]);
+    this.saveDecision(`rewrite: ${decision} claim ${id}`, [['claims', id]], () => this.claims.put(id, claim));
     return { claim: this.view(claim), changed: true };
   }
 
@@ -231,9 +231,30 @@ export class Project {
     if (reopenTransition(claim.editorial_status, claim.history, expected) === 'unchanged') return { claim: this.view(claim), changed: false };
     claim.history.push({ at: new Date().toISOString(), by, from: claim.editorial_status, to: 'proposed', ...(note ? { note } : {}), action: 'reopen' });
     claim.editorial_status = 'proposed';
-    this.claims.put(id, claim);
-    this.git.commit(`rewrite: reopen claim ${id}`, [STATE_DIR]);
+    this.saveDecision(`rewrite: reopen claim ${id}`, [['claims', id]], () => this.claims.put(id, claim));
     return { claim: this.view(claim), changed: true };
+  }
+
+  /**
+   * Writes the records of one review decision and commits them. When the commit fails, every record
+   * is put back byte for byte (or removed when it did not exist) and unstaged, so the book is exactly
+   * as it was and a retry starts from a clean state.
+   */
+  private saveDecision(message: string, records: [collection: string, id: string][], write: () => void): void {
+    const paths = records.map(([collection, id]) => recordPath(collection, id));
+    const before = paths.map((path) => (existsSync(join(this.dir, path)) ? readFileSync(join(this.dir, path)) : null));
+    try {
+      write();
+      this.git.commit(message, paths);
+    } catch (error) {
+      paths.forEach((path, i) => {
+        const bytes = before[i];
+        if (bytes === null) rmSync(join(this.dir, path), { force: true });
+        else writeFileSync(join(this.dir, path), bytes);
+      });
+      this.git.tryRun('reset', '-q', '--', ...paths);
+      throw error;
+    }
   }
 
   /** Everything a reviewer needs for one book, recomputed from the text on each read. */
@@ -256,8 +277,7 @@ export class Project {
   /** Read-only: it computes findings and attaches any verdict a human already gave. */
   check(): Finding[] {
     return inspectContinuity(this.claimViews()).map((finding) => {
-      const verdict = activeVerdict(this.verdicts.get(finding.finding_id));
-      return verdict ? { ...finding, verdict } : finding;
+      return { ...finding, ...verdictFields(this.verdicts.get(finding.finding_id)) };
     });
   }
 
@@ -288,8 +308,7 @@ export class Project {
       ...(note ? { note } : {}),
       ...(history.length ? { history } : {}),
     };
-    this.verdicts.put(id, record);
-    this.git.commit(`rewrite: ${verdict} finding ${id}`, [STATE_DIR]);
+    this.saveDecision(`rewrite: ${verdict} finding ${id}`, [['verdicts', id]], () => this.verdicts.put(id, record));
     return record;
   }
 
@@ -307,8 +326,7 @@ export class Project {
     if (record.at !== expected) throw new StaleStateError();
     if (record.reopened) return { verdict: record, changed: false };
     record.reopened = { by, at: new Date().toISOString(), ...(note ? { note } : {}) };
-    this.verdicts.put(id, record);
-    this.git.commit(`rewrite: reopen finding ${id}`, [STATE_DIR]);
+    this.saveDecision(`rewrite: reopen finding ${id}`, [['verdicts', id]], () => this.verdicts.put(id, record));
     return { verdict: record, changed: true };
   }
 
@@ -387,8 +405,7 @@ export class Project {
       (file) => this.readScene(file),
       (rev, file) => this.git.showAt(rev, file),
     );
-    const verdict = activeVerdict(this.verdicts.get(f.finding_id));
-    return verdict ? { ...view, verdict } : view;
+    return { ...view, ...verdictFields(this.verdicts.get(f.finding_id)) };
   }
 
   /** Stores a change for review. It never writes to the scene. */
@@ -451,9 +468,10 @@ export class Project {
    * The only path that changes a scene, and only after an explicit human accept.
    * Text and decision go in one commit, so neither can exist without the other.
    */
-  reviewProposal(id: string, decision: Decision, by: string, note?: string): { proposal: Proposal; changed: boolean } {
+  reviewProposal(id: string, decision: Decision, by: string, note?: string, expected?: number): { proposal: Proposal; changed: boolean } {
     const proposal = this.proposals.get(id);
     if (!proposal) throw new Error(`unknown proposal: ${id}`);
+    checkExpected(proposal.status, proposal.history, decision, expected);
     const next = nextEditorialStatus(proposal.status, decision);
     if (next === null) return { proposal, changed: false };
     const previous = structuredClone(proposal);
@@ -461,8 +479,7 @@ export class Project {
     proposal.status = next;
 
     if (decision === 'reject') {
-      this.proposals.put(id, proposal);
-      this.git.commit(`rewrite: reject ${id}`, [STATE_DIR]);
+      this.saveDecision(`rewrite: reject ${id}`, [['proposals', id]], () => this.proposals.put(id, proposal));
       return { proposal, changed: true };
     }
 
@@ -478,6 +495,7 @@ export class Project {
     } catch (error) {
       writeFileSync(path, current);
       this.proposals.put(id, previous);
+      this.git.tryRun('reset', '-q', '--', proposal.file, recordPath('proposals', id));
       throw error;
     }
     return { proposal, changed: true };
@@ -496,10 +514,25 @@ export class Project {
     if (proposal.status === 'accepted') throw new Error(`${id} already changed the text; revert it instead of reopening it`);
     proposal.history.push({ at: new Date().toISOString(), by, from: proposal.status, to: 'proposed', ...(note ? { note } : {}), action: 'reopen' });
     proposal.status = 'proposed';
-    this.proposals.put(id, proposal);
-    this.git.commit(`rewrite: reopen ${id}`, [STATE_DIR]);
+    this.saveDecision(`rewrite: reopen ${id}`, [['proposals', id]], () => this.proposals.put(id, proposal));
     return { proposal, changed: true };
   }
+}
+
+/**
+ * An accept or reject may carry the history length the person saw. A different length means another
+ * tab or person changed the item since, unless it is this same decision already recorded (a repeat).
+ */
+function checkExpected(status: string, history: { length: number }, decision: Decision, expected: number | undefined): void {
+  if (expected === undefined || history.length === expected) return;
+  const target = decision === 'accept' ? 'accepted' : 'rejected';
+  if (history.length === expected + 1 && status === target) return;
+  throw new StaleStateError();
+}
+
+/** Where a stored record lives, relative to the book repository. */
+function recordPath(collection: string, id: string): string {
+  return join(STATE_DIR, collection, `${id}.json`);
 }
 
 function acceptSubject(id: string): string {

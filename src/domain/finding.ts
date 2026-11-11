@@ -65,6 +65,8 @@ export interface FindingRecord {
 export interface FindingView extends Omit<FindingRecord, 'evidence'> {
   evidence: FindingEvidenceView[];
   evidence_status: EvidenceStatus;
+  /** While a verdict is reopened: the kept verdict, with its history and who reopened it. */
+  reopened_verdict?: Verdict;
 }
 
 /** Content-derived id so retries are harmless. */

@@ -40,9 +40,13 @@ export interface Verdict {
   reopened?: Reopening;
 }
 
-/** The verdict that currently applies, or null when there is none or it was reopened. */
-export function activeVerdict(record: Verdict | null): Verdict | null {
-  return record && !record.reopened ? record : null;
+/**
+ * How a stored verdict shows on a finding: as its verdict, or, while reopened, as the kept verdict
+ * next to a pending finding. Nothing when there is no verdict.
+ */
+export function verdictFields(record: Verdict | null): { verdict: Verdict } | { reopened_verdict: Verdict } | Record<string, never> {
+  if (!record) return {};
+  return record.reopened ? { reopened_verdict: record } : { verdict: record };
 }
 
 export interface Citation {
@@ -66,6 +70,8 @@ export interface Finding {
   citations: Citation[];
   alternatives: string[];
   verdict?: Verdict;
+  /** While the verdict is reopened: the kept verdict, with its history and who reopened it. */
+  reopened_verdict?: Verdict;
 }
 
 const ALTERNATIVES = [

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 import { Library } from '../src/application/library.ts';
@@ -190,4 +190,146 @@ test('reopen is a review action: agent tokens and package entries are refused', 
   assert.deepEqual(decide({ ...request, entry: null }), { allow: true });
   assert.equal(decide({ ...request, entry: 'com.example.pkg/entry' }).allow, false);
   assert.equal(decide({ ...request, door: 'mcp', entry: null }).allow, false);
+});
+
+function lockIndex(): () => void {
+  const lock = join(h.bookDir, '.git', 'index.lock');
+  writeFileSync(lock, '');
+  return () => rmSync(lock);
+}
+
+test('a reopen whose commit fails leaves the record and the tree as they were, and a retry works', async () => {
+  const session = await h.session();
+  const id = proposeRevision(h.bookDir, SCENE, 'Fuera empezaba a llover', 'Fuera seguía lloviendo');
+  await reviewApi(h, `/books/sal/proposals/${id}`, session, { decision: 'reject' });
+  const record = join(h.bookDir, '.rewrite', 'proposals', `${id}.json`);
+  const before = readFileSync(record);
+  const headBefore = head();
+
+  const unlock = lockIndex();
+  const failed = await reviewApi(h, `/books/sal/proposals/${id}/reopen`, session, { expected: 1 });
+  unlock();
+  assert.equal(failed.status, 409);
+  assert.deepEqual(readFileSync(record), before);
+  assert.equal(head(), headBefore);
+  assert.equal(git(h.bookDir, 'status', '--porcelain'), '');
+
+  const retry = await reviewApi(h, `/books/sal/proposals/${id}/reopen`, session, { expected: 1 });
+  assert.equal(retry.status, 200);
+  assert.equal((await retry.json()).changed, true);
+  assert.equal(subject(), `rewrite: reopen ${id}`);
+});
+
+test('a claim or finding reopen whose commit fails changes nothing on disk', async () => {
+  const session = await h.session();
+  const { claims, findings } = await queue(session);
+  const claim = claims.find((c: any) => c.evidence_status === 'valid');
+  await reviewApi(h, `/books/sal/claims/${claim.claim_id}`, session, { decision: 'reject' });
+  await reviewApi(h, `/books/sal/findings/${findings[0].finding_id}`, session, { verdict: 'confirmed' });
+  const verdict = (await queue(session)).findings[0].verdict;
+  const state = () => git(h.bookDir, 'status', '--porcelain') + readFileSync(join(h.bookDir, '.rewrite', 'claims', `${claim.claim_id}.json`), 'utf8')
+    + readFileSync(join(h.bookDir, '.rewrite', 'verdicts', `${findings[0].finding_id}.json`), 'utf8');
+  const before = state();
+
+  const unlock = lockIndex();
+  assert.equal((await reviewApi(h, `/books/sal/claims/${claim.claim_id}/reopen`, session, { expected: 1 })).status, 409);
+  assert.equal((await reviewApi(h, `/books/sal/findings/${findings[0].finding_id}/reopen`, session, { expected: verdict.at })).status, 409);
+  unlock();
+  assert.equal(state(), before);
+});
+
+test('an accept or reject whose commit fails changes nothing on disk either', async () => {
+  const session = await h.session();
+  const { claims, findings } = await queue(session);
+  const claim = claims.find((c: any) => c.evidence_status === 'valid');
+  const id = proposeRevision(h.bookDir, SCENE, 'Fuera empezaba a llover', 'Fuera seguía lloviendo');
+  const before = git(h.bookDir, 'status', '--porcelain') + readFileSync(join(h.bookDir, '.rewrite', 'claims', `${claim.claim_id}.json`), 'utf8')
+    + readFileSync(join(h.bookDir, '.rewrite', 'proposals', `${id}.json`), 'utf8');
+
+  const unlock = lockIndex();
+  assert.equal((await reviewApi(h, `/books/sal/claims/${claim.claim_id}`, session, { decision: 'accept' })).status, 409);
+  assert.equal((await reviewApi(h, `/books/sal/proposals/${id}`, session, { decision: 'reject' })).status, 409);
+  assert.equal((await reviewApi(h, `/books/sal/findings/${findings[0].finding_id}`, session, { verdict: 'confirmed' })).status, 409);
+  unlock();
+  const after = git(h.bookDir, 'status', '--porcelain') + readFileSync(join(h.bookDir, '.rewrite', 'claims', `${claim.claim_id}.json`), 'utf8')
+    + readFileSync(join(h.bookDir, '.rewrite', 'proposals', `${id}.json`), 'utf8');
+  assert.equal(after, before);
+  assert.equal(existsSync(join(h.bookDir, '.rewrite', 'verdicts', `${findings[0].finding_id}.json`)), false);
+});
+
+test('a reopen by a person without access to the book gets the missing-book refusal, not an error', async () => {
+  const session = await h.session();
+  const id = proposeRevision(h.bookDir, SCENE, 'Fuera empezaba a llover', 'Fuera seguía lloviendo');
+  await reviewApi(h, `/books/sal/proposals/${id}`, session, { decision: 'reject' });
+  const { claims, findings } = await queue(session);
+  const stranger = await h.session('user_other');
+  const headBefore = head();
+  const missing = await (await reviewApi(h, `/books/nope/proposals/${id}/reopen`, stranger, { expected: 1 })).json();
+  for (const path of [`proposals/${id}`, `claims/${claims[0].claim_id}`, `findings/${findings[0].finding_id}`]) {
+    const res = await reviewApi(h, `/books/sal/${path}/reopen`, stranger, { expected: path.startsWith('findings') ? 'x' : 1 });
+    assert.equal(res.status, 404);
+    assert.deepEqual(await res.json(), missing);
+  }
+  assert.equal(head(), headBefore);
+});
+
+test('a reopened finding still shows its kept verdict and history in the review API and the export', async () => {
+  const session = await h.session();
+  const created = h.library.open('sal', 'user_fran').proposeFindings([{
+    question: 'motivation', kind: 'interpretation', statement: 'Elena protege a Bruno',
+    evidence: [{ file: SCENE, quote: 'No fue Bruno' }],
+  }], 'agent').created[0];
+  await reviewApi(h, `/books/sal/findings/${created}`, session, { verdict: 'useful' });
+  await reviewApi(h, `/books/sal/findings/${created}`, session, { verdict: 'noise' });
+  const view = () => queue(session).then((q) => q.finding_views.find((f: any) => f.finding_id === created));
+  const verdict = (await view()).verdict;
+  assert.equal((await reviewApi(h, `/books/sal/findings/${created}/reopen`, session, { expected: verdict.at })).status, 200);
+
+  const shown = await view();
+  assert.equal(shown.verdict, undefined);
+  assert.equal(shown.reopened_verdict.verdict, 'noise');
+  assert.equal(shown.reopened_verdict.reopened.by, 'user_fran');
+  assert.equal(shown.reopened_verdict.history[0].verdict, 'useful');
+
+  const exported = (await (await reviewApi(h, '/books/sal/export', session)).json()).findings.find((f: any) => f.finding_id === created);
+  assert.equal(exported.rating, undefined);
+  assert.equal(exported.reopened_verdict.verdict, 'noise');
+  assert.equal(exported.reopened_verdict.reopened.by, 'user_fran');
+  assert.equal(exported.reopened_verdict.history[0].verdict, 'useful');
+
+  const continuity = (await queue(session)).findings[0];
+  await reviewApi(h, `/books/sal/findings/${continuity.finding_id}`, session, { verdict: 'confirmed' });
+  const at = (await queue(session)).findings[0].verdict.at;
+  await reviewApi(h, `/books/sal/findings/${continuity.finding_id}/reopen`, session, { expected: at });
+  assert.equal((await queue(session)).findings[0].reopened_verdict.verdict, 'confirmed');
+});
+
+test('accept and reject take an optional expected history length, so a tab that saw an older state is refused', async () => {
+  const session = await h.session();
+  const id = proposeRevision(h.bookDir, SCENE, 'Fuera empezaba a llover', 'Fuera seguía lloviendo');
+  await reviewApi(h, `/books/sal/proposals/${id}`, session, { decision: 'reject' });
+  await reviewApi(h, `/books/sal/proposals/${id}/reopen`, session, { expected: 1 });
+  const headBefore = head();
+
+  const stale = await reviewApi(h, `/books/sal/proposals/${id}`, session, { decision: 'accept', expected: 0 });
+  assert.equal(stale.status, 409);
+  assert.match((await stale.json()).error, /otra pestaña/);
+  assert.equal(head(), headBefore);
+  assert.equal((await reviewApi(h, `/books/sal/proposals/${id}`, session, { decision: 'accept', expected: -1 })).status, 400);
+
+  const claim = (await queue(session)).claims[0];
+  assert.equal((await reviewApi(h, `/books/sal/claims/${claim.claim_id}`, session, { decision: 'reject', expected: 3 })).status, 409);
+  assert.equal((await reviewApi(h, `/books/sal/claims/${claim.claim_id}`, session, { decision: 'reject', expected: 0 })).status, 200);
+  const repeat = await reviewApi(h, `/books/sal/claims/${claim.claim_id}`, session, { decision: 'reject', expected: 0 });
+  assert.equal(repeat.status, 200);
+  assert.equal((await repeat.json()).changed, false);
+
+  assert.equal((await reviewApi(h, `/books/sal/proposals/${id}`, session, { decision: 'accept', expected: 2 })).status, 200);
+});
+
+test('an empty expected on a finding reopen is a bad request', async () => {
+  const session = await h.session();
+  const finding = (await queue(session)).findings[0];
+  await reviewApi(h, `/books/sal/findings/${finding.finding_id}`, session, { verdict: 'confirmed' });
+  assert.equal((await reviewApi(h, `/books/sal/findings/${finding.finding_id}/reopen`, session, { expected: '' })).status, 400);
 });
