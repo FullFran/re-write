@@ -38,7 +38,7 @@ export const REWRITE_CAPABILITIES = [
   { ref: 'com.fullfran.rewrite.continuity.check@1', major: 1, provider: 'host', movesTo: 'com.fullfran.rewrite.knowledge-order', mcpTools: ['inspect_continuity'], contract: 'Inspect continuity.' },
   { ref: 'com.fullfran.rewrite.findings.read@1', major: 1, provider: 'host', mcpTools: ['list_findings', 'get_analysis_guide'], contract: 'Read narrative findings and analysis guide.' },
   { ref: 'com.fullfran.rewrite.findings.propose@1', major: 1, provider: 'host', mcpTools: ['propose_findings'], contract: 'Propose narrative findings.' },
-  { ref: 'com.fullfran.rewrite.notes.read@1', major: 1, provider: 'host', mcpTools: ['list_notes', 'read_note', 'graph_neighbors', 'graph_orphans', 'graph_path', 'graph_central'], contract: 'Read book notes, their links and backlinks, and the story graph.' },
+  { ref: 'com.fullfran.rewrite.notes.read@1', major: 1, provider: 'host', mcpTools: ['list_notes', 'read_note', 'graph_neighbors', 'graph_orphans', 'graph_path', 'graph_central', 'graph_suggest_links'], contract: 'Read book notes, their links and backlinks, and the story graph.' },
   { ref: 'com.fullfran.rewrite.claims.extract@1', major: 1, provider: 'package', mcpTools: [], contract: 'Extract claim candidates through the CLI.' },
   { ref: 'com.fullfran.rewrite.entities.read@1', major: 1, provider: 'host', mcpTools: [], contract: 'Read narrative entities.', issue: 12 },
   { ref: 'com.fullfran.rewrite.events.read@1', major: 1, provider: 'host', mcpTools: [], contract: 'Read narrative events.', issue: 15 },

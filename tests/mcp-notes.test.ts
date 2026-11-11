@@ -8,7 +8,7 @@ import { Library } from '../src/application/library.ts';
 import { buildMcpServer } from '../src/adapters/mcp.ts';
 import { cli, git, tempDir } from './helpers.ts';
 
-const GRAPH_TOOLS = ['graph_neighbors', 'graph_orphans', 'graph_path', 'graph_central'];
+const GRAPH_TOOLS = ['graph_neighbors', 'graph_orphans', 'graph_path', 'graph_central', 'graph_suggest_links'];
 
 /** A book with three linked scenes and no notes yet, and a connected assistant. */
 async function setup() {
@@ -194,4 +194,71 @@ test('every note and graph tool answers for the book it is given, never another 
   const [salCentral, otroCentral] = await both('graph_central', {});
   assert.deepEqual(salCentral.data.ranking.map((n: any) => [n.id, n.degree]), [['note:Puente de Sal', 4], ['note:Elena', 3], ['note:Tomás', 2], ['note:Carta', 0]]);
   assert.deepEqual(otroCentral.data.ranking.map((n: any) => [n.id, n.degree]), [['note:Elena', 2], ['note:Faro', 2], ['note:Solo', 0]]);
+
+  const [salSuggest, otroSuggest] = await both('graph_suggest_links', {});
+  assert.deepEqual(salSuggest.data.suggestions.map((s: any) => [s.from, s.to]), [['note:Elena', 'note:Tomás']]);
+  assert.deepEqual(otroSuggest.data.suggestions.map((s: any) => [s.from, s.to]), [['note:Elena', 'note:Faro']]);
+});
+
+const claimOn = (source_file: string, quote: string, subject: string, holder: string, fact: string, mode: string) => ({
+  statement: `${holder} y ${subject}`, subject, source_file, quote, scope: 'book', epistemic_kind: 'belief', knowledge: { holder, fact, mode },
+});
+
+test('graph_neighbors with knows adds who-knows-what edges from claims, cut at as_of_scene, and reports names that match no note', async () => {
+  const { call, addNotes } = await setup();
+  await addNotes(NOTES);
+  const proposed = await call('propose_claims', { extractor: 'test', candidates: [
+    claimOn('scenes/001-lluvia.md', 'Luego [[Elena]] cruzó el', 'Puente de Sal', 'la capitana', 'puente', 'displays'),
+    claimOn('scenes/002-carta.md', 'Tomás habló con [[Elena]]', 'Elena', 'Tomás', 'elena-calla', 'acquires'),
+    claimOn('scenes/003-alba.md', '[[Tomás]] y [[Puente de Sal]] al alba.', 'El tesoro', 'Tomás', 'tesoro', 'hears'),
+  ] });
+  assert.deepEqual(proposed.data.rejected, []);
+  const edges = (data: any) => data.knows.edges.map((e: any) => [e.from, e.to, e.mode, e.fact, e.scene, e.editorial_status]);
+  const near = await call('graph_neighbors', { node: 'Elena', knows: true });
+  assert.deepEqual(near.structured, near.data);
+  assert.deepEqual(edges(near.data), [
+    ['note:Elena', 'note:Puente de Sal', 'displays', 'puente', 'scenes/001-lluvia.md', 'proposed'],
+    ['note:Tomás', 'note:Elena', 'acquires', 'elena-calla', 'scenes/002-carta.md', 'proposed'],
+  ]);
+  assert.deepEqual(near.data.knows.unresolved.map((p: any) => [p.role, p.name, p.scene]), [['subject', 'El tesoro', 'scenes/003-alba.md']]);
+  assert.deepEqual(near.data.knows.ambiguous, []);
+  const early = await call('graph_neighbors', { node: 'Elena', knows: true, as_of_scene: 'scenes/001-lluvia.md' });
+  assert.deepEqual(edges(early.data), [['note:Elena', 'note:Puente de Sal', 'displays', 'puente', 'scenes/001-lluvia.md', 'proposed']]);
+  assert.deepEqual(early.data.knows.unresolved, [], 'a later problem is a spoiler too');
+  assert.equal('knows' in (await call('graph_neighbors', { node: 'Elena' })).data, false, 'without knows the answer is as before');
+});
+
+test('graph_central ranks by PageRank or betweenness on request, and degree stays the default', async () => {
+  const { call, addNotes } = await setup();
+  await addNotes(NOTES);
+  const between = await call('graph_central', { metric: 'betweenness' });
+  assert.equal(between.data.metric, 'betweenness');
+  assert.deepEqual(between.data.ranking.map((n: any) => [n.id, n.betweenness]), [['note:Puente de Sal', 6], ['note:Elena', 4], ['note:Carta', 0], ['note:Tomás', 0]]);
+  const rank = await call('graph_central', { metric: 'pagerank', kind: 'scene' });
+  assert.equal(rank.data.metric, 'pagerank');
+  assert.deepEqual(rank.data.ranking.map((n: any) => n.kind), ['scene', 'scene', 'scene']);
+  const values = rank.data.ranking.map((n: any) => n.pagerank);
+  assert.ok(values.every((v: number, i: number) => typeof v === 'number' && (i === 0 || values[i - 1] >= v)));
+  const degree = await call('graph_central', {});
+  assert.equal(degree.data.metric, 'degree');
+  assert.equal('pagerank' in degree.data.ranking[0], false);
+});
+
+test('graph_suggest_links proposes notes to link, with literal anchors for propose_revision, and writes nothing', async () => {
+  const { book, call, addNotes } = await setup();
+  await addNotes({ ...NOTES, Tomás: '---\ntype: personaje\n---\nUn viajero que busca a Elena.\n' });
+  const commits = git(book, 'rev-list', '--count', 'HEAD');
+  const found = await call('graph_suggest_links', { node: 'Elena' });
+  assert.deepEqual(found.structured, found.data);
+  assert.equal(found.data.metric, 'adamic_adar');
+  assert.deepEqual(found.data.suggestions, [{
+    from: 'note:Elena', to: 'note:Tomás', score: 0.721348, common: 1, via: ['note:Puente de Sal'],
+    anchors: [{ file: 'notas/Tomás.md', line: 4, column: 24, text: 'Elena', context: 'Un viajero que busca a Elena.' }],
+  }]);
+  assert.match(found.data.next_step, /propose_revision/);
+  const book1 = await call('graph_suggest_links', { top: 1 });
+  assert.deepEqual(book1.data.suggestions.map((s: any) => [s.from, s.to, s.score]), [['note:Elena', 'note:Tomás', 0.721348]]);
+  assert.match((await call('graph_suggest_links', { node: 'scenes/001-lluvia.md' })).text, /suggestions are between notes.*\nNext step: Call list_notes/);
+  assert.equal(git(book, 'rev-list', '--count', 'HEAD'), commits, 'suggesting commits nothing');
+  assert.equal(git(book, 'status', '--porcelain'), '');
 });

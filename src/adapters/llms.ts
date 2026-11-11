@@ -77,7 +77,7 @@ Ask the agent to call \`list_books\`.
 
 ## Using it
 
-Tools for the agent: \`list_books\`, \`list_scenes\`, \`read_scene\`, \`list_claims\`, \`propose_claims\`, \`inspect_continuity\`, \`propose_revision\`, \`list_proposals\`, \`get_proposal\`, \`get_analysis_guide\`, \`propose_findings\`, \`list_findings\`, \`list_notes\`, \`read_note\`, \`propose_note\`, \`graph_neighbors\`, \`graph_orphans\`, \`graph_path\`, \`graph_central\`.
+Tools for the agent: \`list_books\`, \`list_scenes\`, \`read_scene\`, \`list_claims\`, \`propose_claims\`, \`inspect_continuity\`, \`propose_revision\`, \`list_proposals\`, \`get_proposal\`, \`get_analysis_guide\`, \`propose_findings\`, \`list_findings\`, \`list_notes\`, \`read_note\`, \`propose_note\`, \`graph_neighbors\`, \`graph_orphans\`, \`graph_path\`, \`graph_central\`, \`graph_suggest_links\`.
 
 - **Usual order:** \`list_books\`, \`list_scenes\`, \`get_analysis_guide\`, \`read_scene\` (every page), then \`propose_findings\`. Imported chapters are named by reading order, so chapter 3 is usually the scene whose path starts with \`scenes/003-\`.
 - **Where the person decides:** Every proposal result carries \`review_url\`: give that link to the person, who reviews, rates and decides there. If a call fails, its \`next_step\` says what to do.
