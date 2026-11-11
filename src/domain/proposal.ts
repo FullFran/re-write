@@ -14,6 +14,8 @@ export interface Proposal {
   reverts?: string;
   /** The proposal whose change this one proposes again against a later text. */
   reproposes?: string;
+  /** A new note: the file must not exist; find is empty and replace is the whole text. */
+  creates?: true;
   status: EditorialStatus;
   history: HistoryEntry[];
 }

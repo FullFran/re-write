@@ -11,6 +11,8 @@ import {
 import { verdictFields, CONTINUITY_VERDICTS, InvalidFindingVerdictError, inspectContinuity, type Finding, type Verdict, type VerdictHistoryEntry, type VerdictKind } from '../domain/continuity.ts';
 import { applyChange, inverseChange, proposalId, type Proposal } from '../domain/proposal.ts';
 import { checkSceneText, isExactUtf8 } from '../domain/scene-text.ts';
+import { checkNoteName, NOTES_DIR } from '../domain/note.ts';
+import { foldName } from '../domain/wikilink.ts';
 import {
   NARRATIVE_VERDICTS, findingId, viewFinding,
   type FindingCandidate, type FindingRecord, type FindingView,
@@ -42,6 +44,15 @@ export class SceneNotFoundError extends Error {
   }
 }
 
+/** The note does not exist as a regular file inside a real notas/ directory. */
+export class NoteNotFoundError extends SceneNotFoundError {
+  constructor(name: string) {
+    super(name);
+    this.message = `note not found: ${name}`;
+    this.name = 'NoteNotFoundError';
+  }
+}
+
 /** An expected refusal of an edit whose reason can be shown to the person. */
 export class SceneEditRefusal extends Error {
   constructor(message: string) {
@@ -57,8 +68,24 @@ export interface SceneEdit {
   text: string;
   by: string;
 }
+export interface NoteEdit {
+  name: string;
+  base_blob: string;
+  text: string;
+  by: string;
+}
+
+export interface NoteProposalInput {
+  name: string;
+  text: string;
+  rationale: string;
+  proposed_by?: string;
+}
+
 /** A markdown file directly inside scenes: never the directory itself, which git can also show. */
 const SCENE_FILE = /^scenes\/[^/]+\.md$/;
+const NOTE_FILE = /^notas\/([^/]+)\.md$/;
+const NOTE_CREATED = 'Esta propuesta creó una nota, así que no se puede revertir ni volver a proponer automáticamente. Cámbiala con una propuesta nueva.';
 
 export function reviewer(by: string | undefined): string {
   return by || process.env.USER || 'unknown';
@@ -189,6 +216,62 @@ export class Project {
   readScene(file: string): string | null {
     const path = this.sceneFile(file);
     return path === null ? null : readFileSync(path, 'utf8');
+  }
+
+  /** Note names (file names without .md), sorted: regular files with valid names in a real notas/. */
+  notes(): string[] {
+    const dir = join(this.dir, NOTES_DIR);
+    if (!this.isRegular(dir, 'directory')) return [];
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+      .map((entry) => entry.name.slice(0, -3))
+      .filter((name) => checkNoteName(name) === null)
+      .sort();
+  }
+
+  /** The repository path of a note, or throws when the name is not a valid note name. */
+  notePath(name: string): string {
+    const problem = checkNoteName(name);
+    if (problem) throw new Error(problem);
+    return `${NOTES_DIR}/${name}.md`;
+  }
+
+  /** The absolute path of a note that is a regular file inside a real notas/ directory, or null. */
+  private noteFile(name: string): string | null {
+    const path = join(this.dir, this.notePath(name));
+    return this.isRegular(join(this.dir, NOTES_DIR), 'directory') && this.isRegular(path, 'file') ? path : null;
+  }
+
+  /** Reads the current text of a note, or null when it does not exist. */
+  readNote(name: string): string | null {
+    const path = this.noteFile(name);
+    return path === null ? null : readFileSync(path, 'utf8');
+  }
+
+  /** A path a proposal may change: a scene in scenes/ or a note in notas/. */
+  textPath(file: string): string {
+    const clean = normalize(file);
+    const note = NOTE_FILE.exec(clean);
+    if (note && !clean.includes('..') && checkNoteName(note[1]) === null) return clean;
+    if (SCENE_FILE.test(clean) && !clean.includes('..')) return clean;
+    throw new Error(`file must be inside ${SCENES_DIR}/ (a scene) or ${NOTES_DIR}/ (a note): ${file}`);
+  }
+
+  /** The current text of a scene or note path, or null when it does not exist. */
+  readText(file: string): string | null {
+    const clean = this.textPath(file);
+    const note = NOTE_FILE.exec(clean);
+    return note ? this.readNote(note[1]) : this.readScene(clean);
+  }
+
+  /** Why a note with this name cannot be created now, or null. Name rules first, then any clash. */
+  private noteClash(name: string): string | null {
+    const file = this.notePath(name);
+    let exists = false;
+    try { lstatSync(join(this.dir, file)); exists = true; } catch { /* absent */ }
+    if (exists) return `${file} already exists; nothing was written`;
+    const twin = this.notes().find((other) => foldName(other) === foldName(name));
+    return twin ? `"${name}" differs from the existing note "${twin}" only by case or accents` : null;
   }
 
   /** Validates candidates against the committed text and stores them as proposed. */
@@ -493,10 +576,21 @@ export class Project {
     const file = this.scenePath(edit.file);
     const path = this.sceneFile(file);
     if (path === null) throw new SceneNotFoundError(file);
+    return this.editFile(file, path, edit);
+  }
+
+  /** A person's own edit of a note, with the same rules as editScene. */
+  editNote(edit: NoteEdit): { file: string; blob: string; revision: string; changed: boolean } {
+    const path = this.noteFile(edit.name);
+    if (path === null) throw new NoteNotFoundError(edit.name);
+    return this.editFile(this.notePath(edit.name), path, edit);
+  }
+
+  private editFile(file: string, path: string, edit: { base_blob: string; text: string; by: string }): { file: string; blob: string; revision: string; changed: boolean } {
     checkSceneText(edit.text);
     const raw = readFileSync(path);
     if (!isExactUtf8(raw)) throw new SceneEditRefusal(`${file} is not valid UTF-8 text, so it cannot be edited here`);
-    if (this.git.isDirty(file)) throw new SceneEditRefusal(`${file} has uncommitted edits; commit them before editing the scene`);
+    if (this.git.isDirty(file)) throw new SceneEditRefusal(`${file} has uncommitted edits; commit them before editing it`);
     const current = raw.toString('utf8');
     const blob = this.git.blobOf(file);
     if (blob !== edit.base_blob) throw new SceneConflictError(file, current, blob);
@@ -514,11 +608,40 @@ export class Project {
     return { proposal, created: true };
   }
 
+  /**
+   * Stores a new note for review; it never writes the note. Accepting it creates the file, and only
+   * if no file has that name by then and no note differs from it only by case or accents.
+   */
+  proposeNote(input: NoteProposalInput): { proposal: Proposal; created: boolean } {
+    const clash = this.noteClash(input.name);
+    if (clash) throw new Error(clash.replace('; nothing was written', '; propose a change to it instead'));
+    checkSceneText(input.text);
+    const file = this.notePath(input.name);
+    const id = proposalId(file, '', '', input.text, 'create');
+    const existing = this.proposals.get(id);
+    if (existing) return { proposal: existing, created: false };
+    const proposal: Proposal = {
+      proposal_id: id,
+      file,
+      base_revision: this.git.head(),
+      base_blob: '',
+      find: '',
+      replace: input.text,
+      rationale: input.rationale,
+      ...(input.proposed_by ? { proposed_by: input.proposed_by } : {}),
+      creates: true,
+      status: 'proposed',
+      history: [],
+    };
+    this.saveRecords(`rewrite: propose ${id}`, [['proposals', id]], () => this.proposals.put(id, proposal));
+    return { proposal, created: true };
+  }
+
   /** Validates a change against the current committed text and builds its proposal, without storing it. */
   private buildProposal(input: ProposalInput): Proposal {
-    const file = this.scenePath(input.file);
-    const text = this.readScene(file);
-    if (text === null) throw new Error(`scene not found: ${file}`);
+    const file = this.textPath(input.file);
+    const text = this.readText(file);
+    if (text === null) throw new Error(`${NOTE_FILE.test(file) ? 'note' : 'scene'} not found: ${file}`);
     if (this.git.isDirty(file)) throw new Error(`${file} has uncommitted edits; commit them before proposing a change`);
     if (input.find.includes('\u0000') || input.replace.includes('\u0000')) {
       throw new Error('a proposal cannot contain NUL characters');
@@ -549,11 +672,11 @@ export class Project {
   showProposal(id: string): { proposal: Proposal & { result_commit?: string }; diff: string; applicable: boolean } {
     const proposal = this.proposals.get(id);
     if (!proposal) throw new Error(`unknown proposal: ${id}`);
-    const base = this.git.showAt(proposal.base_revision, proposal.file);
+    const base = proposal.creates ? '' : this.git.showAt(proposal.base_revision, proposal.file);
     if (base === null) throw new Error(`${proposal.file} not found at revision ${proposal.base_revision}`);
     const diff = this.git.diffTexts(
       base,
-      applyChange(base, proposal.find, proposal.replace),
+      proposal.creates ? proposal.replace : applyChange(base, proposal.find, proposal.replace),
       `${proposal.file} @ ${proposal.base_revision.slice(0, 10)}`,
       `${proposal.file} (proposed)`,
     );
@@ -561,7 +684,9 @@ export class Project {
     return {
       proposal: { ...proposal, ...(resultCommit ? { result_commit: resultCommit } : {}) },
       diff,
-      applicable: proposal.status === 'proposed' && this.git.blobOf(proposal.file) === proposal.base_blob,
+      applicable: proposal.status === 'proposed' && (proposal.creates
+        ? this.noteClash(NOTE_FILE.exec(proposal.file)![1]) === null
+        : this.git.blobOf(proposal.file) === proposal.base_blob),
     };
   }
 
@@ -583,8 +708,23 @@ export class Project {
       return { proposal, changed: true };
     }
 
+    if (proposal.creates) {
+      const name = NOTE_FILE.exec(proposal.file)?.[1] ?? '';
+      const clash = this.noteClash(name);
+      if (clash) throw new Error(clash);
+      checkSceneText(proposal.replace);
+      const dir = join(this.dir, NOTES_DIR);
+      if (existsSync(dir) && !this.isRegular(dir, 'directory')) throw new Error(`${NOTES_DIR} is not a directory; nothing was written`);
+      this.commitWrites(acceptSubject(id), [proposal.file, recordPath('proposals', id)], () => {
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(this.dir, proposal.file), proposal.replace, { flag: 'wx' });
+        this.proposals.put(id, proposal);
+      });
+      return { proposal, changed: true };
+    }
+
     const path = join(this.dir, proposal.file);
-    const current = this.readScene(proposal.file);
+    const current = this.readText(proposal.file);
     if (current === null || this.git.blobOf(proposal.file) !== proposal.base_blob) {
       throw new Error(`${proposal.file} changed since proposal ${id} was made; nothing was written`);
     }
@@ -623,6 +763,7 @@ export class Project {
     const proposal = this.proposals.get(id);
     if (!proposal) throw new Error(`unknown proposal: ${id}`);
     if (proposal.status !== 'accepted') throw new Error(`only an accepted proposal can be reverted; ${id} is ${proposal.status}`);
+    if (proposal.creates) throw new Error(NOTE_CREATED);
     const inverses = proposal.history.filter((entry) => entry.action === 'revert' && entry.ref).map((entry) => this.proposals.get(entry.ref!));
     // A live inverse proposal is the answer to any further revert: no new history entry, no commit.
     const live = inverses.find((inverse) => inverse?.status === 'proposed');
@@ -630,8 +771,8 @@ export class Project {
     if (inverses.some((inverse) => inverse?.status === 'accepted')) throw new Error(ALREADY_REVERTED);
     if (proposal.history.length !== expected) throw new StaleStateError();
 
-    const current = this.readScene(proposal.file);
-    if (current === null) throw new Error(`scene not found: ${proposal.file}`);
+    const current = this.readText(proposal.file);
+    if (current === null) throw new Error(`not found: ${proposal.file}`);
     if (this.git.isDirty(proposal.file)) throw new Error(`${proposal.file} has uncommitted edits; commit them before reverting a change`);
     const base = this.git.showAt(proposal.base_revision, proposal.file);
     const change = base === null ? null : inverseChange(base, proposal.find, proposal.replace, current);
@@ -662,6 +803,7 @@ export class Project {
   reproposeRevision(id: string, by: string): { proposal: Proposal; created: boolean } {
     const proposal = this.proposals.get(id);
     if (!proposal) throw new Error(`unknown proposal: ${id}`);
+    if (proposal.creates) throw new Error(NOTE_CREATED);
     const findingStillThere = proposal.finding_id && this.check().some((f) => f.finding_id === proposal.finding_id);
     const built = this.buildProposal({
       file: proposal.file,
