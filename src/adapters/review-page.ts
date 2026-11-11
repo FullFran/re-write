@@ -2160,6 +2160,13 @@ function graphList(book, onOpen, current) {
     }
   }
 
+  function markRow(id, on) {
+    const entry = id && st.rows.get(id);
+    if (!entry) return;
+    entry.pick.setAttribute('aria-pressed', String(on));
+    entry.row.classList.toggle('selected', on);
+  }
+
   // Up and Down move between the nodes of the table, Home and End to the first and the last.
   tbody.addEventListener('keydown', (event) => {
     const buttons = Array.from(tbody.getElementsByTagName('button'));
@@ -2284,10 +2291,13 @@ function graphList(book, onOpen, current) {
     const node = st.data && nodeById().get(id);
     if (!node) return;
     const changed = reveal(node);
+    const previous = st.selected;
     st.selected = id;
     if (changed || (st.drawing && st.scope === 'local')) refresh();
     else {
-      renderRows();
+      // Only the two rows whose mark changes are touched, so a large table answers at once.
+      markRow(previous, false);
+      markRow(id, true);
       renderDetail();
       // The drawing follows a frame later, so the table answers first on a slow machine.
       if (st.view) requestAnimationFrame(() => setTimeout(() => st.view && st.view.select(st.selected), 0));
