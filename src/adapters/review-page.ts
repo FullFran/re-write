@@ -1334,9 +1334,54 @@ function notionImportSection(book, onImported) {
 const SCENE_EDITOR_CLASS = 'scene-editor-text';
 let unsavedEdit = null;
 
+// What this tab keeps (scene drafts, the assistant's transcript) is keyed by a hash of the
+// signed-in person, so another person in the same tab never sees it; when the person
+// changes, what the tab kept for the previous one is removed. No person, nothing kept.
+let personKey = null;
+const PERSON_MARK = 'rewrite:person';
+const TAB_PREFIXES = ['rewrite:draft:', 'rewrite.assistant.'];
+
+function forgetTab(prefixes) {
+  try {
+    const store = window.sessionStorage;
+    const keys = [];
+    for (let i = 0; i < store.length; i++) {
+      const key = store.key(i);
+      if (key && prefixes.some((prefix) => key.startsWith(prefix))) keys.push(key);
+    }
+    for (const key of keys) store.removeItem(key);
+  } catch {
+    // No storage: nothing was kept.
+  }
+}
+
+async function rememberPerson() {
+  let key = null;
+  try {
+    const token = await window.Clerk.session.getToken();
+    const claims = JSON.parse(atob(String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    if (typeof claims.sub === 'string' && claims.sub) {
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('rewrite:person:' + claims.sub));
+      key = Array.from(new Uint8Array(digest).slice(0, 16), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    }
+  } catch {
+    key = null;
+  }
+  personKey = key;
+  try {
+    if (window.sessionStorage.getItem(PERSON_MARK) !== key) forgetTab(TAB_PREFIXES);
+    if (key) window.sessionStorage.setItem(PERSON_MARK, key);
+    else window.sessionStorage.removeItem(PERSON_MARK);
+  } catch {
+    // No storage: nothing to keep or to forget.
+  }
+  return key;
+}
+
 // The unsaved text survives a re-render or a reload of this tab, never the tab itself.
-function draftKey(book, file) { return 'rewrite:draft:' + book + ':' + file; }
+function draftKey(book, file) { return 'rewrite:draft:' + personKey + ':' + book + ':' + file; }
 function readDraft(book, file) {
+  if (!personKey) return null;
   try {
     const raw = window.sessionStorage.getItem(draftKey(book, file));
     return raw ? JSON.parse(raw) : null;
@@ -1345,6 +1390,7 @@ function readDraft(book, file) {
   }
 }
 function writeDraft(book, file, draft) {
+  if (!personKey) return;
   try {
     if (draft) window.sessionStorage.setItem(draftKey(book, file), JSON.stringify(draft));
     else window.sessionStorage.removeItem(draftKey(book, file));
@@ -1913,12 +1959,21 @@ window.addEventListener('load', async () => {
   try {
     await window.Clerk.load({ ui: { ClerkUI: window.__internal_ClerkUICtor } });
     if (!window.Clerk.isSignedIn) {
+      // Signed out: the assistant's transcript of whoever used this tab goes.
+      forgetTab(['rewrite.assistant.']);
       const box = el('div', undefined, 'sign-in');
       app.replaceChildren(box);
       window.Clerk.mountSignIn(box);
       return;
     }
     window.Clerk.mountUserButton(document.getElementById('user'));
+    await rememberPerson();
+    // Signing out (or another account) while the page is open.
+    if (window.Clerk.addListener) {
+      window.Clerk.addListener((resources) => {
+        if (resources && !resources.session) forgetTab(['rewrite.assistant.']);
+      });
+    }
     if (assistant) assistant.start();
     startRefresh();
     await renderApp();

@@ -13,7 +13,7 @@ import { decide, enforce, ForbiddenError } from '../application/decision.ts';
 import { TokenVerifier } from './auth.ts';
 import { ENGINE_HTTP_STATUS, EngineError, EngineManager, type EngineSettings } from './engine.ts';
 import { isDirectLoopback, looksLikeEngineToken, parseEngineKey } from './engine-auth.ts';
-import { ACTIVITY_SCENE } from './engine-protocol.ts';
+import { ACTIVITY_SCENE, EFFORTS, MAX_MODELS, MODEL_ID, type Effort } from './engine-protocol.ts';
 import { ASSISTANT_CSS, ASSISTANT_JS } from './engine-page.ts';
 import { llmsText } from './llms.ts';
 import { buildMcpServer, logMcpTransport } from './mcp.ts';
@@ -113,7 +113,17 @@ function readEngineSettings(env: Record<string, string | undefined>, dataDir: st
     idleMs: positive('REWRITE_ENGINE_IDLE_SECONDS', 300) * 1000,
     turnTimeoutMs: positive('REWRITE_ENGINE_TURN_SECONDS', 600) * 1000,
     turnMaxBytes: positive('REWRITE_ENGINE_TURN_MAX_BYTES', 2 * 1024 * 1024),
+    ...(env.REWRITE_ENGINE_MODELS === undefined ? {} : { allowedModels: parseModelAllowlist(env.REWRITE_ENGINE_MODELS) }),
   };
+}
+
+/** REWRITE_ENGINE_MODELS: comma-separated model ids. When set, only these may be used. */
+function parseModelAllowlist(value: string): string[] {
+  const ids = [...new Set(value.split(',').map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0 || ids.length > MAX_MODELS || ids.some((id) => !MODEL_ID.test(id))) {
+    throw new Error(`REWRITE_ENGINE_MODELS must be 1 to ${MAX_MODELS} comma-separated model ids`);
+  }
+  return ids;
 }
 
 /** Opens the line the host puts first in a writer's message to say what they are looking at. */
@@ -828,6 +838,26 @@ export function createHandler(
         return json(res, 200, { state: 'disconnected' });
       }
       if (route === 'POST abort') return json(res, 200, { aborted: manager.abort(subject) });
+      if (route === 'GET settings') return json(res, 200, await manager.assistantSettings(subject));
+      if (route === 'PUT settings') {
+        // Only `model` and `effort` are read; any other field is ignored.
+        const body = await readBody(req) as { model?: unknown; effort?: unknown } | null;
+        if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new HttpError(400, 'settings must be an object');
+        const change: { model?: string; effort?: Effort } = {};
+        if (body.model !== undefined) {
+          if (typeof body.model !== 'string' || !MODEL_ID.test(body.model)) throw new HttpError(400, 'model is not a model id');
+          change.model = body.model;
+        }
+        if (body.effort !== undefined) {
+          if (!(EFFORTS as readonly unknown[]).includes(body.effort)) throw new HttpError(400, `effort must be one of ${EFFORTS.join(', ')}`);
+          change.effort = body.effort as Effort;
+        }
+        return json(res, 200, await manager.saveSettings(subject, change));
+      }
+      if (route === 'POST reset') {
+        await manager.reset(subject);
+        return json(res, 200, { reset: true });
+      }
       if (route === 'POST prompt') {
         // Only `text` and `context` are read: the system prompt is host-owned and has no field here.
         const body = (await readBody(req) ?? {}) as { text?: unknown; context?: unknown };

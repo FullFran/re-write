@@ -10,7 +10,8 @@
 /** The only error texts that may reach a browser or a log. */
 export const ENGINE_ERROR_CODES = [
   'model_busy', 'reconnect', 'provider_error', 'busy', 'turn_in_progress',
-  'not_connected', 'engine_unavailable', 'login_failed', 'rate_limited', 'turn_limit',
+  'not_connected', 'engine_unavailable', 'login_failed', 'rate_limited', 'turn_limit', 'model_unavailable',
+  'settings_unavailable',
 ] as const;
 export type EngineErrorCode = typeof ENGINE_ERROR_CODES[number];
 
@@ -46,14 +47,77 @@ export function parseCredential(value: unknown): StoredCredential | null {
   return { access: c.access, refresh: c.refresh, expires: c.expires, accountId: c.accountId };
 }
 
+/**
+ * A model id as the provider names it (`gpt-5.1-codex`). Strict, so an id is never text:
+ * it starts with a letter or digit and has at most 64 characters.
+ */
+export const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+/** Most models the browser is offered; a longer list from the engine is cut. */
+export const MAX_MODELS = 32;
+/** A list longer than this is not a model list: the message is dropped. */
+const MAX_MODELS_RAW = 256;
+const MAX_MODEL_NAME = 64;
+
+/** The reasoning efforts the panel offers, as Pi's thinking levels. */
+export const EFFORTS = ['low', 'medium', 'high'] as const;
+export type Effort = typeof EFFORTS[number];
+export const DEFAULT_EFFORT: Effort = 'medium';
+
+/** One model of the writer's account, as the browser may see it. */
+export interface ModelInfo {
+  id: string;
+  /** The provider's display name: control and format characters removed, cut, never markup. */
+  name: string;
+  /** Whether the model takes a reasoning effort. */
+  reasoning: boolean;
+}
+
+const cleanName = (value: unknown, id: string): string => {
+  const name = typeof value === 'string' ? value.replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, '').trim().slice(0, MAX_MODEL_NAME) : '';
+  return name || id;
+};
+
+/**
+ * The models the engine program reports, reduced to ids that match `MODEL_ID`, a cleaned
+ * name and a flag; duplicates are dropped and the list is cut to `MAX_MODELS`. Null when
+ * the value is not a list at all.
+ */
+export function parseModelList(value: unknown): ModelInfo[] | null {
+  if (!Array.isArray(value) || value.length > MAX_MODELS_RAW) return null;
+  const out: ModelInfo[] = [];
+  for (const entry of value) {
+    if (out.length >= MAX_MODELS) break;
+    const m = entry as { id?: unknown; name?: unknown; reasoning?: unknown } | null;
+    if (typeof m !== 'object' || m === null || typeof m.id !== 'string' || !MODEL_ID.test(m.id)) continue;
+    if (out.some((known) => known.id === m.id)) continue;
+    out.push({ id: m.id, name: cleanName(m.name, m.id), reasoning: m.reasoning === true });
+  }
+  return out;
+}
+
+/**
+ * The model a turn uses: the wanted one if the account offers it and the allowlist allows
+ * it, else the first allowed one; undefined when nothing is allowed. The allowlist is
+ * applied here, at the point of use, whatever list the caller cached before it knew it.
+ */
+export function selectModel<T extends { id: string }>(models: readonly T[], allowed: readonly string[] | undefined, wanted: string | undefined): T | undefined {
+  const usable = allowed ? models.filter((model) => allowed.includes(model.id)) : models;
+  return usable.find((model) => model.id === wanted) ?? usable[0];
+}
+
 export type ParentMessage =
-  | { type: 'start'; mcpUrl: string; mcpToken: string; systemPrompt: string }
+  /** `allowedModels`: the operator's allowlist; the engine program uses no model outside it. */
+  | { type: 'start'; mcpUrl: string; mcpToken: string; systemPrompt: string; allowedModels?: string[] }
   | { type: 'login.start' }
   | { type: 'login.cancel' }
   | { type: 'refresh'; id: string; credential: StoredCredential }
   | { type: 'token'; id: string; access?: string; accountId?: string; expires?: number; error?: EngineErrorCode }
   /** `context` is the host's first line for this turn; the writer's text never comes before it. */
-  | { type: 'prompt'; text: string; context?: string }
+  | { type: 'prompt'; text: string; context?: string; model?: string; effort?: Effort }
+  /** Lists the account's models; answered by `models` or `models.failed` with the same id. */
+  | { type: 'models.get'; id: string }
+  /** Clears the conversation's history; answered by `reset.done`. */
+  | { type: 'reset' }
   | { type: 'abort' }
   | { type: 'shutdown' };
 
@@ -132,7 +196,11 @@ export type ChildMessage =
   | { type: 'delta'; text: string }
   | ToolMessage
   | { type: 'done'; aborted: boolean }
-  | { type: 'error'; code: EngineErrorCode };
+  | { type: 'error'; code: EngineErrorCode }
+  /** With an id it answers `models.get`; without one a turn reports the list it chose from. */
+  | { type: 'models'; id?: string; models: ModelInfo[]; current?: string }
+  | { type: 'models.failed'; id: string; code: EngineErrorCode }
+  | { type: 'reset.done' };
 
 export function encode(message: ParentMessage | ChildMessage): string {
   return `${JSON.stringify(message)}\n`;
@@ -186,6 +254,19 @@ export function parseChildMessage(value: unknown): ChildMessage | null {
       return { type: 'done', aborted: m.aborted === true };
     case 'error':
       return { type: 'error', code: toErrorCode(m.code) };
+    case 'models': {
+      const models = parseModelList(m.models);
+      // A list that is not one fails the request it answers at once, rather than at the timeout.
+      if (!models) return id ? { type: 'models.failed', id, code: 'engine_unavailable' } : null;
+      return {
+        type: 'models', ...(id ? { id } : {}), models,
+        ...(typeof m.current === 'string' && MODEL_ID.test(m.current) ? { current: m.current } : {}),
+      };
+    }
+    case 'models.failed':
+      return id ? { type: 'models.failed', id, code: toErrorCode(m.code) } : null;
+    case 'reset.done':
+      return { type: 'reset.done' };
     default:
       return null;
   }

@@ -56,6 +56,7 @@ The server never imports the Pi packages. They live in `engine/`, are installed 
 | `REWRITE_ENGINE_IDLE_SECONDS` | `300` | An engine process with no turn and no pending login for this long is stopped |
 | `REWRITE_ENGINE_TURN_SECONDS` | `600` | Longest one turn may run. Past it the turn ends with `turn_limit` |
 | `REWRITE_ENGINE_TURN_MAX_BYTES` | `2097152` | Most answer text one turn may stream. Past it the turn ends with `turn_limit` |
+| `REWRITE_ENGINE_MODELS` | unset | Optional allowlist: comma-separated model ids (at most 32, each letters, digits, `.`, `_`, `:` and `-`, up to 64 characters). When set, writers are offered and may use only these, in the account's order; when unset, every model of their account. A malformed list stops the server at start |
 
 The engine process reaches the server at `http://127.0.0.1:$PORT/mcp`.
 
@@ -66,9 +67,11 @@ The engine process reaches the server at `http://127.0.0.1:$PORT/mcp`.
 1. The review page has an **Asistente** button in its header and a floating one. It opens a side panel on wide screens and a bottom sheet on phones, over the same page: nothing reloads and the page keeps its place and its refresh. `/review/engine`, the old address, redirects to `/review?asistente=1`, which opens the panel.
 2. Not connected, the panel asks them to connect ChatGPT, then shows a code and a link to `https://auth.openai.com/codex/device`. They sign in there and type the code. Nothing travels from their browser to the server in this step; the server polls OpenAI.
 3. Connected, the panel offers a few quick questions that only fill the prompt. The book selected in the page is sent with every turn, and **Preguntar al asistente** on a proposal, finding or claim adds that item (see [Page context](#page-context)). Answers stream in with paragraphs, lists, quotes and emphasis, built as elements from text. Each tool call shows as a step while it runs and after (`Leyendo escena 3…`, `Propuestos 2 hallazgos`, `Error: …`). When the assistant proposed something, the panel waits for the page's next refresh and offers **Ver en la página**, which scrolls to the new card.
-4. "Desconectar ChatGPT" deletes the stored credential, stops their engine process and revokes its token.
+4. **Ajustes** in the panel header opens a section inside the panel with the model, the reasoning effort, **Nueva conversación** and **Desconectar ChatGPT**. "Desconectar ChatGPT" deletes the stored credential, stops their engine process and revokes its token.
 
-The model is the first one OpenAI lists for the account; there is no model picker. The conversation is kept in the memory of the engine process only: it is lost when the process stops (idle, disconnect, restart) and is never written to disk.
+**Model and effort.** The panel offers the models OpenAI lists for the writer's account, with the names and in the order the provider gives (after `REWRITE_ENGINE_MODELS`, when set). Until the writer picks one, the first is used. The reasoning effort is **Rápido**, **Equilibrado** (the default) or **A fondo**, Pi's thinking levels `low`, `medium` and `high`; Pi clamps a level to what the model supports, and a model without reasoning ignores it. A choice applies from the next turn and is remembered per person on the server, in `$REWRITE_DATA_DIR/engine/settings/` (one small JSON file per person, named by a hash of the subject, holding only the model id and the effort; it is not a secret and is kept apart from the credential vault, and a disconnect does not remove it). The list is asked of the person's engine process (which starts one if none runs) and reused for an hour.
+
+**Conversation.** The model's conversation lives in the memory of the engine process only: it is lost when the process stops (idle, disconnect, restart, the 60-minute limit) and is never written to disk. **Nueva conversación** clears that history in the running process (Pi starts a new, empty session; the process, the connection, the model and the effort stay) and touches no other writer's process. What the writer saw (their messages, the answers as shown and the step labels) is kept in the browser's `sessionStorage`, per person and per book, so a reload of the page shows it again; it never goes to the server. The person part of the key is a hash of the session's subject, never the subject itself, and without one nothing is kept. It is cleared by **Nueva conversación**, by disconnecting, by closing the tab, by a 401 from the engine routes, by signing out, and when another person signs in in the same tab (which also clears that tab's scene drafts, keyed the same way). When the page shows an earlier conversation but the engine process no longer holds it, the panel says the assistant does not remember the earlier messages and offers **Nueva conversación**.
 
 ## Routes
 
@@ -77,11 +80,14 @@ All under the browser session, like the review API. An agent's access token and 
 | Route | Answer |
 | --- | --- |
 | `GET /review/engine` | 302 to `/review?asistente=1`. The panel is served with the review page: `/review/app.js` and `/review/app.css` carry it when the engine is on |
-| `GET /review/api/engine/status` | `{state}`: `disconnected`, `pending` (with `user_code` and `verification_uri`), `connected` or `reconnect` |
+| `GET /review/api/engine/status` | `{state}`: `disconnected`, `pending` (with `user_code` and `verification_uri`), `connected` or `reconnect`. `connected` has `conversation: true` while an engine process holds this person's conversation |
 | `POST /review/api/engine/login` | Starts a device login: `{user_code, verification_uri, expires_in}`. One pending login per person; a new one cancels the previous. At most 3 starts per person in 15 minutes, then `rate_limited` |
 | `DELETE /review/api/engine/credential` | Disconnects |
 | `POST /review/api/engine/prompt` `{text, context?}` | `text/event-stream` with `delta {text}`, `tool {name, phase, ok?, call?, scene?, count?}`, then `done {aborted}` or `error {code}`. See [Page context](#page-context) and [Tool activity](#tool-activity) |
 | `POST /review/api/engine/abort` | `{aborted}`: stops the running turn of this person |
+| `GET /review/api/engine/settings` | `{models: [{id, name, reasoning}], model, effort, efforts}`. `model` is what the next turn uses (null when no model is allowed). Needs a connected account (`not_connected`) |
+| `PUT /review/api/engine/settings` `{model?, effort?}` | Remembers either or both and answers like `GET`. Only these two fields are read. A model id of the wrong shape or an unknown effort is 400; a model not in the person's list is 400 `model_unavailable` and never reaches the engine process |
+| `POST /review/api/engine/reset` | `{reset: true}`: clears the conversation's history. `turn_in_progress` during a turn. An engine process that does not confirm within the reply timeout is stopped, which clears it too |
 
 ### Page context
 
@@ -103,7 +109,11 @@ A `tool` event is a step of one tool call: `phase` is `start` or `end` (`ok` on 
 
 A person who can use no book gets 404 on every one of these, as if the engine were off: create or be given a book first.
 
-Errors are a closed set of codes and nothing else: `model_busy`, `reconnect`, `provider_error`, `busy`, `rate_limited`, `turn_in_progress`, `turn_limit`, `not_connected`, `engine_unavailable`, `login_failed`. Provider error text can quote response bodies, so it never reaches a response or a log.
+Errors are a closed set of codes and nothing else: `model_busy`, `reconnect`, `provider_error`, `busy`, `rate_limited`, `turn_in_progress`, `turn_limit`, `not_connected`, `engine_unavailable`, `login_failed`, `model_unavailable`, `settings_unavailable` (500: the settings file could not be written).
+
+### Model list
+
+The engine program lists the account's models through Pi (`ModelRuntime.refresh` and `getAvailable`, which ask `{base}/models` of the writer's OpenAI login) and fails closed if any model of another provider appears. It reports them as `models {models: [{id, name, reasoning}]}`, once when asked (`models.get`) and once after the first turn of a process chose a model. The server parses the list again: an id must match `^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$` or its entry is dropped, duplicates go, the name loses control and invisible format characters and is cut at 64 characters (the id stands in when there is none), and the list is cut at 32 entries; a list of more than 256 entries, or not a list, fails the request it answers at once with `engine_unavailable` (503). The browser renders names as text. Each turn tells the engine program which model and effort to use; it applies them with Pi's `AgentSession.setModel` and `setThinkingLevel`, and falls back to the first allowed model when the requested one is gone. With `REWRITE_ENGINE_MODELS` set, the engine program also gets the allowlist and applies it when it picks the model for a turn, whatever list it cached before (a list asked for before the first turn is fetched again), so it never uses a model outside it (`model_unavailable` when the account has none of them). Provider error text can quote response bodies, so it never reaches a response or a log.
 
 ## Security boundaries
 
@@ -129,7 +139,8 @@ Tests run against a fake engine process and call no provider. The real engine pr
 - that OpenAI accepts this login from a server address, and under the client name Pi presents;
 - the refresh exchange with a real rotating refresh token;
 - a real model request: streaming over the SSE transport, tool calls reaching `/mcp`, the answer arriving in the page;
-- the model list of a real account, and that its first entry is the right default;
+- the model list of a real account (ids, names, which models report reasoning), that its first entry is the right default, and that switching models and thinking levels mid-conversation is accepted by OpenAI;
+- that clearing a session's history in place (`SessionManager.newSession` and `refreshContext`) leaves a real conversation empty for the model;
 - which error texts a real 429, 503 or expired login produce, and so whether they map to `model_busy` and `reconnect` rather than `provider_error`;
 - abort during a real model request;
 - memory and latency under real use, and the image built with `WITH_ENGINE=1`.

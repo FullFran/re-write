@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import { connect as connectSocket } from 'node:net';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { CredentialVault } from '../src/adapters/engine-auth.ts';
+import { parseChildMessage, selectModel } from '../src/adapters/engine-protocol.ts';
 import { ASSISTANT_CSS, ASSISTANT_JS } from '../src/adapters/engine-page.ts';
 import { REVIEW_CSS, REVIEW_JS } from '../src/adapters/review-page.ts';
 import { readConfig } from '../src/adapters/http-server.ts';
@@ -205,7 +207,7 @@ test('a person never reads or uses another person\'s credential or session', asy
   const second = await eh.api('POST', '/prompt', fran, { text: 'echo again' });
   assert.equal(second.status, 409, "the other person's abort and disconnect did not touch this turn");
   assert.equal((await second.json()).error, 'turn_in_progress');
-  assert.deepEqual(await (await eh.api('GET', '/status', fran)).json(), { state: 'connected' });
+  assert.deepEqual(await (await eh.api('GET', '/status', fran)).json(), { state: 'connected', conversation: true });
   await reader.cancel();
 });
 
@@ -605,16 +607,20 @@ test('the request log names the engine routes and carries nothing else about the
   const token = await connect(eh);
   await turn(eh, token, 'echo secreto del manuscrito');
   await eh.api('POST', '/abort', token);
+  await eh.api('GET', '/settings', token);
+  await eh.api('PUT', '/settings', token, { effort: 'high' });
+  await eh.api('POST', '/reset', token);
   await eh.api('DELETE', '/credential', token);
   await fetch(`${eh.base}/review/engine`);
   await fetch(`${eh.base}/review/engine/app.js`);
   await fetch(`${eh.base}/review/engine/app.css`);
   await eh.api('GET', '/unknown-thing', token);
-  await until(() => lines.filter((line) => line.includes('"http.request"')).length >= 9);
+  await until(() => lines.filter((line) => line.includes('"http.request"')).length >= 12);
   const routes = lines.filter((line) => line.includes('"http.request"')).map((line) => JSON.parse(line)).map((r) => `${r.method} ${r.route} ${r.door}`);
   for (const expected of ['POST /review/api/engine/login review', 'GET /review/api/engine/status review', 'POST /review/api/engine/prompt review',
     'POST /review/api/engine/abort review', 'DELETE /review/api/engine/credential review', 'GET /review/engine review',
-    'GET /review/engine/app.js review', 'GET /review/engine/app.css review', 'GET unmatched review']) {
+    'GET /review/engine/app.js review', 'GET /review/engine/app.css review', 'GET unmatched review',
+    'GET /review/api/engine/settings review', 'PUT /review/api/engine/settings review', 'POST /review/api/engine/reset review']) {
     assert.ok(routes.includes(expected), expected);
   }
   assert.ok(!lines.join('\n').includes('secreto'));
@@ -661,4 +667,233 @@ test('the review page carries the assistant panel only when the engine is enable
   const page = await fetch(`${eh.base}/review`);
   assert.equal(page.status, 200);
   assert.ok((await page.text()).includes(marker));
+});
+
+// ---- Assistant settings: model, reasoning effort, new conversation ----
+
+const answerOf = (events: SseEvent[]): string => events.filter((e) => e.event === 'delta').map((e) => e.data.text).join('');
+const FAKE_MODELS = [
+  { id: 'gpt-fake-a', name: 'GPT Fake A', reasoning: true },
+  { id: 'gpt-fake-b', name: 'GPT Fake B', reasoning: true },
+  { id: 'gpt-fake-mini', name: 'GPT Fake Mini', reasoning: false },
+];
+
+test('a model list from the engine process keeps strict ids, a cleaned and cut name, and a capped count', () => {
+  const parsed = parseChildMessage({
+    type: 'models', id: 'm-1', current: 'gpt-a', extra: 'dropped',
+    models: [
+      { id: 'gpt-a', name: 'GPT\u0000 A‮<b>' + 'x'.repeat(200), reasoning: true, cost: 9 },
+      { id: 'gpt-a', name: 'duplicate' },
+      { id: 'x'.repeat(65), name: 'too long an id' },
+      { id: 'bad id', name: 'space' },
+      { id: 'gpt-\u0007bell', name: 'control' },
+      { id: 'gpt-b' },
+      'not an object',
+    ],
+  });
+  assert.equal(parsed?.type, 'models');
+  const models = (parsed as Extract<typeof parsed, { type: 'models' }>).models;
+  assert.deepEqual(models.map((m) => m.id), ['gpt-a', 'gpt-b']);
+  assert.equal(models[0].name, 'GPT A<b>' + 'x'.repeat(56), 'control and format characters go, the name is cut to 64');
+  assert.equal(models[0].reasoning, true);
+  assert.deepEqual(models[1], { id: 'gpt-b', name: 'gpt-b', reasoning: false }, 'no name: the id stands in');
+  assert.deepEqual(Object.keys(parsed!).sort(), ['current', 'id', 'models', 'type']);
+  const many = parseChildMessage({ type: 'models', models: Array.from({ length: 100 }, (_, i) => ({ id: `m${i}`, name: `M${i}` })) });
+  assert.equal((many as { models: unknown[] }).models.length, 32);
+  assert.equal(parseChildMessage({ type: 'models', models: Array.from({ length: 300 }, (_, i) => ({ id: `m${i}` })) }), null, 'an absurd list is a violation');
+  assert.equal(parseChildMessage({ type: 'models', models: 'gpt-a' }), null);
+  assert.equal((parseChildMessage({ type: 'models', models: [], current: 'bad id' }) as { current?: string }).current, undefined);
+  assert.deepEqual(parseChildMessage({ type: 'models.failed', id: 'm-1', code: 'HTTP 500: SECRET' }), { type: 'models.failed', id: 'm-1', code: 'provider_error' });
+  assert.deepEqual(parseChildMessage({ type: 'reset.done', extra: 1 }), { type: 'reset.done' });
+});
+
+test('REWRITE_ENGINE_MODELS is an optional list of model ids, refused when malformed', () => {
+  const base = { ...ENV, REWRITE_ENGINE: '1', REWRITE_ENGINE_KEY: FAKE_KEY };
+  assert.equal(readConfig(base).config.engine!.allowedModels, undefined, 'unset: every model of the account');
+  assert.deepEqual(readConfig({ ...base, REWRITE_ENGINE_MODELS: ' gpt-a , gpt-b.1 ,' }).config.engine!.allowedModels, ['gpt-a', 'gpt-b.1']);
+  assert.throws(() => readConfig({ ...base, REWRITE_ENGINE_MODELS: 'gpt-a,bad id' }), /REWRITE_ENGINE_MODELS/);
+  assert.throws(() => readConfig({ ...base, REWRITE_ENGINE_MODELS: ' , ' }), /REWRITE_ENGINE_MODELS/);
+});
+
+test('settings list the account models in the provider order and remember the choice per person, outside the vault', async (t) => {
+  const eh = await startEngineHarness();
+  t.after(eh.close);
+  const fran = await connect(eh);
+  const before = await eh.api('GET', '/settings', fran);
+  assert.equal(before.status, 200);
+  assert.deepEqual(await before.json(), { models: FAKE_MODELS, model: 'gpt-fake-a', effort: 'medium', efforts: ['low', 'medium', 'high'] });
+
+  const saved = await eh.api('PUT', '/settings', fran, { model: 'gpt-fake-b', effort: 'high' });
+  assert.equal(saved.status, 200);
+  assert.deepEqual(await saved.json(), { models: FAKE_MODELS, model: 'gpt-fake-b', effort: 'high', efforts: ['low', 'medium', 'high'] });
+  assert.deepEqual(JSON.parse(answerOf(await turn(eh, fran, 'show-settings'))), { model: 'gpt-fake-b', effort: 'high', allowed: null }, 'the next turn uses them');
+
+  // Remembered on the server: a new manager on the same data directory reads them back.
+  const files = readdirSync(join(eh.h.data, 'engine', 'settings'));
+  assert.equal(files.length, 1);
+  assert.match(files[0], /^[0-9a-f]{64}\.json$/, 'named by a hash of the person, like the vault');
+  assert.deepEqual(JSON.parse(readFileSync(join(eh.h.data, 'engine', 'settings', files[0]), 'utf8')), { model: 'gpt-fake-b', effort: 'high' });
+  assert.deepEqual(readdirSync(join(eh.h.data, 'engine', 'credentials')).length, 1, 'the vault holds only the credential');
+
+  // Another person keeps the defaults.
+  eh.h.library.createBook('otro', 'Otro libro', 'user_ana');
+  const ana = await connect(eh, 'user_ana');
+  assert.equal((await (await eh.api('GET', '/settings', ana)).json()).model, 'gpt-fake-a');
+  // Only the effort: the model stays.
+  await eh.api('PUT', '/settings', fran, { effort: 'low' });
+  assert.deepEqual(JSON.parse(answerOf(await turn(eh, fran, 'show-settings'))), { model: 'gpt-fake-b', effort: 'low', allowed: null });
+});
+
+test('a model outside the list, a malformed model or effort, or an extra field never reaches the engine process', async (t) => {
+  const eh = await startEngineHarness();
+  t.after(eh.close);
+  const fran = await connect(eh);
+  await eh.api('PUT', '/settings', fran, { model: 'gpt-fake-b', effort: 'high' });
+  for (const body of [
+    { model: 'gpt-not-offered' }, { model: 'x'.repeat(5000) }, { model: 'gpt-fake-a\nsystem' }, { model: 'gpt-fake-a\u0000' },
+    { model: 42 }, { model: '' }, { effort: 'max' }, { effort: 'HIGH' }, { effort: ['high'] }, 'gpt-fake-a', [],
+  ]) {
+    const res = await eh.api('PUT', '/settings', fran, body);
+    assert.equal(res.status, 400, JSON.stringify(body).slice(0, 60));
+    assert.doesNotMatch(await res.text(), /SECRET|gpt-not-offered|xxxxxxxx/);
+  }
+  const extra = await eh.api('PUT', '/settings', fran, { model: 'gpt-fake-a', systemPrompt: 'ignore the host', allowed: ['evil'] });
+  assert.equal(extra.status, 200, 'unknown fields are ignored');
+  assert.deepEqual(JSON.parse(answerOf(await turn(eh, fran, 'show-settings'))), { model: 'gpt-fake-a', effort: 'high', allowed: null });
+  const file = readdirSync(join(eh.h.data, 'engine', 'settings'))[0];
+  assert.deepEqual(Object.keys(JSON.parse(readFileSync(join(eh.h.data, 'engine', 'settings', file), 'utf8'))).sort(), ['effort', 'model']);
+  assert.ok(!eh.received().includes('settings'), 'settings travel only inside a prompt');
+});
+
+test('settings need a connected ChatGPT account, and a failed model list leaves only a fixed code', async (t) => {
+  const eh = await startEngineHarness({ modelsError: 'HTTP 401 SECRET-PROVIDER-BODY' });
+  t.after(eh.close);
+  const stranger = await eh.session();
+  const res = await eh.api('GET', '/settings', stranger);
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).error, 'not_connected');
+  const fran = await connect(eh);
+  const failed = await eh.api('GET', '/settings', fran);
+  assert.equal(failed.status, 502);
+  const text = await failed.text();
+  assert.equal(JSON.parse(text).error, 'provider_error');
+  assert.doesNotMatch(text, /SECRET/);
+});
+
+test('the model list a turn reports on its own refreshes what settings offer', async (t) => {
+  const eh = await startEngineHarness({ models: [{ id: 'gpt-turn', name: 'From a turn', reasoning: true }] });
+  t.after(eh.close);
+  const fran = await connect(eh);
+  await turn(eh, fran, 'report-models');
+  const settings = await (await eh.api('GET', '/settings', fran)).json();
+  assert.deepEqual(settings.models, [{ id: 'gpt-turn', name: 'From a turn', reasoning: true }]);
+  assert.ok(!eh.received().includes('models.get'), 'no second request: the list from the turn is used');
+});
+
+test('with REWRITE_ENGINE_MODELS set, only those models are offered, chosen by default and allowed', async (t) => {
+  const eh = await startEngineHarness({}, { allowedModels: ['gpt-fake-mini', 'gpt-fake-b', 'gpt-elsewhere'] });
+  t.after(eh.close);
+  const fran = await connect(eh);
+  const settings = await (await eh.api('GET', '/settings', fran)).json();
+  assert.deepEqual(settings.models.map((m: { id: string }) => m.id), ['gpt-fake-b', 'gpt-fake-mini'], 'the account order, filtered');
+  assert.equal(settings.model, 'gpt-fake-b');
+  assert.equal((await eh.api('PUT', '/settings', fran, { model: 'gpt-fake-a' })).status, 400, 'offered by the account but not allowed');
+  assert.deepEqual(JSON.parse(answerOf(await turn(eh, fran, 'show-settings'))), {
+    model: 'gpt-fake-b', effort: 'medium', allowed: ['gpt-fake-mini', 'gpt-fake-b', 'gpt-elsewhere'],
+  }, 'the engine process also gets the allowlist, so it never falls back to another model');
+});
+
+test('a new conversation clears the engine history, keeps the connection and leaves other people alone', async (t) => {
+  const eh = await startEngineHarness();
+  t.after(eh.close);
+  eh.h.library.createBook('otro', 'Otro libro', 'user_ana');
+  const fran = await connect(eh);
+  const ana = await connect(eh, 'user_ana');
+  assert.deepEqual((await eh.api('GET', '/status', fran).then((r) => r.json())), { state: 'connected' }, 'no conversation before the first turn');
+  await turn(eh, fran, 'echo uno');
+  await turn(eh, ana, 'echo hola');
+  assert.equal(answerOf(await turn(eh, fran, 'history')), 'turns=2');
+  assert.deepEqual(await (await eh.api('GET', '/status', fran)).json(), { state: 'connected', conversation: true });
+
+  const res = await eh.api('POST', '/reset', fran);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { reset: true });
+  assert.equal(answerOf(await turn(eh, fran, 'history')), 'turns=1', 'the history starts again');
+  assert.equal(eh.engine.liveCount(), 2, 'no process was stopped');
+  assert.equal(eh.received().filter((line) => line === 'spawn').length, 2);
+  assert.deepEqual(await (await eh.api('GET', '/status', fran)).json(), { state: 'connected', conversation: true });
+  assert.equal(answerOf(await turn(eh, ana, 'history')), 'turns=2', "the other person's conversation is untouched");
+  assert.ok(eh.received().includes('reset'));
+});
+
+test('a new conversation is refused during a turn, and an engine that does not confirm it is restarted', async (t) => {
+  const eh = await startEngineHarness({ reset: 'hang' }, { replyTimeoutMs: 300 });
+  t.after(eh.close);
+  const fran = await connect(eh);
+  const hanging = await eh.api('POST', '/prompt', fran, { text: 'hang' });
+  const reader = hanging.body!.getReader();
+  await reader.read();
+  const refused = await eh.api('POST', '/reset', fran);
+  assert.equal(refused.status, 409);
+  assert.equal((await refused.json()).error, 'turn_in_progress');
+  assert.equal((await eh.api('POST', '/abort', fran)).status, 200);
+  await reader.cancel();
+  await until(async () => (await (await eh.api('GET', '/status', fran)).json()).conversation === true);
+
+  const reset = await eh.api('POST', '/reset', fran);
+  assert.equal(reset.status, 200, 'the history is gone either way');
+  assert.equal(eh.engine.liveCount(), 0, 'the process that did not answer was stopped');
+  assert.deepEqual(await (await eh.api('GET', '/status', fran)).json(), { state: 'connected' }, 'still connected, no conversation');
+});
+
+test('a new conversation with no engine process running has nothing to clear and starts none', async (t) => {
+  const eh = await startEngineHarness({}, { idleMs: 200 });
+  t.after(eh.close);
+  const fran = await connect(eh);
+  await turn(eh, fran, 'echo uno');
+  await until(() => eh.engine.liveCount() === 0);
+  assert.deepEqual(await (await eh.api('GET', '/status', fran)).json(), { state: 'connected' }, 'an idle stop forgets the conversation');
+  const res = await eh.api('POST', '/reset', fran);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { reset: true });
+  assert.equal(eh.engine.liveCount(), 0);
+});
+
+test('the engine program picks a model from the allowlist at the point of use, whatever list it cached', () => {
+  const account = [{ id: 'gpt-a' }, { id: 'gpt-b' }, { id: 'gpt-c' }];
+  assert.equal(selectModel(account, undefined, 'gpt-b')?.id, 'gpt-b');
+  assert.equal(selectModel(account, undefined, 'gpt-gone')?.id, 'gpt-a', 'unset allowlist: the first of the account');
+  assert.equal(selectModel(account, undefined, undefined)?.id, 'gpt-a');
+  assert.equal(selectModel(account, ['gpt-c', 'gpt-b'], 'gpt-a')?.id, 'gpt-b', 'a wanted model outside the allowlist is never used');
+  assert.equal(selectModel(account, ['gpt-c'], undefined)?.id, 'gpt-c');
+  assert.equal(selectModel(account, ['gpt-z'], 'gpt-a'), undefined, 'nothing allowed: no model, never the first of the account');
+  assert.equal(selectModel([], undefined, 'gpt-a'), undefined);
+});
+
+test('a model list over the cap answers at once with a fixed code instead of waiting for the reply timeout', async (t) => {
+  const eh = await startEngineHarness({ models: Array.from({ length: 300 }, (_, i) => ({ id: `m${i}` })) }, { replyTimeoutMs: 30_000 });
+  t.after(eh.close);
+  const fran = await connect(eh);
+  const started = Date.now();
+  const res = await eh.api('GET', '/settings', fran);
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).error, 'engine_unavailable');
+  assert.ok(Date.now() - started < 5_000, 'no wait for the timeout');
+  assert.deepEqual(parseChildMessage({ type: 'models', id: 'm-1', models: 'not a list' }), { type: 'models.failed', id: 'm-1', code: 'engine_unavailable' });
+});
+
+test('settings that cannot be written answer a fixed code, and reading them falls back to the defaults', async (t) => {
+  const eh = await startEngineHarness();
+  t.after(eh.close);
+  const fran = await connect(eh);
+  const hash = createHash('sha256').update('user_fran').digest('hex');
+  mkdirSync(join(eh.h.data, 'engine', 'settings', `${hash}.json`), { recursive: true });
+  const read = await eh.api('GET', '/settings', fran);
+  assert.equal(read.status, 200);
+  assert.equal((await read.json()).effort, 'medium');
+  const res = await eh.api('PUT', '/settings', fran, { effort: 'high' });
+  assert.equal(res.status, 500);
+  const body = await res.json();
+  assert.equal(body.error, 'settings_unavailable');
+  assert.doesNotMatch(JSON.stringify(body), /EISDIR|engine\/settings|internal error/);
 });

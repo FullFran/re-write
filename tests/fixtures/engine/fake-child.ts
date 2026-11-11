@@ -16,6 +16,11 @@ const scenario: {
   refreshDelayMs?: number;
   tools?: string[];
   stderr?: string;
+  /** What `models.get` answers: a list as the child sends it, or a fixed failure code. */
+  models?: unknown;
+  modelsError?: string;
+  /** `hang` leaves a reset unanswered. */
+  reset?: 'ok' | 'hang';
 } = JSON.parse(readFileSync(join(dir, 'scenario.json'), 'utf8'));
 
 const record = (line: string) => appendFileSync(join(dir, 'received.log'), `${line}\n`);
@@ -27,7 +32,14 @@ writeFileSync(join(dir, 'pid.txt'), String(process.pid));
 if (scenario.stderr) process.stderr.write(`${scenario.stderr}\n`);
 send({ type: 'ready', piVersion: '0.0.0-fake' });
 
-let start: { mcpUrl: string; mcpToken: string; systemPrompt: string } | undefined;
+let start: { mcpUrl: string; mcpToken: string; systemPrompt: string; allowedModels?: string[] } | undefined;
+/** Turns since the process started or since the last reset: the conversation's length. */
+let history = 0;
+const DEFAULT_MODELS = [
+  { id: 'gpt-fake-a', name: 'GPT Fake A', reasoning: true },
+  { id: 'gpt-fake-b', name: 'GPT Fake B', reasoning: true },
+  { id: 'gpt-fake-mini', name: 'GPT Fake Mini', reasoning: false },
+];
 let sessionSent = false;
 let loginTimer: NodeJS.Timeout | undefined;
 let hanging = false;
@@ -52,7 +64,8 @@ async function mcp(method: string, params: object): Promise<any> {
   return { status: res.status, body: res.status === 200 ? await res.json() : null };
 }
 
-async function prompt(text: string): Promise<void> {
+async function prompt(text: string, message: { model?: string; effort?: string }): Promise<void> {
+  history += 1;
   if (!sessionSent) {
     sessionSent = true;
     send({ type: 'session', tools: scenario.tools ?? ['mcp__rewrite__list_books', 'mcp__rewrite__read_scene'] });
@@ -60,6 +73,19 @@ async function prompt(text: string): Promise<void> {
   if (text.startsWith('echo ')) {
     send({ type: 'delta', text: text.slice(5) });
     send({ type: 'tool', name: 'mcp__rewrite__list_books', ok: true });
+    return send({ type: 'done' });
+  }
+  if (text === 'show-settings') {
+    send({ type: 'delta', text: JSON.stringify({ model: message.model ?? null, effort: message.effort ?? null, allowed: start?.allowedModels ?? null }) });
+    return send({ type: 'done' });
+  }
+  if (text === 'history') {
+    send({ type: 'delta', text: `turns=${history}` });
+    return send({ type: 'done' });
+  }
+  if (text === 'report-models') {
+    // A turn reports the account's models on its own, as the engine program does after choosing one.
+    send({ type: 'models', models: scenario.models ?? DEFAULT_MODELS, current: 'gpt-fake-b' });
     return send({ type: 'done' });
   }
   if (text === 'hang') {
@@ -142,7 +168,16 @@ process.stdin.on('data', (chunk) => {
         tokenWaiters.delete(message.id);
         break;
       case 'prompt':
-        void prompt(message.text);
+        void prompt(message.text, message);
+        break;
+      case 'models.get':
+        if (scenario.modelsError) send({ type: 'models.failed', id: message.id, code: scenario.modelsError, reason: 'SECRET-PROVIDER-BODY' });
+        else send({ type: 'models', id: message.id, models: scenario.models ?? DEFAULT_MODELS });
+        break;
+      case 'reset':
+        if (scenario.reset === 'hang') break;
+        history = 0;
+        send({ type: 'reset.done' });
         break;
       case 'abort':
         if (stuck) break;

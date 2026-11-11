@@ -139,3 +139,135 @@ for (const [name, size] of [['phone', PHONE], ['desktop', DESKTOP]] as const) {
     await expect(panel.getByRole('heading', { name: 'Qué necesitas' })).toHaveCount(0);
   });
 }
+
+// Settings, a new conversation and a transcript that survives a reload. The stand-in
+// engine process lists no models and ignores a reset, so those two routes are answered
+// here with what the server would answer; the transcript and the panel are real.
+const MODELS = {
+  models: [
+    { id: 'gpt-fake-a', name: 'GPT Fake A', reasoning: true },
+    { id: 'gpt-fake-b', name: 'GPT Fake B', reasoning: true },
+    { id: 'gpt-fake-mini', name: 'GPT Fake Mini', reasoning: false },
+  ],
+  model: 'gpt-fake-a', effort: 'medium', efforts: ['low', 'medium', 'high'],
+};
+
+async function fakeSettings(page: Page): Promise<object[]> {
+  const saved: object[] = [];
+  let current = { ...MODELS };
+  await page.route('**/review/api/engine/settings', async (route) => {
+    if (route.request().method() === 'PUT') {
+      const change = route.request().postDataJSON();
+      saved.push(change);
+      current = { ...current, ...change };
+    }
+    await route.fulfill({ json: current });
+  });
+  await page.route('**/review/api/engine/reset', (route) => route.fulfill({ json: { reset: true } }));
+  return saved;
+}
+
+for (const [name, size] of [['phone', PHONE], ['desktop', DESKTOP]] as const) {
+  test(`on a ${name}, Ajustes opens a section inside the panel with the model, the effort and both actions`, async ({ page, book }) => {
+    const saved = await fakeSettings(page);
+    await page.setViewportSize(size);
+    await open(page, book);
+    await (name === 'phone' ? page.locator('.assistant-fab') : page.locator('#assistant-toggle')).click();
+    const panel = page.getByRole('complementary', { name: 'Asistente' });
+    await connect(page);
+    const toggle = panel.getByRole('button', { name: 'Ajustes' });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    const section = panel.getByLabel('Ajustes del asistente');
+    await expect(section).toBeVisible();
+    await expect(page.locator('[role=dialog], dialog[open]')).toHaveCount(0);
+
+    const model = section.getByLabel('Modelo');
+    const effort = section.getByLabel('Razonamiento');
+    await expect(model.locator('option')).toHaveText(['GPT Fake A', 'GPT Fake B', 'GPT Fake Mini']);
+    await expect(model).toHaveValue('gpt-fake-a');
+    await expect(effort.locator('option')).toHaveText(['Rápido', 'Equilibrado', 'A fondo']);
+    await expect(effort).toHaveValue('medium');
+    await expect(model).toHaveCSS('font-size', '16px');
+    for (const control of [model, effort, section.getByRole('button', { name: 'Nueva conversación' }), section.getByRole('button', { name: 'Desconectar ChatGPT' })]) {
+      expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    }
+    // The section stays inside the panel.
+    const box = (await section.boundingBox())!;
+    const side = (await panel.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(side.x - 1);
+    expect(box.x + box.width).toBeLessThanOrEqual(side.x + side.width + 1);
+    // No pointer over a control, and no colour transition half way, in the pictures.
+    await page.mouse.move(0, 0);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.screenshot({ path: test.info().outputPath(`settings-${name}-light.png`) });
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.waitForTimeout(200);
+    await page.screenshot({ path: test.info().outputPath(`settings-${name}-dark.png`) });
+    await page.emulateMedia({ colorScheme: 'light' });
+
+    await effort.selectOption('high');
+    await expect(section.getByText('Se usará en tu próximo mensaje.')).toBeVisible();
+    await model.selectOption('gpt-fake-mini');
+    await expect(effort).toBeDisabled();
+    await expect(section.getByText('Este modelo no tiene niveles de razonamiento.')).toBeVisible();
+    expect(saved).toEqual([{ effort: 'high' }, { model: 'gpt-fake-mini' }]);
+  });
+}
+
+test('the conversation survives a reload, and Nueva conversación clears it', async ({ page, book }) => {
+  await fakeSettings(page);
+  await page.setViewportSize(DESKTOP);
+  await open(page, book);
+  await page.locator('#assistant-toggle').click();
+  const panel = page.getByRole('complementary', { name: 'Asistente' });
+  await connect(page);
+  await panel.getByRole('textbox', { name: 'Mensaje para el asistente' }).fill('Primera pregunta');
+  await panel.getByRole('button', { name: 'Enviar' }).click();
+  await expect(panel.locator('.answer li')).toHaveText(['uno', 'dos']);
+
+  await page.reload();
+  await page.locator('#assistant-toggle').click();
+  await expect(panel.locator('.turn-user')).toHaveText('Primera pregunta');
+  await expect(panel.locator('.answer li')).toHaveText(['uno', 'dos']);
+  await expect(panel.locator('.activity li')).toHaveText(['Leída: escena 01']);
+  await expect(panel.getByText('El asistente ya no recuerda los mensajes anteriores.')).toHaveCount(0);
+  // Keyed by a hash of the person (never the subject itself) and the book.
+  const stored = await page.evaluate(() => Object.keys(sessionStorage).sort());
+  expect(stored).toEqual(['rewrite.assistant.' + await page.evaluate(() => sessionStorage.getItem('rewrite:person')) + '.' + book.book, 'rewrite:person'].sort());
+  expect(stored.join(' ')).not.toContain('user_');
+
+  await panel.getByRole('button', { name: 'Ajustes' }).click();
+  await panel.getByLabel('Ajustes del asistente').getByRole('button', { name: 'Nueva conversación' }).click();
+  await expect(panel.locator('.turn-user')).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: 'Busca incoherencias en el libro' })).toBeVisible();
+  await expect(panel.getByRole('textbox', { name: 'Mensaje para el asistente' })).toBeFocused();
+  await page.reload();
+  await page.locator('#assistant-toggle').click();
+  await expect(panel.getByRole('button', { name: 'Busca incoherencias en el libro' })).toBeVisible();
+  expect(await page.evaluate(() => Object.keys(sessionStorage).filter((key) => key.startsWith('rewrite.assistant.')))).toEqual([]);
+});
+
+test('after a reload, a conversation the engine no longer holds is marked with one line', async ({ page, book }) => {
+  await fakeSettings(page);
+  await page.setViewportSize(PHONE);
+  await open(page, book);
+  await page.locator('.assistant-fab').click();
+  const panel = page.getByRole('complementary', { name: 'Asistente' });
+  await connect(page);
+  await panel.getByRole('textbox', { name: 'Mensaje para el asistente' }).fill('Hola');
+  await panel.getByRole('button', { name: 'Enviar' }).click();
+  await expect(panel.locator('.answer li')).toHaveText(['uno', 'dos']);
+
+  // As if the engine process had stopped after a while unused.
+  await page.route('**/review/api/engine/status', (route) => route.fulfill({ json: { state: 'connected' } }));
+  await page.reload();
+  await page.locator('.assistant-fab').click();
+  await expect(panel.locator('.turn-user')).toHaveText('Hola');
+  const note = panel.locator('.assistant-forgot');
+  await expect(note).toHaveText(/El asistente ya no recuerda los mensajes anteriores\./);
+  await page.screenshot({ path: test.info().outputPath('forgotten-phone.png') });
+  await note.getByRole('button', { name: 'Nueva conversación' }).click();
+  await expect(panel.locator('.turn-user')).toHaveCount(0);
+});
