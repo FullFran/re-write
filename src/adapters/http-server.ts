@@ -27,7 +27,7 @@ import { productProblem } from './problems.ts';
 import { inspectNotion, loadNotionChapters, parseNotionMapping, type NotionMapping } from '../application/notion-export.ts';
 import { chapterFilename, convertToMarkdown, importBook } from '../application/book-import.ts';
 import { SCENE_EDIT } from '../application/decision.ts';
-import { SceneConflictError } from '../application/project.ts';
+import { SceneConflictError, SceneEditRefusal, SceneNotFoundError } from '../application/project.ts';
 import { InvalidSceneTextError, MAX_SCENE_BYTES } from '../domain/scene-text.ts';
 
 export interface ServerConfig {
@@ -565,8 +565,9 @@ export function createHandler(
       } catch (error) {
         throw error instanceof HttpError ? error : new HttpError(404, 'not found');
       }
-      // JSON escaping can make the body larger than the text it carries.
-      const body = (await readBody(req, 3 * MAX_SCENE_BYTES) ?? {}) as { text?: unknown; base_blob?: unknown };
+      // JSON escaping can make the body up to 6 times the text (a control character is \u0001),
+      // so the cap leaves room for that and the size check on the text answers first.
+      const body = (await readBody(req, 6 * MAX_SCENE_BYTES + 65_536) ?? {}) as { text?: unknown; base_blob?: unknown };
       if (typeof body.text !== 'string' || typeof body.base_blob !== 'string') {
         throw new HttpError(400, 'text and base_blob are required');
       }
@@ -577,8 +578,12 @@ export function createHandler(
         if (error instanceof SceneConflictError) {
           return json(res, 409, { error: error.message, current: { text: error.text, blob: error.blob } });
         }
+        if (error instanceof SceneNotFoundError) throw new HttpError(404, 'not found');
+        if (error instanceof SceneEditRefusal) return problem(res, 409, library.publicMessage(error));
         if (error instanceof HttpError || error instanceof HcsFailure) throw error;
-        return problem(res, 409, library.publicMessage(error));
+        // Anything else is a failure to write or commit (for example a held git lock): the book is
+        // back as it was, and git's own text, which can quote the commit message, stays out.
+        return problem(res, 409, 'No se pudo guardar la escena y no se ha cambiado nada. Inténtalo de nuevo.');
       }
     }
 

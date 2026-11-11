@@ -1365,48 +1365,97 @@ async function apiSave(path, body) {
   return { ok: res.ok, status: res.status, data };
 }
 
+// How a text breaks its lines: only \n, only \r\n, or a mix (a lone \r counts as a mix).
+// A text field shows every break as \n, so only the first two can be edited without
+// rewriting the breaks the person never touched.
+function lineEndings(text) {
+  const crlf = (text.match(/\r\n/g) || []).length;
+  const cr = (text.match(/\r/g) || []).length;
+  const lf = (text.match(/\n/g) || []).length;
+  if (cr === 0) return 'lf';
+  return crlf === cr && crlf === lf ? 'crlf' : 'mixed';
+}
+
 function sceneEditor(book, scene, close) {
-  // A text field reports line breaks as \n; a scene stored with \r\n keeps its own on save.
-  const crlf = scene.text.includes('\r\n');
-  const stored = (value) => crlf ? value.replace(/\r?\n/g, '\r\n') : value;
-  const shown = (text) => text.replace(/\r\n/g, '\n');
+  const file = scene.file;
+  // The text as the field shows it: every line break as \n.
+  const shown = (text) => text.replace(/\r\n?/g, '\n');
+  let endings = 'lf';
   let base = scene.blob;
-  let saved = scene.text;
+  let savedShown = '';
+  let normalising = false;
+  let saving = false;
+  const stored = (value) => endings === 'crlf' ? value.replace(/\n/g, '\r\n') : value;
   const box = el('div', undefined, 'scene-editor');
   const area = el('textarea', undefined, SCENE_EDITOR_CLASS);
-  area.setAttribute('aria-label', 'Texto de la escena ' + scene.file);
+  area.setAttribute('aria-label', 'Texto de la escena ' + file);
   area.spellcheck = true;
+  const mixedNote = el('p', 'Esta escena mezcla finales de línea (de Windows y de otros sistemas). Para no cambiarlos sin querer, solo se puede leer aquí.', 'meta');
+  const normalise = button('Normalizar los finales de línea y editar', '', async () => {
+    endings = 'lf';
+    normalising = true;
+    setEditable(true);
+    remember();
+    status.textContent = 'Al guardar, todos los finales de línea de la escena quedarán normalizados.';
+    area.focus();
+  });
+  const saveButton = button('Guardar', 'accept', () => save());
   const status = el('p', '', 'meta save-status');
   status.setAttribute('role', 'status');
   const conflict = el('div', undefined, 'scene-conflict');
   conflict.hidden = true;
-  const dirty = () => stored(area.value) !== saved;
+  // Unsaved means different from what the field showed for the saved text: opening a scene
+  // and closing it again is never a change.
+  const dirty = () => normalising || area.value !== savedShown;
   unsavedEdit = dirty;
 
-  const draft = readDraft(book, scene.file);
-  area.value = shown(draft ? draft.text : scene.text);
+  function setEditable(editable) {
+    area.readOnly = !editable;
+    mixedNote.hidden = editable;
+    normalise.hidden = editable;
+    saveButton.hidden = !editable;
+  }
+  // Shows a saved version of the scene in the field.
+  function load(text, blob) {
+    base = blob;
+    endings = lineEndings(text);
+    normalising = false;
+    savedShown = shown(text);
+    area.value = savedShown;
+    setEditable(endings !== 'mixed');
+  }
+  load(scene.text, scene.blob);
+
+  const draft = readDraft(book, file);
   if (draft) {
+    // A draft is always stored with \n or \r\n only, so it is editable; when the scene itself
+    // mixes endings, the draft was normalised and saving it still changes them.
+    if (endings === 'mixed') {
+      normalising = true;
+      endings = 'lf';
+      setEditable(true);
+    }
+    if (lineEndings(draft.text) === 'crlf') endings = 'crlf';
     base = draft.base_blob;
+    area.value = shown(draft.text);
     status.textContent = draft.base_blob === scene.blob
       ? 'Se recuperó un texto sin guardar de esta pestaña.'
       : 'Se recuperó un texto sin guardar de esta pestaña, pero la escena cambió después: al guardar podrás comparar.';
   }
 
-  const remember = () => {
-    writeDraft(book, scene.file, dirty() ? { base_blob: base, text: stored(area.value) } : null);
+  function remember() {
+    writeDraft(book, file, dirty() ? { base_blob: base, text: stored(area.value) } : null);
     status.textContent = dirty() ? 'Cambios sin guardar' : 'Guardado';
-  };
+  }
   area.addEventListener('input', remember);
 
   const showConflict = (current) => {
     status.textContent = 'No se guardó: la escena cambió mientras editabas. Tu versión sigue en el editor.';
     const useSaved = button('Usar la versión guardada', '', async () => {
-      base = current.blob;
-      saved = current.text;
-      area.value = shown(current.text);
       conflict.hidden = true;
       conflict.replaceChildren();
-      remember();
+      load(current.text, current.blob);
+      writeDraft(book, file, null);
       status.textContent = 'Se cargó la versión guardada. Tu versión se ha descartado.';
     });
     const keepMine = button('Guardar mi versión encima', 'accept', async () => {
@@ -1421,25 +1470,38 @@ function sceneEditor(book, scene, close) {
     conflict.hidden = false;
   };
 
-  const save = async () => {
-    const text = stored(area.value);
+  // One save at a time: a second Guardar or Ctrl+S while one is in flight would be based on
+  // the old version and come back as a conflict with the person's own text.
+  async function save() {
+    if (saving || area.readOnly || !dirty()) return;
+    saving = true;
+    saveButton.disabled = true;
+    const value = area.value;
+    const wasNormalising = normalising;
     status.textContent = 'Guardando…';
-    let result;
     try {
-      result = await apiSave('/books/' + book + '/scenes/' + encodeURIComponent(scene.file), { base_blob: base, text });
-    } catch {
-      status.textContent = 'Error: no se pudo conectar. Tu texto sigue aquí sin guardar.';
-      return;
+      let result;
+      try {
+        result = await apiSave('/books/' + book + '/scenes/' + encodeURIComponent(file), { base_blob: base, text: stored(value) });
+      } catch {
+        status.textContent = 'Error: no se pudo conectar. Tu texto sigue aquí sin guardar.';
+        return;
+      }
+      if (result.ok) {
+        base = result.data.blob;
+        savedShown = value;
+        normalising = false;
+        remember();
+        if (!dirty() && wasNormalising) status.textContent = 'Guardado, con los finales de línea normalizados.';
+        return;
+      }
+      if (result.status === 409 && result.data.current) return showConflict(result.data.current);
+      status.textContent = 'Error: ' + (result.data.error || 'no se pudo guardar') + '. Tu texto sigue aquí sin guardar.';
+    } finally {
+      saving = false;
+      saveButton.disabled = false;
     }
-    if (result.ok) {
-      base = result.data.blob;
-      saved = text;
-      remember();
-      return;
-    }
-    if (result.status === 409 && result.data.current) return showConflict(result.data.current);
-    status.textContent = 'Error: ' + (result.data.error || 'no se pudo guardar') + '. Tu texto sigue aquí sin guardar.';
-  };
+  }
 
   area.addEventListener('keydown', (event) => {
     if ((event.ctrlKey || event.metaKey) && (event.key === 's' || event.key === 'S')) {
@@ -1449,13 +1511,13 @@ function sceneEditor(book, scene, close) {
   });
   const closeEditor = button('Cerrar editor', '', async () => {
     if (dirty() && !window.confirm('Hay cambios sin guardar. ¿Cerrar el editor y descartarlos?')) return;
-    writeDraft(book, scene.file, null);
+    writeDraft(book, file, null);
     unsavedEdit = null;
     await close();
   });
   const row = el('div', undefined, 'form-row actions');
-  row.append(button('Guardar', 'accept', save), closeEditor);
-  box.append(area, row, status, conflict);
+  row.append(saveButton, closeEditor);
+  box.append(mixedNote, normalise, area, row, status, conflict);
   return box;
 }
 

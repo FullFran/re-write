@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, normalize, resolve } from 'node:path';
 import { Git } from '../adapters/git.ts';
 import { JsonStore, STATE_DIR } from '../adapters/json-store.ts';
@@ -31,6 +31,22 @@ export class SceneConflictError extends Error {
     this.name = 'SceneConflictError';
     this.text = text;
     this.blob = blob;
+  }
+}
+
+/** The scene does not exist as a regular file inside scenes/ (missing, or a symlink). */
+export class SceneNotFoundError extends Error {
+  constructor(file: string) {
+    super(`scene not found: ${file}`);
+    this.name = 'SceneNotFoundError';
+  }
+}
+
+/** An expected refusal of an edit whose reason can be shown to the person. */
+export class SceneEditRefusal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SceneEditRefusal';
   }
 }
 
@@ -90,8 +106,28 @@ export class Project {
 
   scenes(): string[] {
     const dir = join(this.dir, SCENES_DIR);
-    if (!existsSync(dir)) return [];
-    return readdirSync(dir).filter((name) => name.endsWith('.md')).sort().map((name) => `${SCENES_DIR}/${name}`);
+    if (!this.isRegular(dir, 'directory')) return [];
+    // A symlink is not a scene: it could point outside the book.
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+      .map((entry) => `${SCENES_DIR}/${entry.name}`)
+      .sort();
+  }
+
+  /** True only for a real file or directory: never a symlink, which could lead outside the book. */
+  private isRegular(path: string, kind: 'file' | 'directory'): boolean {
+    try {
+      const stat = lstatSync(path);
+      return kind === 'file' ? stat.isFile() : stat.isDirectory();
+    } catch {
+      return false;
+    }
+  }
+
+  /** The absolute path of a scene that is a regular file inside a real scenes/ directory, or null. */
+  private sceneFile(file: string): string | null {
+    const path = join(this.dir, this.scenePath(file));
+    return this.isRegular(join(this.dir, SCENES_DIR), 'directory') && this.isRegular(path, 'file') ? path : null;
   }
 
   /** Copies scenes in and commits them. It never overwrites a scene with different text. */
@@ -151,8 +187,8 @@ export class Project {
 
   /** Reads the current text of a scene, or null when it no longer exists. */
   readScene(file: string): string | null {
-    const path = join(this.dir, this.scenePath(file));
-    return existsSync(path) && statSync(path).isFile() ? readFileSync(path, 'utf8') : null;
+    const path = this.sceneFile(file);
+    return path === null ? null : readFileSync(path, 'utf8');
   }
 
   /** Validates candidates against the committed text and stores them as proposed. */
@@ -455,12 +491,12 @@ export class Project {
    */
   editScene(edit: SceneEdit): { file: string; blob: string; revision: string; changed: boolean } {
     const file = this.scenePath(edit.file);
-    const path = join(this.dir, file);
-    if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`scene not found: ${file}`);
+    const path = this.sceneFile(file);
+    if (path === null) throw new SceneNotFoundError(file);
     checkSceneText(edit.text);
     const raw = readFileSync(path);
-    if (!isExactUtf8(raw)) throw new Error(`${file} is not valid UTF-8 text, so it cannot be edited here`);
-    if (this.git.isDirty(file)) throw new Error(`${file} has uncommitted edits; commit them before editing the scene`);
+    if (!isExactUtf8(raw)) throw new SceneEditRefusal(`${file} is not valid UTF-8 text, so it cannot be edited here`);
+    if (this.git.isDirty(file)) throw new SceneEditRefusal(`${file} has uncommitted edits; commit them before editing the scene`);
     const current = raw.toString('utf8');
     const blob = this.git.blobOf(file);
     if (blob !== edit.base_blob) throw new SceneConflictError(file, current, blob);

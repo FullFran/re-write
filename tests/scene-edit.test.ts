@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { decide, SCENE_EDIT } from '../src/application/decision.ts';
 import { grantPermission } from '../src/hcs/grants.ts';
-import { cli, FIXTURES, git, read } from './helpers.ts';
+import { cli, FIXTURES, git, read, tempDir } from './helpers.ts';
 import { proposeRevision, reviewApi, startHarness, type Harness } from './server-helpers.ts';
 
 const SCENE = 'scenes/escena-01.md';
@@ -151,7 +151,74 @@ test('only a person on the review door edits scenes: agents, packages and strang
 
   const request = { library: h.library, subject: 'user_fran', book: 'sal', permission: SCENE_EDIT };
   assert.deepEqual(decide({ ...request, door: 'review', entry: null }), { allow: true });
-  assert.equal(decide({ ...request, door: 'mcp', entry: null }).allow, false, 'never through the MCP door');
-  assert.equal(decide({ ...request, door: 'review', entry: 'com.example.package' }).allow, false, 'never by a package');
+  const forbidden = (door: string) => ({ allow: false, reason: 'forbidden', detail: `forbidden: ${SCENE_EDIT} is not available through the ${door} door` });
+  assert.deepEqual(decide({ ...request, door: 'mcp', entry: null }), forbidden('mcp'), 'never through the MCP door');
+  assert.deepEqual(decide({ ...request, door: 'review', entry: 'com.example.package' }), forbidden('review'), 'never by a package, even on the review door');
   assert.throws(() => grantPermission(h.data, 'com.example.package', SCENE_EDIT), /cannot be granted/);
+});
+
+test('Project.editScene itself only writes Markdown files directly inside scenes/', async () => {
+  const project = h.library.open('sal', 'user_fran');
+  const blob = git(h.bookDir, 'hash-object', SCENE);
+  const head = git(h.bookDir, 'rev-parse', 'HEAD');
+  for (const file of ['../project.json', 'scenes/../outside.md', 'scenes/sub/inner.md', 'scenes/notes.txt', '/tmp/x.md', '.rewrite/project.json']) {
+    assert.throws(() => project.editScene({ file, base_blob: blob, text: 'x', by: 'user_fran' }), /must be inside scenes\//, file);
+  }
+  assert.equal(existsSync(join(h.bookDir, 'outside.md')), false);
+  assert.equal(git(h.bookDir, 'rev-parse', 'HEAD'), head);
+});
+
+test('a scene that is a symlink is neither read nor written, whether it points to a file or a directory', async () => {
+  const session = await h.session();
+  const outside = join(tempDir(), 'outside.md');
+  writeFileSync(outside, 'fuera del libro\n');
+  const outsideDir = tempDir();
+  symlinkSync(outside, join(h.bookDir, 'scenes/link.md'));
+  symlinkSync(outsideDir, join(h.bookDir, 'scenes/dirlink.md'));
+  git(h.bookDir, 'add', 'scenes/link.md', 'scenes/dirlink.md');
+  git(h.bookDir, 'commit', '-q', '-m', 'links', '--', 'scenes/link.md', 'scenes/dirlink.md');
+  try {
+    for (const file of ['scenes/link.md', 'scenes/dirlink.md']) {
+      assert.equal((await reviewApi(h, `/books/sal/scenes/${encodeURIComponent(file)}`, session)).status, 404, file);
+      const blob = git(h.bookDir, 'hash-object', SCENE);
+      assert.equal((await save(session, { base_blob: blob, text: 'escrito\n' }, file)).status, 404, file);
+    }
+    assert.equal(readFileSync(outside, 'utf8'), 'fuera del libro\n');
+    assert.equal(existsSync(join(outsideDir, 'escrito')), false);
+    const queue = await (await reviewApi(h, '/books/sal', session)).json();
+    assert.equal(queue.scenes.some((f: string) => f.includes('link')), false, 'links are not listed as scenes');
+  } finally {
+    git(h.bookDir, 'rm', '-q', 'scenes/link.md', 'scenes/dirlink.md');
+    git(h.bookDir, 'commit', '-q', '-m', 'drop links');
+  }
+});
+
+test('a save that git cannot commit answers a fixed message, writes nothing and leaks no details', async () => {
+  const session = await h.session();
+  const scene = await openScene(session);
+  const before = bytes();
+  const head = git(h.bookDir, 'rev-parse', 'HEAD');
+  const lock = join(h.bookDir, '.git', 'index.lock');
+  writeFileSync(lock, '');
+  try {
+    const res = await save(session, { base_blob: scene.blob, text: scene.text + 'bloqueado\n' });
+    assert.equal(res.status, 409);
+    const body = await res.json();
+    assert.equal(body.error, 'No se pudo guardar la escena y no se ha cambiado nada. Inténtalo de nuevo.');
+    assert.doesNotMatch(JSON.stringify(body), /index\.lock|rewrite: edit|fatal|Edited-by/);
+  } finally {
+    rmSync(lock, { force: true });
+  }
+  assert.deepEqual(bytes(), before);
+  assert.equal(git(h.bookDir, 'rev-parse', 'HEAD'), head);
+  assert.equal(git(h.bookDir, 'status', '--porcelain'), '');
+});
+
+test('a scene just over the size limit is refused as too large even when JSON escaping makes the body much bigger', async () => {
+  const session = await h.session();
+  const scene = await openScene(session);
+  // A control character takes 6 bytes in JSON, so the body is about 6 MiB for 1 MiB of text.
+  const res = await save(session, { base_blob: scene.blob, text: '\u0001'.repeat(1_048_577) });
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).error, /larger than 1048576 bytes/);
 });

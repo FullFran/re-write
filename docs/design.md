@@ -121,8 +121,14 @@ the selected rating has `aria-pressed`.
 
 - The editor is a plain text field holding the scene's Markdown exactly as stored, in
   the manuscript font (`--font-prose`). Markers such as `*` and `#` stay visible; the
-  saved bytes are the bytes in the field (a scene stored with CRLF line breaks keeps
-  them).
+  saved bytes are the bytes in the field. A text field shows every line break as LF, so
+  a scene stored with only LF or only CRLF keeps its breaks on save, and opening and
+  closing a scene is never an unsaved change.
+- A scene that mixes line breaks (or has a lone CR) opens read-only, with one line
+  explaining why and **Normalizar los finales de línea y editar**: that action is the
+  only way its breaks change, and the save says so.
+- **Guardar** and Ctrl/Cmd+S do nothing while a save is in flight or when nothing
+  changed.
 - **Guardar** (or Ctrl/Cmd+S) saves explicitly; there is no autosave. The status line
   below it (`role="status"`) says **Cambios sin guardar**, **Guardando…**, **Guardado**
   or the error, and an error always adds that the text is still there.

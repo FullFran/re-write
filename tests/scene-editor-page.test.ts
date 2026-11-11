@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { read } from './helpers.ts';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { git, read } from './helpers.ts';
 import { proposeRevision, reviewApi, startHarness, type Harness } from './server-helpers.ts';
 
 const SCENE = 'scenes/escena-01.md';
@@ -20,8 +22,12 @@ async function openPage(h: Harness, session: string) {
     className = '';
     id = '';
     type = '';
-    value = '';
+    private raw = '';
     defaultValue = '';
+    readOnly = false;
+    // A browser normalises a text field's value: CRLF and a lone CR become LF (HTML, "API value").
+    get value(): string { return this.raw; }
+    set value(text: string) { this.raw = this.tagName === 'TEXTAREA' ? String(text).replace(/\r\n?/g, '\n') : text; }
     spellcheck = false;
     files: unknown[] | null = null;
     hidden = false;
@@ -66,6 +72,7 @@ async function openPage(h: Harness, session: string) {
   const body = new Element('body');
   const timers: { id: number; run: () => unknown; delay: number }[] = [];
   const pageListeners: Record<string, (...args: any[]) => any> = {};
+  const posts: string[] = [];
   const storage = new Map<string, string>();
   const confirms: string[] = [];
   let confirmAnswer = true;
@@ -94,7 +101,10 @@ async function openPage(h: Harness, session: string) {
       },
       Clerk: { load: async () => {}, isSignedIn: true, mountUserButton() {}, session: { getToken: async () => session } },
     },
-    fetch: (path: string, init: RequestInit = {}) => fetch(`${h.base}${path}`, init),
+    fetch: (path: string, init: RequestInit = {}) => {
+      if (init.method === 'POST') posts.push(path);
+      return fetch(`${h.base}${path}`, init);
+    },
     setTimeout: (run: () => unknown, delay: number) => { timers.push({ id: ++nextTimer, run, delay }); return nextTimer; },
     clearTimeout: (id: number) => { const at = timers.findIndex((t) => t.id === id); if (at !== -1) timers.splice(at, 1); },
   });
@@ -108,7 +118,9 @@ async function openPage(h: Harness, session: string) {
   const editor = (): Element | undefined => all(app, (n) => n.tagName === 'TEXTAREA')[0];
   const status = (): string => all(app, (n) => n.className.includes('save-status'))[0]?.textContent ?? '';
   return {
-    app, storage, confirms, pageListeners,
+    app, storage, confirms, pageListeners, posts,
+    visible: (label: string): number => all(app, (n) => n.tagName === 'BUTTON' && n.textContent === label && !n.hidden).length,
+    text: (pattern: RegExp): boolean => all(app, (n) => n.tagName === 'P' && pattern.test(n.textContent)).length > 0,
     setConfirm(answer: boolean) { confirmAnswer = answer; },
     button, editor, status,
     async click(label: string) { await button(label).events.click(); },
@@ -118,8 +130,8 @@ async function openPage(h: Harness, session: string) {
       area.value = text;
       await area.events.input?.();
     },
-    async openEditor() {
-      await button(SCENE).events.click();
+    async openEditor(file = SCENE) {
+      await button(file).events.click();
       await button('Editar escena').events.click();
       assert.ok(editor(), 'the editor is open');
     },
@@ -135,13 +147,14 @@ async function openPage(h: Harness, session: string) {
   };
 }
 
-async function quietPage(t: any) {
+async function quietPage(t: any, setup?: (h: Harness) => void) {
   t.mock.method(console, 'log', () => {});
   t.mock.method(console, 'warn', () => {});
   t.mock.method(console, 'error', () => {});
   const h = await startHarness();
   t.after(() => h.close());
   const session = await h.session();
+  setup?.(h);
   return { h, session, page: await openPage(h, session) };
 }
 
@@ -233,4 +246,68 @@ test('an unsaved edit survives the scene being reopened in the same tab, and clo
   assert.equal(page.editor(), undefined);
   assert.equal(page.storage.has(DRAFT_KEY), false, 'a discarded draft is gone');
   assert.notEqual(read(h.bookDir, SCENE), draft);
+});
+
+/** Commits a scene with exactly these bytes, as an import of a file from any editor would. */
+function commitScene(h: Harness, file: string, text: string) {
+  writeFileSync(join(h.bookDir, file), text);
+  git(h.bookDir, 'add', file);
+  git(h.bookDir, 'commit', '-q', '-m', `add ${file}`, '--', file);
+}
+
+test('CRLF and LF scenes keep their line endings, and opening one never marks it unsaved', async (t) => {
+  const CRLF = 'scenes/crlf.md';
+  const { h, page } = await quietPage(t, (h) => commitScene(h, CRLF, '# Uno\r\n\r\nDos.\r\n'));
+  await page.openEditor(CRLF);
+  assert.equal(page.editor()!.value, '# Uno\n\nDos.\n');
+  assert.equal(page.storage.size, 0, 'nothing unsaved after opening');
+  await page.click('Guardar');
+  assert.equal(page.posts.length, 0, 'saving an unchanged scene sends nothing');
+  await page.type('# Uno\n\nDos.\nTres.\n');
+  await page.click('Guardar');
+  assert.equal(read(h.bookDir, CRLF), '# Uno\r\n\r\nDos.\r\nTres.\r\n');
+  await page.click('Cerrar editor');
+  assert.equal(page.confirms.length, 0);
+});
+
+test('a scene with mixed line endings or a lone CR opens read-only until the person normalises it', async (t) => {
+  const MIXED = 'scenes/mixed.md';
+  const LONE = 'scenes/lone-cr.md';
+  const { h, page } = await quietPage(t, (h) => {
+    commitScene(h, MIXED, 'a\r\nb\nc\n');
+    commitScene(h, LONE, 'x\ry\n');
+  });
+  for (const [file, normalised] of [[MIXED, 'a\nb\nc\n'], [LONE, 'x\ny\n']]) {
+    const before = read(h.bookDir, file);
+    await page.openEditor(file);
+    assert.equal(page.editor()!.readOnly, true);
+    assert.ok(page.text(/mezcla finales de línea/), 'one line explains why');
+    assert.equal(page.visible('Guardar'), 0, 'nothing can be saved before normalising');
+    assert.equal(page.storage.size, 0);
+    await page.click('Cerrar editor');
+    assert.equal(page.confirms.length, 0, 'opening and closing is not an unsaved change');
+    assert.equal(read(h.bookDir, file), before);
+
+    await page.openEditor(file);
+    await page.click('Normalizar los finales de línea y editar');
+    assert.equal(page.editor()!.readOnly, false);
+    await page.click('Guardar');
+    assert.equal(read(h.bookDir, file), normalised, 'the explicit action is the only way the endings change');
+    assert.match(page.status(), /finales de línea/);
+    await page.click('Cerrar editor');
+  }
+});
+
+test('a second save while one is in flight is not sent, so the person never conflicts with themselves', async (t) => {
+  const { h, page } = await quietPage(t);
+  await page.openEditor();
+  const mine = page.editor()!.value + 'Rápido.\n';
+  await page.type(mine);
+  const ctrlS = () => page.editor()!.events.keydown({ ctrlKey: true, key: 's', preventDefault() {} });
+  ctrlS();
+  ctrlS();
+  for (let i = 0; i < 200 && page.status() !== 'Guardado'; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(page.status(), 'Guardado');
+  assert.equal(page.posts.length, 1);
+  assert.equal(read(h.bookDir, SCENE), mine);
 });
