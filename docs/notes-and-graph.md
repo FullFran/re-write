@@ -94,6 +94,58 @@ A pure, dependency-free module (`src/domain/story-graph.ts`) builds the graph fr
 - **Operations** (edges taken in both directions, any kind): neighbours within depth *k*, a shortest
   path (BFS, fewest steps), degree (distinct neighbours) and the degree ranking, connected
   components, and orphans (notes with no edge at all).
+- **Paragraph co-occurrence** (on request): every `cooccurs` edge gains a second weight,
+  `paragraphs`, the number of scene paragraphs that link both notes. A paragraph is a run of lines
+  with text; a line that is empty or holds only spaces (`\r\n` included) separates paragraphs. A
+  pair that shares a scene but never a paragraph keeps its edge with `paragraphs: 0`, so a view can
+  weigh by scene (`weight`) or by paragraph (`paragraphs`) and filter out the zeros.
+
+### Who knows what
+
+Claims with `knowledge` (holder, fact and mode: `displays`, `acquires` or `hears`) become `knows`
+edges, one per claim, from the holder's note to the subject's note: `{ kind: "knows", from, to,
+mode, fact, scene, claim_id, story_time, editorial_status }`, where `scene` is the claim's
+`source_file`, the scene whose text establishes the knowledge.
+
+- **Names.** Holder and subject are free text and resolve exactly like a link (name, then alias,
+  folded). A name that matches no note is listed in `unresolved`, one that matches several in
+  `ambiguous` with its candidates (`{ claim_id, role: "holder" | "subject", name, scene }`); such a
+  claim gives no edge. Nothing is guessed. Edges connect notes only: a subject that is not a note
+  (an event, an object nobody wrote a note for) is reported rather than drawn as a separate node, so
+  the fix is the author's (write the note or add an alias), and the graph keeps its two node kinds.
+- **Which claims.** Proposed and accepted claims count, each edge saying which; rejected claims do
+  not. A claim on a scene that no longer exists is left out.
+- **`as_of_scene`.** Only claims whose scene is at or before the cut in reading order count, and
+  the problems of later claims are hidden too, since they would reveal later knowledge.
+- `knows` edges are listed apart from `edges`: they come from claims, not from links, and the
+  graph operations below do not walk them.
+
+### Operations in the server
+
+Besides the operations above, `src/domain/story-graph.ts` computes, with no dependency and a fixed
+order:
+
+| Operation | Definition | Cost |
+| --- | --- | --- |
+| PageRank | Edges point the way they are written (`link` note to note, `mention` scene to note), `cooccurs` both ways, parallel edges once, unweighted; damping 0.85; a node with no outgoing edge spreads its rank over all nodes. Rounded to 6 decimals. | at most 100 iterations of O(nodes + edges) |
+| Betweenness | Brandes on the undirected graph (any edge, once per pair of neighbours): for each pair of other nodes, the share of their shortest paths through the node, each unordered pair counted once, not normalised. Rounded to 6 decimals. | O(nodes × (nodes + edges)) |
+| Link suggestions | Pairs of notes with at least one shared neighbour (a scene that links both, a note linked to both, a note they co-occur with) and no `[[link]]` between them in either direction. **Adamic-Adar** sums `1 / ln(degree)` over the shared neighbours, so a rare shared neighbour weighs more than a hub; **Jaccard** is shared neighbours over all neighbours of the pair. Each suggestion gives `common` (shared neighbours), `via` (the first five by id) and, in the application layer, up to three `anchors`. | the sum of the squared degrees of the neighbours visited |
+
+Rankings and suggestions go highest score first, then by id (suggestions: more shared neighbours
+first, then ids). With a node, suggestions are its best `top` partners (`from` is that note);
+without, the best `top` pairs of the book (`from` < `to`). A pair that only co-occurs is still a
+candidate: sharing scenes without a link is exactly what a suggestion points out. (The drawing below computes
+its own suggestions in the browser over the graph as drawn, with a different candidate set.)
+
+**Work cap.** Betweenness and suggestions are not linear, so each counts its steps before or
+while working and refuses a graph above 25,000,000 steps (`MAX_GRAPH_WORK`) with a message that
+names the operation and points to degree or PageRank, instead of holding the single-threaded
+server. Below it, a book of a few thousand notes and scenes answers within the request. The text
+cap above still bounds the graph's size; PageRank and `knows` edges are linear.
+
+**Anchors.** An anchor is a plain-text mention of one note in the other's note file (`{ file,
+line, column, text, context }`), found like an unlinked mention: the literal passage an assistant
+can turn into a link.
 
 **Cost.** Every pass is linear in the text: one forward scan finds code ranges and links, positions
 come from precomputed line starts, exclusions are checked by binary search, and sentence boundaries
@@ -111,7 +163,7 @@ size of the book) instead of cached, so it is never stale after an edit made out
 
 | Door | What |
 | --- | --- |
-| MCP (read-only, capability `com.fullfran.rewrite.notes.read@1`) | `list_notes`, `read_note`, `graph_neighbors`, `graph_orphans`, `graph_path`, `graph_central` (`metric: degree`) |
+| MCP (read-only, capability `com.fullfran.rewrite.notes.read@1`) | `list_notes`, `read_note`, `graph_neighbors` (`knows: true` adds the `knows` edges that touch the nodes reached, with the book's `unresolved` and `ambiguous` names, 100 of each at most), `graph_orphans`, `graph_path`, `graph_central` (`metric: degree`, `pagerank` or `betweenness`), `graph_suggest_links` (`node?`, `top?` up to 50, `as_of_scene?`; Adamic-Adar) |
 | MCP (proposes, capability `com.fullfran.rewrite.revision.propose@1`) | `propose_note`, and `propose_revision` on a `notas/` file |
 | Review door | `GET /review/api/books/:book/notes`, `GET /review/api/books/:book/notes/:name`, `POST /review/api/books/:book/notes/:name` (a person's edit: `{ text, base_blob }`), `GET /review/api/books/:book/graph[?as_of_scene=<scene path>]` |
 
@@ -120,6 +172,33 @@ size of the book) instead of cached, so it is never stale after an edit made out
 scene), `edges` (`kind`, `from`, `to`, `weight`), `scenes` (every scene path in reading order,
 whatever the cut, so a picker can offer them all), `as_of_scene` and `too_large`. An unknown
 `as_of_scene` is a `400` that names it. It is built from the same core as the MCP tools.
+
+Optional query parameters add more, only when asked; without them the answer has exactly the fields
+above:
+
+| Parameter | Adds |
+| --- | --- |
+| `metrics=pagerank,betweenness` (either or both) | `pagerank` and `betweenness` on every node |
+| `include=knows,paragraphs` (either or both) | `knows` (`{ edges, unresolved, ambiguous }`, see "Who knows what") and the `paragraphs` weight on `cooccurs` edges |
+| `suggest=adamic_adar` or `suggest=jaccard`, with `top=1..50` (default 10) | `suggestions: { metric, items }`, the best pairs of the book with their anchors |
+
+Every one respects `as_of_scene`. An unknown value, a `top` out of range, or a graph above the
+work cap is a `400` that names the problem.
+
+### From a suggestion to a link
+
+A suggestion never writes. The recommended assistant flow:
+
+1. `graph_suggest_links` (with `node` when the person asks about one note) and show the person the
+   pairs and why (`via`).
+2. Only if the person wants a link: take an anchor and call `propose_revision` with `file` = the
+   anchor's `file`, `find` = its `context` copied exactly, and `replace` = the same text with the
+   name written as `[[Nota]]`. Without an anchor, `read_note` one of the two notes and pick a
+   literal sentence to extend, for example with "Ver [[Nota]].".
+3. The person accepts or rejects the proposal at the review page. Once accepted, the pair has a
+   link and is no longer suggested.
+
+There is no other write path: the same proposal flow as any change to a note.
 
 A node in the graph tools is named like a link (a note name or alias, case and accents ignored) or
 by a scene path. An ambiguous or unknown name is refused with the next step (`list_notes`). The

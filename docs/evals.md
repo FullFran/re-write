@@ -64,6 +64,7 @@ browser import names them (`evals/journeys/books/capitulos/003-la-carta.md`). Se
 | `chatgpt-chapter-analysis` | "Analiza el capítulo 3" takes the documented calls, reads a long scene page by page, stores only a proposal, and hands the person the review URL. |
 | `chatgpt-error-recovery` | Every refusal names the tool to call next, an ambiguous or absent passage asks for a longer or present one from read_scene, a refused proposal stores nothing, and following the hint works. |
 | `notes-and-graph` | Links in scenes become notes only when a person accepts the proposal; backlinks and the graph tools follow the links, `as_of_scene` leaves out later scenes, and reading the graph writes nothing. Its book is `evals/journeys/books/grafo/`. |
+| `chatgpt-graph-suggestions` | Who-knows-what edges come from claims and respect `as_of_scene`, names that match no note are reported instead of guessed, betweenness finds the bridge, link suggestions leave out existing links and carry a literal anchor, and a suggested link reaches the note only as a proposal a person accepts. Its book is `evals/journeys/books/grafo/`. |
 | `chatgpt-tool-metadata` | Every tool has a title and says when to use it, only proposals are write tools, the tool list stays under 28 KB, and the first 512 characters of the instructions give the order of calls and the review URL. |
 
 The in-memory build gives the server the review URL `https://rewrite.invalid/review`, built from the

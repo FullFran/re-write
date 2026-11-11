@@ -51,7 +51,7 @@ function results(...journeys: JourneyResult[]): RunResults {
 test('the shipped journeys cover the first set and all pass against this build, identically on every run', async () => {
   const first = await runJourneys();
   assert.deepEqual(first.journeys.map((item) => item.id), [
-    'agent-cannot-approve', 'chatgpt-chapter-analysis', 'chatgpt-error-recovery', 'chatgpt-tool-metadata',
+    'agent-cannot-approve', 'chatgpt-chapter-analysis', 'chatgpt-error-recovery', 'chatgpt-graph-suggestions', 'chatgpt-tool-metadata',
     'fabricated-quote', 'literal-quote-claim', 'notes-and-graph', 'onboarding', 'retried-proposal', 'rumor-not-canon', 'stale-evidence',
   ]);
   assert.deepEqual(resultRows(first).filter((row) => row.status !== 'PASS'), []);
@@ -59,7 +59,7 @@ test('the shipped journeys cover the first set and all pass against this build, 
   assert.equal(first.version, JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.json'), 'utf8')).version);
   assert.match(first.commit, /^([0-9a-f]{40}|unknown)$/);
   assert.equal(first.build, 'in-memory');
-  assert.deepEqual(first.summary.journeys, { pass: 11, fail: 0 });
+  assert.deepEqual(first.summary.journeys, { pass: 12, fail: 0 });
   assert.equal(first.summary.checks.pass, resultRows(first).length);
   for (const item of first.journeys) {
     assert.ok(item.guarantee, item.id);
@@ -98,7 +98,7 @@ test('runner self-test: a build that allows approval over MCP fails the approval
   assert.deepEqual(metadata.checks.filter((check) => check.status === 'FAIL').map((check) => check.check), [
     'every tool has a title', 'every description starts with Use this', 'only the four proposal tools are write tools',
   ]);
-  assert.deepEqual(broken.summary.journeys, { pass: 8, fail: 3 });
+  assert.deepEqual(broken.summary.journeys, { pass: 9, fail: 3 });
 });
 
 test('runner self-test: a tool list that grows past its budget fails the metadata journey', async () => {
@@ -125,7 +125,7 @@ test('runner self-test: onboarding text that names a tool the harness does not o
   const misleading: Build = {
     ...inMemoryBuild,
     name: 'misleading-onboarding',
-    llms: (resource) => inMemoryBuild.llms(resource).replace('`graph_central`.', '`graph_central`, `accept_claim`.'),
+    llms: (resource) => inMemoryBuild.llms(resource).replace('`graph_suggest_links`.', '`graph_suggest_links`, `accept_claim`.'),
   };
   assert.deepEqual(failing(await runJourneys({ build: misleading })), ['onboarding']);
 });
@@ -241,11 +241,11 @@ test('npm run eval writes results.json, prints the table, and exits 1 only when 
   assert.equal(passing.code, 0, passing.stderr);
   assert.match(passing.stdout, /^\| journey +\| check +\| status \| note \|$/m);
   assert.match(passing.stdout, /^\| agent-cannot-approve +\| accept_claim is refused +\| PASS +\|/m);
-  assert.ok(passing.stdout.includes('journeys: 11 passed, 0 failed; checks: '));
+  assert.ok(passing.stdout.includes('journeys: 12 passed, 0 failed; checks: '));
   assert.ok(passing.stdout.includes(`results: ${out}`));
   const written = JSON.parse(readFileSync(out, 'utf8'));
   assert.equal(written.schema, RESULTS_SCHEMA);
-  assert.deepEqual(written.summary.journeys, { pass: 11, fail: 0 });
+  assert.deepEqual(written.summary.journeys, { pass: 12, fail: 0 });
   assert.equal(JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.json'), 'utf8')).scripts.eval, 'node scripts/eval.ts');
 
   const dir = journeyDir({ broken: journey('broken', [{ id: 'books', do: 'call', tool: 'list_books', checks: [{ name: 'no book is listed', path: 'books.data.books', equals: [] }] }]) });

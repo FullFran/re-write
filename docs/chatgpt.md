@@ -59,6 +59,13 @@ lists Business, Enterprise and Edu. Check it on the writer's own plan.
   `graph_central` answer over the links, and take `as_of_scene` to leave out later scenes. They
   never write: a new note goes through `propose_note`, a change to a note through
   `propose_revision` on its `notas/` file. An unknown or ambiguous note name points to `list_notes`.
+  `graph_central` ranks by `degree`, `pagerank` or `betweenness` (a graph above the work cap is
+  refused with a pointer to degree or PageRank); `graph_neighbors` with `knows: true` adds who
+  knows what, from claims with `knowledge`, and lists holder or subject names that match no note
+  instead of guessing. `graph_suggest_links` lists notes that could be linked, with anchors: a
+  suggested link reaches the text only through `propose_revision` on the anchor's note file, which
+  the person accepts at the review URL (its `next_step` says so). The
+  `chatgpt-graph-suggestions` journey pins this flow.
   See [notes-and-graph.md](notes-and-graph.md).
 - **Scene lengths.** `list_scenes` adds `chars`, the length of each scene, so the assistant can plan
   `read_scene` pages of up to 20,000 characters.
