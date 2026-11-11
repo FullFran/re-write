@@ -59,11 +59,19 @@ test('MCP instructions preserve every previous safety sentence and point to the 
     'For narrative analysis, call get_analysis_guide to read the analysis procedure.',
   ];
   for (const sentence of previous) assert.ok(instructions.includes(sentence), sentence);
-  assert.ok(instructions.startsWith(previous.join('\n')));
+  // The three boundary sentences still open the instructions; the order of calls follows them.
+  assert.ok(instructions.startsWith(previous.slice(0, 3).join('\n')));
   assert.ok(instructions.includes('/llms.txt'));
   assert.ok(instructions.includes('Guía para escritores'));
   assert.ok(instructions.includes('/review'));
   assert.ok(instructions.includes('propose_findings'));
   assert.ok(instructions.includes('rate'));
   assert.ok(instructions.includes('export'));
+});
+
+test('the guide gives the order of calls, how chapters are named and where the person decides', () => {
+  const text = llmsText('https://rewrite.example/mcp');
+  assert.ok(text.includes('**Usual order:** `list_books`, `list_scenes`, `get_analysis_guide`, `read_scene` (every page), then `propose_findings`.'));
+  assert.ok(text.includes('chapter 3 is usually the scene whose path starts with `scenes/003-`'));
+  assert.ok(text.includes('Every proposal result carries `review_url`: give that link to the person'));
 });

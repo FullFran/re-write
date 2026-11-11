@@ -255,7 +255,7 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
     const body = await readBody(req);
     // Stateless: one server per request, so nothing about a person outlives the call.
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-    const server = buildMcpServer(library, subject);
+    const server = buildMcpServer(library, subject, undefined, undefined, null, `${config.reviewOrigin}/review`);
     res.on('close', () => {
       void transport.close();
       void server.close();
