@@ -107,6 +107,8 @@ test('Separador de escena puts *** on its own line between blank lines, and remo
   assert.equal(run('Fin de la escena.‸\nOtra escena.', toggleSceneBreak), 'Fin de la escena.\n\n***\n\n‸Otra escena.');
   assert.equal(run('Fin.‸', toggleSceneBreak), 'Fin.\n\n***\n\n‸');
   assert.equal(run('Fin.\n‸\nOtra.', toggleSceneBreak), 'Fin.\n\n***\n\n‸Otra.');
+  // At the end of a text that ends with a line break: the cursor gets a fresh line below.
+  assert.equal(run('Fin.\n‸', toggleSceneBreak), 'Fin.\n\n***\n\n‸');
   assert.equal(run('Fin.\n\n**‸*\n\nOtra.', toggleSceneBreak), 'Fin.\n‸\n\nOtra.');
 });
 

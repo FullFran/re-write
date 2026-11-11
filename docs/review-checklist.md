@@ -184,3 +184,17 @@ Tests pin link rendering, completion, following a link, backlinks, the note save
 - [ ] **Dibujo** on a desktop: the drawing appears with communities in colour; on a real phone (iOS Safari, Android Chrome) one finger pans the drawing, two fingers zoom, a tap on a node chooses its row, and the page still scrolls outside the drawing.
 - [ ] **Análisis**: **Buscar camino** between two notes draws the path and the screen reader reads the steps; **Quitar camino** clears it; a ranking name chooses the node in the table. *(automated)*
 - [ ] Switch the system theme while the drawing is open: labels, edges and colours follow at once and stay readable.
+
+## 14. Formatting, Analizar and the Phone Keyboard (#101)
+
+Tests pin every formatting rule on the raw Markdown (`editor/test/format.test.mjs`), the scope line and the engine-off message of **Analizar** (`tests/review-modes.test.ts`), and in Chromium the saved bytes of each toolbar action, Ctrl+B/I, the scope and the one prompt sent with the scene as context, and the phone layout at 360x740 and 390x844 with a simulated keyboard (`browser-tests/tests/format-toolbar.spec.ts` and `analyse.spec.ts`, which save screenshots on desktop and on a phone, light and dark). Emulation shrinks the whole window; a real on-screen keyboard only shrinks the visual viewport and behaves differently per browser. These need a real device:
+
+- [ ] iOS Safari and Android Chrome (Gboard): open the keyboard in **Concentración** and type at the end of a long scene. The line being typed stays above the keyboard, **Guardar** and its status stay at the top of what is visible, and the mode dock is gone until the keyboard closes.
+- [ ] iOS Safari: scroll up and down with the keyboard open. The head with **Guardar** follows the visible top (`--vv-top`) without jumping, and nothing is left floating in the middle of the screen when the keyboard closes.
+- [ ] On a real phone, select a word with a long press and tap **Formato**, then **Negrita**: the selection survives the tap, the word becomes `**word**` in **Markdown**, and the system selection handles do not cover the toolbar.
+- [ ] Hold a key for an accented letter and dictate a sentence right after **Cursiva** at the cursor: the text lands between the markers and the composition is not cut.
+- [ ] Rotate the phone with the keyboard open and closed: the dock comes back when the keyboard closes; nothing scrolls sideways.
+- [ ] Safe areas on a phone with a notch and a home indicator, in both orientations: the dock, the toolbar and the scene list stay inside them.
+- [ ] Mac: Cmd+B and Cmd+I format (the tests use Ctrl on Linux).
+- [ ] With a screen reader: the **Formato** group, each button's name and pressed state, **Analizar** with `aria-expanded`, the **Qué analizar** group and the **Se analizará: …** line are announced.
+- [ ] **Analizar** with a real ChatGPT account: the answer names the scene or the selection asked about; for **El libro** it says which scenes it read.

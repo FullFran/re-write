@@ -82,12 +82,14 @@ const editability = (editable) => [EditorView.editable.of(editable), EditorState
  * Builds an editor. `onChange` runs after each edit by the person, `onSave` on Ctrl/Cmd+S,
  * `onViewChange` when the person picks another view. `notes` ({ name, type, aliases }) are the
  * book's notes that wikilinks resolve and `[[` completes against, and `onOpenNote(target)` runs
- * when the person follows a link. Returns the same small surface as the page's plain text
+ * when the person follows a link; `margins()` ({ top, bottom } in px) is what covers the window
+ * around the text, which scrolling the caret into view keeps clear. Returns the same small surface as the page's plain text
  * field: dom, getValue, setValue, setEditable, isEditable, getSelection, select, focus, destroy,
- * plus setNotes. A formatting toolbar (format.js) sits between the views and the text. New behaviour belongs in its own extension module added to the list below, as
+ * plus setNotes, caretRect and toolbar (the formatting toolbar of format.js, which the page
+ * may move). New behaviour belongs in its own extension module added to the list below, as
  * live-preview.js and wikilinks.js are.
  */
-export function createSceneEditor({ text, label, view = 'live', notes = [], onChange = () => {}, onSave = () => {}, onViewChange = () => {}, onOpenNote = () => {} }) {
+export function createSceneEditor({ text, label, view = 'live', notes = [], onChange = () => {}, onSave = () => {}, onViewChange = () => {}, onOpenNote = () => {}, margins = () => null }) {
   const doc = document;
   let current = isView(view) ? view : 'live';
   let editable = true;
@@ -129,6 +131,9 @@ export function createSceneEditor({ text, label, view = 'live', notes = [], onCh
           if (update.docChanged && !update.transactions.some((tr) => tr.annotation(fromPage))) onChange();
         }),
         theme,
+        // What covers the window around the text (a sticky head, a dock, a phone keyboard), so
+        // the caret is never scrolled under it.
+        EditorView.scrollMargins.of(() => margins()),
         wikilinks({ notes, onOpen: (target) => onOpenNote(target) }),
         modeSlot.of(viewExtension(current)),
         editSlot.of(editability(true)),
@@ -170,6 +175,8 @@ export function createSceneEditor({ text, label, view = 'live', notes = [], onCh
 
   return {
     dom: root,
+    // The formatting toolbar, inside dom until the page places it elsewhere (its sticky head).
+    toolbar: format.dom,
     getValue: () => cm.state.doc.toString(),
     setValue(value) {
       cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: value }, annotations: fromPage.of(true) });
@@ -186,6 +193,11 @@ export function createSceneEditor({ text, label, view = 'live', notes = [], onCh
     },
     // Selects [from, to) of the text and scrolls it to the middle of the editor. The reading
     // view cannot show a selection, so it gives way to the live preview (not remembered).
+    // Where the caret is in the viewport ({ top, bottom }), or null when it is not drawn.
+    caretRect() {
+      const rect = cm.coordsAtPos(cm.state.selection.main.head);
+      return rect ? { top: rect.top, bottom: rect.bottom } : null;
+    },
     // The selection as [from, to) and its text, for the page's "Analizar" (empty when none).
     getSelection() {
       const { from, to } = cm.state.selection.main;

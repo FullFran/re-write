@@ -243,7 +243,7 @@ export function toggleSceneBreak(state) {
   if (blank) {
     // The break takes the empty line; a blank line is added only where text touches it.
     at = line.from;
-    insert = (prev && prev.text.trim() !== '' ? '\n' : '') + SCENE_BREAK + (next && next.text.trim() !== '' ? '\n' : '');
+    insert = (prev && prev.text.trim() !== '' ? '\n' : '') + SCENE_BREAK + (next ? (next.text.trim() !== '' ? '\n' : '') : '\n\n');
   } else {
     at = line.to;
     insert = '\n\n' + SCENE_BREAK + (next ? (next.text.trim() !== '' ? '\n' : '') : '\n\n');
