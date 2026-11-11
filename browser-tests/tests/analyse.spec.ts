@@ -74,10 +74,11 @@ for (const [name, size] of [['desktop', DESKTOP], ['phone', PHONE]] as const) {
     await box.getByRole('button', { name: 'Enviar al asistente' }).click();
     const answer = panel.locator('.answer');
     await expect(answer).toContainText(`book_id="sal" title="La puerta de Sal"; item=scene id="${SCENE}"`);
-    await expect(answer).toContainText('Analiza esta escena.');
     await expect(box.locator('.analyse-status')).toHaveText('Enviado al asistente. La respuesta aparece en su panel.');
     expect(prompts).toHaveLength(1);
-    expect(JSON.parse(prompts[0].postData()!).context).toEqual({ book_id: 'sal', item: { kind: 'scene', id: SCENE } });
+    const sent = JSON.parse(prompts[0].postData()!);
+    expect(sent.context).toEqual({ book_id: 'sal', item: { kind: 'scene', id: SCENE } });
+    expect(sent.text).toMatch(/^Analiza esta escena\. Fíjate en las motivaciones/);
     await shoot(page, `analizar-${name}-sent`);
     expect(errors).toEqual([]);
   });

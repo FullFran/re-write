@@ -193,7 +193,7 @@ body[data-mode=focus] .toolbar, body[data-mode=help] .toolbar { margin-bottom: v
 .scene-format[hidden] { display: none; }
 .format-toggle { display: none; }
 .format-buttons { display: flex; flex-wrap: wrap; gap: var(--space-1); }
-.format-buttons > button { padding: var(--space-1) var(--space-3); font-size: var(--text-sm); }
+.format-buttons > button { padding: var(--space-1) var(--space-2); font-size: var(--text-sm); }
 .format-buttons > [data-format=bold] { font-weight: 700; }
 .format-buttons > [data-format=italic] { font-style: italic; }
 .desk-help h2 { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-lg); }
