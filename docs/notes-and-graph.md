@@ -3,8 +3,9 @@
 Book notes hold the characters, places, objects and plot threads of a book. Notes and scenes link
 to notes with Obsidian-style wikilinks, and the links form a story graph that both the writer and
 the assistant can query. This is slice 1 of [#115](https://github.com/FullFran/re-write/issues/115):
-storage, links, backlinks, the graph core and the read-only MCP tools. The graph view, the editor's
-link rendering and autocomplete come in later slices.
+storage, links, backlinks, the graph core and the read-only MCP tools. Slice 2 adds the links in the
+editor, the notes and their backlinks in the page, the graph as data and its list view
+([design](design.md#notes-wikilinks-and-the-graph-list)). The graph drawing comes in slice 3.
 
 ## Notes
 
@@ -41,7 +42,8 @@ Notes change only in the two ways scenes do:
    with a new proposal.
 2. **A person's own edit**, through the review door, with the same rules as a scene edit: it applies
    only on top of the version the person opened (`blob`), refuses uncommitted local edits, and goes
-   into one commit that touches only that note. There is no editor UI for notes yet, only the API.
+   into one commit that touches only that note. In the page, **Notas** in Concentración or Ayuda
+   opens a note in the scene editor, which saves it through the same code as a scene.
 
 ## Wikilinks
 
@@ -110,7 +112,13 @@ size of the book) instead of cached, so it is never stale after an edit made out
 | --- | --- |
 | MCP (read-only, capability `com.fullfran.rewrite.notes.read@1`) | `list_notes`, `read_note`, `graph_neighbors`, `graph_orphans`, `graph_path`, `graph_central` (`metric: degree`) |
 | MCP (proposes, capability `com.fullfran.rewrite.revision.propose@1`) | `propose_note`, and `propose_revision` on a `notas/` file |
-| Review door | `GET /review/api/books/:book/notes`, `GET /review/api/books/:book/notes/:name`, `POST /review/api/books/:book/notes/:name` (a person's edit: `{ text, base_blob }`) |
+| Review door | `GET /review/api/books/:book/notes`, `GET /review/api/books/:book/notes/:name`, `POST /review/api/books/:book/notes/:name` (a person's edit: `{ text, base_blob }`), `GET /review/api/books/:book/graph[?as_of_scene=<scene path>]` |
+
+`GET .../graph` returns the graph as data, read-only: `nodes` (each with `id`, `kind`, `name`,
+`type`, `order`, `degree`, and `scenes`, the number of scenes that mention a note, `null` for a
+scene), `edges` (`kind`, `from`, `to`, `weight`), `scenes` (every scene path in reading order,
+whatever the cut, so a picker can offer them all), `as_of_scene` and `too_large`. An unknown
+`as_of_scene` is a `400` that names it. It is built from the same core as the MCP tools.
 
 A node in the graph tools is named like a link (a note name or alias, case and accents ignored) or
 by a scene path. An ambiguous or unknown name is refused with the next step (`list_notes`). The

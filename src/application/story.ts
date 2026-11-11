@@ -3,7 +3,7 @@
  * here writes. The analysis is rebuilt on each call from the texts (linear in the size of the book),
  * so it never serves a stale answer after an edit made outside RE;write.
  */
-import { analyseBook, backlinks, buildGraph, noteNode, sceneNode, type Analysis, type LinkRef, type StoryGraph } from '../domain/story-graph.ts';
+import { analyseBook, backlinks, buildGraph, central, noteNode, sceneNode, type Analysis, type LinkRef, type StoryGraph } from '../domain/story-graph.ts';
 import type { Project } from './project.ts';
 
 /** Every note and scene of the book, scenes in the reading order of Project.scenes (path order). */
@@ -81,6 +81,25 @@ export function notesSummary(project: Project) {
     unresolved: groupLinks(analysis.unresolved),
     ambiguous: groupLinks(analysis.ambiguous),
     /** Notes and scenes too large to analyse: their links and mentions are not counted. */
+    too_large: analysis.too_large,
+  };
+}
+
+/**
+ * The graph as data for the review page: every node with its degree (distinct neighbours) and, for
+ * a note, how many scenes mention it; the typed edges; and every scene path in reading order, so a
+ * slider can offer any of them. With `asOfScene` the later scenes and their edges are left out.
+ */
+export function graphData(project: Project, asOfScene?: string) {
+  const { analysis, graph } = graphOf(project, asOfScene);
+  const degree = new Map(central(graph).map((node) => [node.id, node.degree]));
+  const scenes = new Map<string, number>();
+  for (const edge of graph.edges) if (edge.kind === 'mention') scenes.set(edge.to, (scenes.get(edge.to) ?? 0) + 1);
+  return {
+    as_of_scene: asOfScene ?? null,
+    scenes: analysis.scenes,
+    nodes: graph.nodes.map((node) => ({ ...node, degree: degree.get(node.id)!, scenes: node.kind === 'note' ? scenes.get(node.id) ?? 0 : null })),
+    edges: graph.edges,
     too_large: analysis.too_large,
   };
 }
