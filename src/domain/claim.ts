@@ -13,8 +13,13 @@ export interface HistoryEntry {
   from: string;
   to: string;
   note?: string;
-  /** Set when a person reopened a decision; absent on ordinary decisions and on all older records. */
-  action?: 'reopen';
+  /**
+   * Set when a person reopened a decision, or asked to revert an accepted proposal (the status does
+   * not change then); absent on ordinary decisions and on all older records.
+   */
+  action?: 'reopen' | 'revert';
+  /** The proposal a `revert` entry created or reopened to undo this one. */
+  ref?: string;
 }
 
 /** How a claim bears on what a character knows. */

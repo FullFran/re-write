@@ -590,8 +590,10 @@ export function createHandler(
       }
     }
 
-    const reopen = parts.length === 5 && parts[4] === 'reopen';
-    if (req.method !== 'POST' || !(parts.length === 4 || reopen)) throw new HttpError(404, 'not found');
+    const action = parts.length === 5 ? parts[4] : null;
+    const reopen = action === 'reopen';
+    const proposalAction = kind === 'proposals' && (action === 'revert' || action === 'repropose');
+    if (req.method !== 'POST' || !(parts.length === 4 || reopen || proposalAction)) throw new HttpError(404, 'not found');
 
     const project = open(REVIEW_DECIDE);
     const body = (await readBody(req) ?? {}) as { decision?: unknown; verdict?: unknown; note?: unknown; expected?: unknown };
@@ -611,6 +613,13 @@ export function createHandler(
         problem(res, 409, library.publicMessage(error));
       }
     };
+    if (action === 'repropose') return refusable(() => project.reproposeRevision(id, subject));
+    if (action === 'revert') {
+      // Like reopen, a revert carries the history length the person saw.
+      if (!Number.isSafeInteger(body.expected) || (body.expected as number) < 0) throw new HttpError(400, 'expected must be the history length being reverted');
+      const expected = body.expected as number;
+      return refusable(() => project.revertProposal(id, subject, expected, note));
+    }
     if (reopen) {
       // Reopening takes back a decision, so it carries the state the person saw: the history length
       // of a claim or proposal, the time of a finding's verdict. A different state is refused.

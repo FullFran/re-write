@@ -9,7 +9,7 @@ import {
   type Claim, type ClaimCandidate, type ClaimView, type Decision,
 } from '../domain/claim.ts';
 import { verdictFields, CONTINUITY_VERDICTS, InvalidFindingVerdictError, inspectContinuity, type Finding, type Verdict, type VerdictHistoryEntry, type VerdictKind } from '../domain/continuity.ts';
-import { applyChange, proposalId, type Proposal } from '../domain/proposal.ts';
+import { applyChange, inverseChange, proposalId, type Proposal } from '../domain/proposal.ts';
 import {
   NARRATIVE_VERDICTS, findingId, viewFinding,
   type FindingCandidate, type FindingRecord, type FindingView,
@@ -423,8 +423,16 @@ export class Project {
   }
 
   /** Stores a change for review. It never writes to the scene. */
-  proposeRevision(input: { file: string; find: string; replace: string; rationale: string; finding_id?: string; proposed_by?: string }):
-    { proposal: Proposal; created: boolean } {
+  proposeRevision(input: ProposalInput): { proposal: Proposal; created: boolean } {
+    const proposal = this.buildProposal(input);
+    const existing = this.proposals.get(proposal.proposal_id);
+    if (existing) return { proposal: existing, created: false };
+    this.saveRecords(`rewrite: propose ${proposal.proposal_id}`, [['proposals', proposal.proposal_id]], () => this.proposals.put(proposal.proposal_id, proposal));
+    return { proposal, created: true };
+  }
+
+  /** Validates a change against the current committed text and builds its proposal, without storing it. */
+  private buildProposal(input: ProposalInput): Proposal {
     const file = this.scenePath(input.file);
     const text = this.readScene(file);
     if (text === null) throw new Error(`scene not found: ${file}`);
@@ -437,11 +445,8 @@ export class Project {
       throw new Error(`unknown finding: ${input.finding_id}`);
     }
     const baseBlob = this.git.blobOf(file);
-    const id = proposalId(file, baseBlob, input.find, input.replace);
-    const existing = this.proposals.get(id);
-    if (existing) return { proposal: existing, created: false };
-    const proposal: Proposal = {
-      proposal_id: id,
+    return {
+      proposal_id: proposalId(file, baseBlob, input.find, input.replace, input.reproposes),
       file,
       base_revision: this.git.head(),
       base_blob: baseBlob,
@@ -450,11 +455,11 @@ export class Project {
       rationale: input.rationale,
       ...(input.finding_id ? { finding_id: input.finding_id } : {}),
       ...(input.proposed_by ? { proposed_by: input.proposed_by } : {}),
+      ...(input.reverts ? { reverts: input.reverts } : {}),
+      ...(input.reproposes ? { reproposes: input.reproposes } : {}),
       status: 'proposed',
       history: [],
     };
-    this.saveRecords(`rewrite: propose ${id}`, [['proposals', id]], () => this.proposals.put(id, proposal));
-    return { proposal, created: true };
   }
 
   /** The proposal, its diff against its base, and whether it can still be applied. */
@@ -523,6 +528,82 @@ export class Project {
     this.saveRecords(`rewrite: reopen ${id}`, [['proposals', id]], () => this.proposals.put(id, proposal));
     return { proposal, changed: true };
   }
+
+  /**
+   * Starts undoing an accepted text change. It writes no text: it creates the inverse proposal (the
+   * changed passage back to what it was, against the current text), which changes the scene only
+   * when a person accepts it. The accepted proposal stays accepted and its history records who
+   * asked for the revert and which proposal undoes it. Refused when later edits touched the passage.
+   * A repeated click returns the same inverse proposal; a rejected inverse proposal is reopened.
+   */
+  revertProposal(id: string, by: string, expected: number, note?: string): { proposal: Proposal; created: boolean } {
+    const proposal = this.proposals.get(id);
+    if (!proposal) throw new Error(`unknown proposal: ${id}`);
+    if (proposal.status !== 'accepted') throw new Error(`only an accepted proposal can be reverted; ${id} is ${proposal.status}`);
+    const last = proposal.history.at(-1);
+    if (proposal.history.length === expected + 1 && last?.action === 'revert' && last.ref) {
+      const linked = this.proposals.get(last.ref);
+      if (linked?.status === 'proposed') return { proposal: linked, created: false };
+    }
+    if (proposal.history.length !== expected) throw new StaleStateError();
+
+    const current = this.readScene(proposal.file);
+    if (current === null) throw new Error(`scene not found: ${proposal.file}`);
+    if (this.git.isDirty(proposal.file)) throw new Error(`${proposal.file} has uncommitted edits; commit them before reverting a change`);
+    const base = this.git.showAt(proposal.base_revision, proposal.file);
+    const change = base === null ? null : inverseChange(base, proposal.find, proposal.replace, current);
+    if (change === null) {
+      throw new Error('Hay ediciones posteriores que tocan este pasaje, así que no se puede revertir automáticamente. Revísalo a mano con una propuesta nueva.');
+    }
+    const built = this.buildProposal({ file: proposal.file, ...change, rationale: `Revert ${id}`, proposed_by: by, reverts: id });
+    const existing = this.proposals.get(built.proposal_id);
+    const at = new Date().toISOString();
+    const inverse = existing ?? built;
+    if (inverse.status === 'rejected') {
+      inverse.history.push({ at, by, from: 'rejected', to: 'proposed', action: 'reopen', ref: id });
+      inverse.status = 'proposed';
+    }
+    proposal.history.push({ at, by, from: 'accepted', to: 'accepted', ...(note ? { note } : {}), action: 'revert', ref: inverse.proposal_id });
+    this.saveRecords(`rewrite: propose ${inverse.proposal_id} to revert ${id}`, [['proposals', inverse.proposal_id], ['proposals', id]], () => {
+      this.proposals.put(inverse.proposal_id, inverse);
+      this.proposals.put(id, proposal);
+    });
+    return { proposal: inverse, created: existing === null };
+  }
+
+  /**
+   * Proposes the change of an earlier proposal again, against the current text: after it was
+   * reverted, or when it went stale. The new proposal goes through review like any other.
+   */
+  reproposeRevision(id: string, by: string): { proposal: Proposal; created: boolean } {
+    const proposal = this.proposals.get(id);
+    if (!proposal) throw new Error(`unknown proposal: ${id}`);
+    const findingStillThere = proposal.finding_id && this.check().some((f) => f.finding_id === proposal.finding_id);
+    const built = this.buildProposal({
+      file: proposal.file,
+      find: proposal.find,
+      replace: proposal.replace,
+      rationale: proposal.rationale,
+      ...(findingStillThere ? { finding_id: proposal.finding_id } : {}),
+      proposed_by: by,
+      reproposes: id,
+    });
+    const existing = this.proposals.get(built.proposal_id);
+    if (existing) return { proposal: existing, created: false };
+    this.saveRecords(`rewrite: propose ${built.proposal_id} again from ${id}`, [['proposals', built.proposal_id]], () => this.proposals.put(built.proposal_id, built));
+    return { proposal: built, created: true };
+  }
+}
+
+interface ProposalInput {
+  file: string;
+  find: string;
+  replace: string;
+  rationale: string;
+  finding_id?: string;
+  proposed_by?: string;
+  reverts?: string;
+  reproposes?: string;
 }
 
 /**
