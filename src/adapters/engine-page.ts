@@ -1,8 +1,10 @@
 /**
  * The page where a writer talks with the embedded engine. Like the review page it holds
  * no data and renders everything with textContent: what the model writes, and what it
- * read from a manuscript, is untrusted. It works in one column from 360 px wide.
+ * read from a manuscript, is untrusted. It follows docs/design.md: the review page's
+ * tokens, one centred column at every size, controls of at least 44 px.
  */
+import { REVIEW_CSS } from './review-page.ts';
 
 function escapeAttribute(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
@@ -14,7 +16,7 @@ export function engineHtml(issuer: string, publishableKey: string): string {
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>RE;write · Asistente</title>
 <link rel="stylesheet" href="/review/engine/app.css">
 <script defer crossorigin="anonymous" src="${frontendApi}/npm/@clerk/ui@1/dist/ui.browser.js"></script>
@@ -29,37 +31,63 @@ export function engineHtml(issuer: string, publishableKey: string): string {
 `;
 }
 
+/**
+ * The colour roles and the spacing, type and control scales of docs/design.md, taken from
+ * the review page so both pages share one definition instead of two copies.
+ */
+const TOKENS_START = ':root {';
+const TOKENS_END = '* { box-sizing';
+if (!REVIEW_CSS.includes(TOKENS_START) || !REVIEW_CSS.includes(TOKENS_END)) throw new Error('design tokens not found in the review page styles');
+const DESIGN_TOKENS = REVIEW_CSS.slice(REVIEW_CSS.indexOf(TOKENS_START), REVIEW_CSS.indexOf(TOKENS_END));
+
 export const ENGINE_CSS = `
-:root { color-scheme: light dark; --ink: #1c1b19; --paper: #faf8f4; --line: #d9d4ca; --muted: #6b665c; --accent: #1f6b45; --warn: #a32a2a; --bubble: #efeae0; }
-@media (prefers-color-scheme: dark) { :root { --ink: #ece8df; --paper: #1a1917; --line: #3a372f; --muted: #a39d90; --accent: #5fc08f; --warn: #ef8585; --bubble: #26241f; } }
+/* Roles, scales and breakpoints are described in docs/design.md. */
+${DESIGN_TOKENS}
 * { box-sizing: border-box; }
-html, body { height: 100%; }
-body { margin: 0; display: flex; flex-direction: column; background: var(--paper); color: var(--ink); font: 16px/1.5 Georgia, 'Times New Roman', serif; }
-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
-h1 { margin: 0; font-size: 18px; }
-h2 { margin: 0 0 8px; font-size: 18px; }
-nav { display: flex; align-items: center; gap: 12px; }
-a { color: var(--accent); }
-nav a { display: inline-flex; align-items: center; min-height: 44px; }
-main { flex: 1; min-height: 0; width: 100%; max-width: 760px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-p { margin: 0 0 8px; }
-.muted { color: var(--muted); font-size: 14px; }
-.panel { border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
-.code { display: block; margin: 12px 0; padding: 12px; border: 1px dashed var(--line); border-radius: 8px; text-align: center; font: 700 28px/1.2 ui-monospace, Menlo, Consolas, monospace; letter-spacing: 2px; overflow-wrap: anywhere; user-select: all; }
-.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-button, .button { min-height: 44px; padding: 10px 16px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 16px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
-button.primary, .button.primary { background: var(--accent); border-color: var(--accent); color: var(--paper); }
-button.danger { color: var(--warn); }
-button:disabled { opacity: 0.5; cursor: default; }
-.messages { flex: 1; min-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 0; }
-.message { max-width: 92%; padding: 10px 12px; border-radius: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.message.user { align-self: flex-end; background: var(--accent); color: var(--paper); }
-.message.assistant { align-self: flex-start; background: var(--bubble); }
-.message.note { align-self: center; color: var(--muted); font-size: 14px; padding: 2px 8px; }
-.message.error { align-self: center; color: var(--warn); font-size: 14px; }
-form { display: flex; gap: 8px; align-items: flex-end; }
-textarea { flex: 1; min-width: 0; min-height: 44px; max-height: 40vh; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 16px; resize: vertical; }
-@media (max-width: 480px) { header { padding: 8px 12px; } main { padding: 12px; } .message { max-width: 100%; } }
+html { height: 100%; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { margin: 0; min-height: 100%; display: flex; flex-direction: column; background: var(--paper); color: var(--ink); font: var(--text-md)/1.6 var(--font-prose); overflow-wrap: anywhere; }
+header { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-2) max(var(--gutter), calc((100% - var(--measure)) / 2 + var(--gutter))); padding-top: max(var(--space-2), env(safe-area-inset-top)); border-bottom: 1px solid var(--line); }
+h1 { margin: 0; font: 700 var(--text-lg)/1.3 var(--font-ui); }
+h2 { margin: 0 0 var(--space-2); font: 700 var(--text-lg)/1.3 var(--font-ui); }
+nav { display: flex; align-items: center; gap: var(--space-3); font: var(--text-md)/1.3 var(--font-ui); }
+a { color: inherit; }
+nav a { display: inline-flex; align-items: center; min-height: var(--tap); }
+#user { display: flex; align-items: center; justify-content: flex-end; min-width: var(--tap); min-height: var(--tap); }
+main { flex: 1; min-height: 0; width: 100%; max-width: var(--measure); margin: 0 auto; padding: var(--space-4) var(--gutter) calc(var(--space-4) + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: var(--space-3); }
+p { margin: 0 0 var(--space-2); }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.muted { color: var(--muted); font: var(--text-sm)/1.45 var(--font-ui); }
+.panel { border: 1px solid var(--line); border-radius: var(--radius); padding: var(--space-4); }
+.code { display: block; margin: var(--space-3) 0; padding: var(--space-3); border: 1px solid var(--edge); border-radius: var(--radius); text-align: center; font: 700 var(--text-xl)/1.3 var(--font-code); letter-spacing: .1em; user-select: all; }
+.row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
+button, .button, textarea { min-height: var(--tap); max-width: 100%; margin: 0; padding: var(--space-2) var(--space-4); border: 1px solid var(--edge); border-radius: var(--radius); background: transparent; color: inherit; font: var(--text-md)/1.3 var(--font-ui); touch-action: manipulation; }
+button, .button { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; text-decoration: none; transition: background-color .12s, opacity .12s; }
+button.accept, .button.accept { border-color: var(--accept); background: var(--accept); color: var(--paper); font-weight: 600; }
+button.reject { border-color: var(--reject); color: var(--reject); font-weight: 600; }
+button:disabled { opacity: .5; cursor: default; }
+@media (hover: hover) {
+  button:not(:disabled):hover, .button:hover { background: var(--pressed); }
+  button.accept:not(:disabled):hover, .button.accept:hover { background: var(--accept); opacity: .85; }
+}
+.messages { flex: 1; min-height: 8rem; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-1) 0; }
+/* Who speaks is said by position, outline and a label for screen readers, not by colour alone. */
+.message { max-width: 92%; padding: var(--space-2) var(--space-3); border-radius: var(--radius); white-space: pre-wrap; }
+.message.user { align-self: flex-end; background: var(--pressed); font: var(--text-md)/1.45 var(--font-ui); }
+.message.assistant { align-self: flex-start; border: 1px solid var(--line); }
+.message.note { align-self: center; padding: 0 var(--space-2); color: var(--muted); font: var(--text-sm)/1.45 var(--font-ui); }
+[role=alert] { align-self: stretch; max-width: none; margin: 0; padding: var(--space-3) var(--space-4); border: 1px solid var(--reject); border-left-width: var(--space-1); border-radius: var(--radius); background: var(--reject-bg); font: var(--text-sm)/1.45 var(--font-ui); }
+form { display: flex; gap: var(--space-3); align-items: flex-end; }
+textarea { flex: 1 1 auto; min-width: 0; max-height: 40vh; padding: var(--space-2) var(--space-3); resize: vertical; }
+@media (max-width: 40em) {
+  .message { max-width: 100%; }
+  .row > button, .row > .button { flex: 1 1 100%; }
+}
+@media (min-width: 48em) {
+  main { padding-top: var(--space-5); }
+}
+@media (prefers-reduced-motion: reduce) {
+  button, .button { transition: none; }
+}
 `;
 
 export const ENGINE_JS = String.raw`
@@ -73,6 +101,8 @@ const MESSAGES = {
   not_connected: 'Conecta tu cuenta de ChatGPT para empezar.',
   engine_unavailable: 'El asistente no está disponible ahora mismo.',
   login_failed: 'No se pudo iniciar la conexión con ChatGPT. Prueba de nuevo.',
+  rate_limited: 'Has pedido demasiados códigos seguidos. Espera unos minutos y prueba de nuevo.',
+  turn_limit: 'La respuesta se ha detenido porque era demasiado larga o tardaba demasiado.',
 };
 const state = { status: { state: 'disconnected' }, messages: [], running: false, notice: '', poll: null };
 
@@ -112,6 +142,8 @@ async function failure(res) {
 async function refreshStatus() {
   const res = await api('GET', '/status');
   if (res.ok) state.status = await res.json();
+  // The engine does not exist for someone who cannot use a book yet.
+  else if (res.status === 404) state.status = { state: 'unavailable' };
   if (state.status.state !== 'pending' && state.poll) {
     clearInterval(state.poll);
     state.poll = null;
@@ -198,6 +230,12 @@ async function stop() {
 function connectPanel() {
   const panel = el('section', 'panel');
   const status = state.status;
+  if (status.state === 'unavailable') {
+    const link = el('a', 'button accept', 'Ir a Revisión');
+    link.setAttribute('href', '/review');
+    panel.append(el('h2', '', 'Primero necesitas un libro'), el('p', '', 'El asistente trabaja sobre tus libros. Crea uno o pide acceso a uno en Revisión y vuelve aquí.'), link);
+    return panel;
+  }
   if (status.state === 'pending') {
     panel.append(
       el('h2', '', 'Escribe este código en OpenAI'),
@@ -205,7 +243,7 @@ function connectPanel() {
       el('strong', 'code', status.user_code || '…'),
     );
     const row = el('div', 'row');
-    const link = el('a', 'button primary', 'Abrir OpenAI');
+    const link = el('a', 'button accept', 'Abrir OpenAI');
     link.setAttribute('href', status.verification_uri);
     link.setAttribute('target', '_blank');
     link.setAttribute('rel', 'noopener noreferrer');
@@ -219,8 +257,8 @@ function connectPanel() {
     el('p', 'muted', 'El texto que el asistente lea de tus libros se envía a OpenAI con tu cuenta.'),
   );
   const row = el('div', 'row');
-  row.append(button('Conectar ChatGPT', 'primary', connect));
-  if (status.state === 'reconnect') row.append(button('Desconectar', 'danger', disconnect));
+  row.append(button('Conectar ChatGPT', 'accept', connect));
+  if (status.state === 'reconnect') row.append(button('Desconectar', 'reject', disconnect));
   panel.append(row);
   return panel;
 }
@@ -228,7 +266,15 @@ function connectPanel() {
 function chat() {
   const list = el('div', 'messages');
   if (state.messages.length === 0) list.append(el('p', 'muted', 'Pregunta por tu libro: personajes, continuidad, una escena que no encaja.'));
-  for (const message of state.messages) list.append(el('div', 'message ' + message.role, message.text || '…'));
+  list.setAttribute('role', 'log');
+  list.setAttribute('aria-label', 'Conversación');
+  for (const message of state.messages) {
+    const bubble = el('div', 'message ' + message.role, message.text || '…');
+    if (message.role === 'error') bubble.setAttribute('role', 'alert');
+    if (message.role === 'user') bubble.setAttribute('aria-label', 'Tú');
+    if (message.role === 'assistant') bubble.setAttribute('aria-label', 'Asistente');
+    list.append(bubble);
+  }
   const form = el('form');
   const input = el('textarea');
   input.id = 'prompt';
@@ -243,7 +289,7 @@ function chat() {
     return sendPrompt(text);
   };
   form.addEventListener('submit', (event) => { event.preventDefault(); return submit(); });
-  form.append(input, state.running ? button('Detener', 'danger', stop) : button('Enviar', 'primary', submit));
+  form.append(input, state.running ? button('Detener', 'reject', stop) : button('Enviar', 'accept', submit));
   const footer = el('div', 'row');
   footer.append(button('Desconectar ChatGPT', '', disconnect), el('span', 'muted', 'La conversación no se guarda: se pierde al cerrar o tras un rato sin usarla.'));
   return [list, form, footer];
@@ -251,7 +297,11 @@ function chat() {
 
 function render() {
   const nodes = state.status.state === 'connected' ? chat() : [connectPanel()];
-  if (state.notice) nodes.unshift(el('p', 'message error', state.notice));
+  if (state.notice) {
+    const alert = el('p', '', state.notice);
+    alert.setAttribute('role', 'alert');
+    nodes.unshift(alert);
+  }
   app.replaceChildren(...nodes);
   const list = nodes.find((node) => node.className === 'messages');
   if (list) list.scrollTop = list.scrollHeight;
@@ -269,7 +319,9 @@ window.addEventListener('load', async () => {
     window.Clerk.mountUserButton(document.getElementById('user'));
     await refreshStatus();
   } catch (error) {
-    app.replaceChildren(el('p', 'message error', 'No se pudo cargar la página'));
+    const alert = el('p', '', 'No se pudo cargar la página');
+    alert.setAttribute('role', 'alert');
+    app.replaceChildren(alert);
   }
 });
 `;

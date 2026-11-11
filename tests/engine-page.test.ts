@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { ENGINE_CSS, ENGINE_JS, engineHtml } from '../src/adapters/engine-page.ts';
+import { REVIEW_CSS } from '../src/adapters/review-page.ts';
 
 // Minimal DOM adapter: execute the shipped script, not a second rendering implementation.
 class Element {
@@ -143,14 +144,46 @@ test('disconnect calls the server and clears the conversation', async () => {
   assert.ok(byText(ui.app, 'button', 'Conectar ChatGPT'));
 });
 
-test('the page is built for a phone: one column, 16 px inputs, 44 px targets', () => {
+test('a person with no book is sent to the review page instead of a connect button', async () => {
+  const ui = page({ 'GET /status': { status: 404, json: {} } });
+  await ui.refreshStatus();
+  assert.ok(byText(ui.app, 'h2', 'Primero necesitas un libro'));
+  assert.equal(nodes(ui.app, 'a')[0].attrs.href, '/review');
+  assert.equal(nodes(ui.app, 'button').length, 0);
+});
+
+test('errors are announced as alerts and the new limits have their own messages', async () => {
+  const ui = page({ 'POST /login': { status: 429, json: { error: 'rate_limited' } } });
+  await ui.connect();
+  const alert = nodes(ui.app, 'p').find((n) => n.attrs.role === 'alert');
+  assert.equal(alert?.textContent, 'Has pedido demasiados códigos seguidos. Espera unos minutos y prueba de nuevo.');
+
+  const chat = page({ 'GET /status': { json: { state: 'connected' } }, 'POST /prompt': { chunks: ['event: error\ndata: {"code":"turn_limit"}\n\n'] } });
+  await chat.refreshStatus();
+  await chat.sendPrompt('hola');
+  const bubble = nodes(chat.app, 'div').find((n) => n.attrs.role === 'alert');
+  assert.equal(bubble?.textContent, 'La respuesta se ha detenido porque era demasiado larga o tardaba demasiado.');
+});
+
+test('the page follows docs/design.md: shared tokens, one column, 16 px controls of 44 px', () => {
   const html = engineHtml('https://clerk.example.com/', 'pk_test_"placeholder');
-  assert.match(html, /<meta name="viewport" content="width=device-width, initial-scale=1">/);
+  assert.match(html, /<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">/);
   assert.match(html, /<a href="\/review">/);
   assert.match(html, /data-clerk-publishable-key="pk_test_&quot;placeholder"/);
-  assert.match(ENGINE_CSS, /textarea \{[^}]*font-size: 16px/);
-  assert.match(ENGINE_CSS, /button, \.button \{ min-height: 44px;[^}]*font-size: 16px/);
-  assert.match(ENGINE_CSS, /main \{[^}]*max-width: 760px[^}]*flex-direction: column/);
-  assert.doesNotMatch(ENGINE_CSS, /min-width: (3[6-9]\d|[4-9]\d\d)px/, 'nothing forces a width over 360 px');
+
+  // The tokens are the review page's own, not a second copy.
+  const tokens = REVIEW_CSS.slice(REVIEW_CSS.indexOf(':root {'), REVIEW_CSS.indexOf('* { box-sizing'));
+  assert.match(tokens, /--tap: 44px/);
+  assert.match(tokens, /prefers-color-scheme: dark/);
+  assert.ok(ENGINE_CSS.includes(tokens));
+  const own = ENGINE_CSS.replace(tokens, '');
+  assert.doesNotMatch(own, /#[0-9a-fA-F]{3,8}\b/, 'no colour literal outside the tokens');
+  assert.doesNotMatch(own, /\b\d+px\b(?<!\b[12]px)/, 'no spacing or size literal outside the scales (1 and 2 px lines aside)');
+  assert.match(own, /button, \.button, textarea \{ min-height: var\(--tap\);[^}]*font: var\(--text-md\)/);
+  assert.match(own, /main \{[^}]*max-width: var\(--measure\)[^}]*flex-direction: column/);
+  assert.deepEqual([...own.matchAll(/@media \((?:max|min)-width: ([^)]+)\)/g)].map((m) => m[1]), ['40em', '48em'], 'the two breakpoints of the design rules');
+  assert.match(own, /:focus-visible/);
+  assert.match(own, /prefers-reduced-motion: reduce/);
+  assert.match(own, /env\(safe-area-inset-bottom\)/);
   assert.doesNotMatch(ENGINE_JS, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
 });
