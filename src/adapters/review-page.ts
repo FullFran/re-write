@@ -207,6 +207,7 @@ body[data-mode=focus] .toolbar, body[data-mode=help] .toolbar { margin-bottom: v
 /* Analizar: Ayuda only, its scope said before sending (docs/design.md, "Modes"). */
 .analyse-toggle, .desk-analyse { display: none; }
 body[data-mode=help] .analyse-toggle { display: inline-flex; align-items: center; }
+.analyse-toggle[aria-expanded=true] { background: var(--pressed); }
 body[data-mode=help] .desk-analyse:not([hidden]) { display: block; margin: var(--space-3) 0; padding: var(--space-3) var(--space-4); border: 1px solid var(--line); border-left: 4px solid var(--accept); border-radius: var(--radius); }
 .desk-analyse h2 { margin: 0 0 var(--space-2); font-size: var(--text-lg); }
 .analyse-scopes { display: flex; flex-wrap: wrap; gap: var(--space-1); }
