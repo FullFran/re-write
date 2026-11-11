@@ -23,6 +23,8 @@ npm test        # automated tests
 npm run eval    # agent journeys over the MCP harness, no model and no network (docs/evals.md)
 ```
 
+The review page also has browser tests in their own package, `browser-tests/`; see [testing](docs/testing.md).
+
 `node scripts/demo.ts walkthrough.log` also saves the walkthrough to a file. A saved run is in [docs/demo-log.txt](docs/demo-log.txt).
 
 ## Use it

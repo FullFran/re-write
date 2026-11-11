@@ -55,6 +55,43 @@ jobs:
           path: evals/results/results.json
           if-no-files-found: error
 
+  # Drives the real /review page in headless Chromium against the real server and a
+  # synthetic book. Playwright is a dependency of browser-tests/ only (docs/testing.md).
+  browser:
+    name: browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Chromium and its system libraries come preinstalled in Playwright's image for the pinned
+    # version, so the job does not depend on apt mirrors (an apt outage failed every run on
+    # 2026-11-11). Keep the tag equal to @playwright/test in browser-tests/package.json.
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            browser-tests/package-lock.json
+      # The tests start the server from src/, which needs the root dependencies.
+      - run: npm ci
+      - run: npm ci
+        working-directory: browser-tests
+      - run: npx playwright test
+        working-directory: browser-tests
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: browser-results
+          path: |
+            browser-tests/test-results/
+            browser-tests/playwright-report/
+          retention-days: 7
+
   image:
     name: image
     runs-on: ubuntu-latest

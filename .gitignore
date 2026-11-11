@@ -3,3 +3,5 @@ demo-output/
 odd/
 .atl/
 .claude/
+browser-tests/test-results/
+browser-tests/playwright-report/
