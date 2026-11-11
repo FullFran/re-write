@@ -7,6 +7,13 @@ export class TarUnsafeNameError extends Error {
   constructor(memberName: string) { super('Tar name contains bytes after NUL'); this.memberName = memberName; }
 }
 
+// The bytes are not a well-formed archive. `reason` is a short stable name for what is wrong
+// (for example `invalid checksum`); `message` is the human-readable text.
+export class TarFormatError extends Error {
+  readonly reason: string;
+  constructor(reason: string, message: string) { super(message); this.name = 'TarFormatError'; this.reason = reason; }
+}
+
 function stringField(header: Buffer, start: number, size: number): string {
   const field = header.subarray(start, start + size);
   const end = field.indexOf(0);
@@ -14,9 +21,9 @@ function stringField(header: Buffer, start: number, size: number): string {
 }
 function octal(header: Buffer, start: number, size: number): number {
   const text = stringField(header, start, size).trim();
-  if (text && !/^[0-7]+$/.test(text)) throw new Error('Invalid tar numeric field');
+  if (text && !/^[0-7]+$/.test(text)) throw new TarFormatError('invalid numeric field', 'Invalid tar numeric field');
   const value = text ? parseInt(text, 8) : 0;
-  if (!Number.isSafeInteger(value)) throw new Error('Tar numeric field exceeds safe range');
+  if (!Number.isSafeInteger(value)) throw new TarFormatError('invalid numeric field', 'Tar numeric field exceeds safe range');
   return value;
 }
 function putOctal(header: Buffer, start: number, size: number, value: number): void {
@@ -58,17 +65,17 @@ export function writeTar(members: TarInput[]): Buffer {
 }
 export function readTar(bytes: Uint8Array): TarMember[] {
   const buffer = Buffer.from(bytes), members: TarMember[] = [];
-  if (buffer.length % BLOCK) throw new Error('Truncated tar archive');
+  if (buffer.length % BLOCK) throw new TarFormatError('truncated archive', 'Truncated tar archive');
   let offset = 0;
   while (offset + BLOCK <= buffer.length) {
     const header = buffer.subarray(offset, offset + BLOCK);
     if (header.every(b => b === 0)) {
-      if (offset + BLOCK * 2 > buffer.length || !buffer.subarray(offset).every(b => b === 0)) throw new Error('Invalid tar terminator');
+      if (offset + BLOCK * 2 > buffer.length || !buffer.subarray(offset).every(b => b === 0)) throw new TarFormatError('invalid terminator', 'Invalid tar terminator');
       return members;
     }
     const stored = octal(header, 148, 8);
     let sum = 0; for (let i = 0; i < BLOCK; i++) sum += i >= 148 && i < 156 ? 32 : header[i];
-    if (sum !== stored) throw new Error('Invalid tar checksum');
+    if (sum !== stored) throw new TarFormatError('invalid checksum', 'Invalid tar checksum');
     const name = stringField(header, 0, 100), prefix = stringField(header, 345, 155);
     for (const [start, length] of [[0, 100], [345, 155]]) {
       const field = header.subarray(start, start + length), nul = field.indexOf(0);
@@ -80,9 +87,9 @@ export function readTar(bytes: Uint8Array): TarMember[] {
     }
     const size = octal(header, 124, 12), mode = octal(header, 100, 8);
     const start = offset + BLOCK, end = start + size;
-    if (end > buffer.length || start + Math.ceil(size / BLOCK) * BLOCK > buffer.length) throw new Error('Truncated tar member');
+    if (end > buffer.length || start + Math.ceil(size / BLOCK) * BLOCK > buffer.length) throw new TarFormatError('truncated member', 'Truncated tar member');
     members.push({ name: prefix ? `${prefix}/${name}` : name, type: String.fromCharCode(header[156] || 48), size, mode, linkname: stringField(header, 157, 100), data: buffer.subarray(start, end) });
     offset = start + Math.ceil(size / BLOCK) * BLOCK;
   }
-  throw new Error('Missing tar terminator');
+  throw new TarFormatError('missing terminator', 'Missing tar terminator');
 }

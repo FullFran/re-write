@@ -1,14 +1,12 @@
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { gunzipSync } from 'node:zlib';
-import { evaluate, readRequestDocument, type Grant, type PermissionRequest } from './authority.ts';
+import { evaluate, matching, readRequestDocument, type Grant, type PermissionRequest } from './authority.ts';
 import type { CatalogEntry } from './catalog.ts';
-import { writeDecisionRecord } from './decision-records.ts';
+import { writeDecisionRecord, type Decider } from './decision-records.ts';
 import { HcsFailure, hcsError } from './errors.ts';
 import { isDottedId, REWRITE_PERMISSIONS } from './ids.ts';
-import { fetchPackageBytes, verifyPackage } from './package.ts';
-import { readTar } from './tar.ts';
+import { fetchPackageBytes, readPackageMembers, verifyPackage } from './package.ts';
 
 // Grants held by the host, one record per entry and permission (HCS-0005). They live in
 // `<data-dir>/grants.json` and are read again on every check, so a revocation applies to the next
@@ -77,10 +75,11 @@ export function revokePermission(dataDir: string, entry: string, permission: str
   }
 }
 
-// The permissions a verified package requests. No package code runs: the archive is only read.
+// The permissions a verified package requests. No package code runs: the archive is only read. An
+// archive that cannot be read is refused like when unpacking it (`integrity_mismatch`).
 export function packageRequests(bytes: Uint8Array, entry: CatalogEntry): PermissionRequest[] {
   verifyPackage(bytes, entry);
-  const members = readTar(gunzipSync(bytes, { maxOutputLength: MAX_PACKAGE_BYTES }))
+  const members = readPackageMembers(bytes, MAX_PACKAGE_BYTES)
     .filter(member => posix.normalize(member.name).replace(/\/$/, '') === REQUEST_DOCUMENT);
   if (members.length === 0) return [];
   if (members.length > 1 || members[0].type !== '0') throw new Error('Invalid request document');
@@ -93,7 +92,13 @@ export function packageRequests(bytes: Uint8Array, entry: CatalogEntry): Permiss
 // The lifecycle's default authorization: an entry is authorized only when every permission its
 // package requests is granted. A package that requests nothing needs no grant. Aborting `signal`
 // aborts the package download.
+// Each permission decided writes one decision record to `<grantsDir>/decisions.jsonl`, next to the
+// `grants.json` that decided, before it is acted on (HCS-0005-R010), with channel
+// `lifecycle-authorize`. Its `operation` is one identifier generated when the authorizer is created
+// and shared by every entry it authorizes: the lifecycle creates one per apply run. When a record
+// cannot be written the entry is not authorized (HCS-0005-R012).
 export function grantAuthorizer(options: { grantsDir: string; storeDir: string }): (entry: CatalogEntry, signal?: AbortSignal) => Promise<boolean> {
+  const operation = randomUUID();
   return async (entry, signal) => {
     let bytes: Uint8Array;
     try { bytes = await fetchPackageBytes(entry, { storeDir: options.storeDir, signal }); } catch (error) {
@@ -102,8 +107,16 @@ export function grantAuthorizer(options: { grantsDir: string; storeDir: string }
     }
     const requests = packageRequests(bytes, entry);
     const grants = readGrants(options.grantsDir);
-    for (const request of requests) {
-      const decision = evaluate({ entry: entry.id, permission: request.permission }, grants);
+    for (const { permission } of requests) {
+      const check = { entry: entry.id, permission };
+      const decision = evaluate(check, grants);
+      const grant = matching(check, grants);
+      const decider: Decider = decision.allow && grant ? { kind: 'grant', id: grantId(grant) } : { kind: 'policy', id: 'HCS-0005-R001' };
+      try {
+        writeDecisionRecord(options.grantsDir, { entry: entry.id, permission, outcome: decision.allow ? 'allow' : 'deny', operation, decider, channel: 'lifecycle-authorize' });
+      } catch {
+        throw new HcsFailure([hcsError('permission_denied', `Permission denied: ${permission}`, { entry: entry.id, requirement: 'HCS-0005-R012' })]);
+      }
       if (!decision.allow) throw new HcsFailure([decision.error]);
     }
     return true;
