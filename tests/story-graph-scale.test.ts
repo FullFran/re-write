@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { analyseBook, backlinks, MAX_ANALYSED_CHARS } from '../src/domain/story-graph.ts';
+import { analyseBook, backlinks, buildGraph, knowsEdges, MAX_ANALYSED_CHARS, pageRank, type KnowledgeClaim } from '../src/domain/story-graph.ts';
 import { codeRanges, parseWikilinks } from '../src/domain/wikilink.ts';
 
 /**
@@ -80,4 +80,25 @@ test('a text over the work cap is reported as too large to analyse instead of be
   const analysis = analyseBook({ notes: [{ name: 'Elena', text: '' }], scenes: [{ file: 'scenes/1.md', text: huge }, { file: 'scenes/2.md', text: '[[Elena]]' }] });
   assert.deepEqual(analysis.too_large, [{ source_kind: 'scene', source: 'scenes/1.md', chars: MAX_ANALYSED_CHARS + 1 }]);
   assert.deepEqual(analysis.links.map((link) => link.source), ['scenes/2.md'], 'the other scenes are still analysed');
+});
+
+test('the paragraph co-occurrence weight over many paragraphs runs in linear time', () => {
+  const two = (scene: string) => analyseBook({ notes: [{ name: 'A', text: '' }, { name: 'B', text: '' }], scenes: [{ file: 'scenes/1.md', text: scene }] });
+  linear('paragraphs', repeat('[[A]] y [[B]].\n\n'), (text) => {
+    const edge = buildGraph(two(text), undefined, { paragraphs: true }).edges.find((e) => e.kind === 'cooccurs')!;
+    assert.equal(edge.paragraphs, text.length / 16);
+  });
+});
+
+test('PageRank and knows edges over a growing chain of notes run in linear time', () => {
+  // One note per 16 characters of "size", each linking the next, and one knowledge claim per note.
+  const chain = (size: number) => {
+    const count = Math.floor(size / 16);
+    const names = Array.from({ length: count }, (_, i) => `N${i}`);
+    const analysis = analyseBook({ notes: names.map((name, i) => ({ name, text: i + 1 < count ? `[[N${i + 1}]]` : '' })), scenes: [{ file: 'scenes/1.md', text: '' }] });
+    const claims: KnowledgeClaim[] = names.map((name, i) => ({ claim_id: `C-${i}`, subject: name, source_file: 'scenes/1.md', editorial_status: 'proposed', knowledge: { holder: 'N0', fact: name, mode: 'displays' } }));
+    return { analysis, graph: buildGraph(analysis), claims, count };
+  };
+  linear('pagerank', chain, ({ graph, count }) => assert.equal(pageRank(graph).size, count + 1), 'every note and the scene');
+  linear('knows', chain, ({ analysis, claims, count }) => assert.equal(knowsEdges(analysis, claims).edges.length, count));
 });

@@ -297,19 +297,27 @@ export interface GraphEdge {
   to: string;
   /** mention and link: how many links; cooccurs: how many scenes the two notes share. */
   weight: number;
+  /** cooccurs only, and only with the `paragraphs` option: how many scene paragraphs the two notes share. */
+  paragraphs?: number;
 }
 export interface StoryGraph { nodes: GraphNode[]; edges: GraphEdge[] }
 
 export const noteNode = (name: string) => `note:${name}`;
 export const sceneNode = (file: string) => `scene:${file}`;
 
+export interface GraphOptions {
+  /** Add to every cooccurs edge the finer weight `paragraphs`: the scene paragraphs the two notes share. */
+  paragraphs?: boolean;
+}
+
 /**
  * Notes and scenes as nodes, with typed edges: `mention` (scene to note), `link` (note to note,
  * self-links left out) and `cooccurs` (two notes mentioned in the same scene, from the smaller id to
  * the larger). With `asOfScene`, scenes after it in reading order, and the edges they bring, are
- * left out; notes and links between notes are always kept.
+ * left out; notes and links between notes are always kept. A paragraph is a run of lines with text:
+ * lines that are empty or hold only spaces separate paragraphs.
  */
-export function buildGraph(analysis: Analysis, asOfScene?: string): StoryGraph {
+export function buildGraph(analysis: Analysis, asOfScene?: string, options: GraphOptions = {}): StoryGraph {
   let scenes = analysis.scenes;
   if (asOfScene !== undefined) {
     const last = scenes.indexOf(asOfScene);
@@ -330,6 +338,9 @@ export function buildGraph(analysis: Analysis, asOfScene?: string): StoryGraph {
     weights.set(key, edge);
   };
   const mentioned = new Map<string, Set<string>>();
+  // With the paragraph option: the notes of each paragraph, keyed by scene and paragraph number.
+  const inParagraph = new Map<string, Set<string>>();
+  const paragraphsOf = new Map(analysis.sources.filter((source) => source.kind === 'scene').map((source) => [source.id, source]));
   for (const link of analysis.links) {
     if (link.resolution.status !== 'resolved') continue;
     const target = link.resolution.note;
@@ -338,14 +349,48 @@ export function buildGraph(analysis: Analysis, asOfScene?: string): StoryGraph {
     } else if (kept.has(link.source)) {
       bump('mention', sceneNode(link.source), noteNode(target));
       mentioned.set(link.source, (mentioned.get(link.source) ?? new Set()).add(noteNode(target)));
+      if (options.paragraphs) {
+        const key = `${link.source}\u0000${paragraphNumbers(paragraphsOf.get(link.source)!)[link.line - 1]}`;
+        inParagraph.set(key, (inParagraph.get(key) ?? new Set()).add(noteNode(target)));
+      }
     }
   }
   for (const notes of mentioned.values()) {
     const list = [...notes].sort(byCodeUnit);
     for (let i = 0; i < list.length; i += 1) for (let j = i + 1; j < list.length; j += 1) bump('cooccurs', list[i], list[j]);
   }
+  if (options.paragraphs) {
+    for (const edge of weights.values()) if (edge.kind === 'cooccurs') edge.paragraphs = 0;
+    for (const notes of inParagraph.values()) {
+      const list = [...notes].sort(byCodeUnit);
+      for (let i = 0; i < list.length; i += 1) for (let j = i + 1; j < list.length; j += 1) weights.get(`cooccurs\u0000${list[i]}\u0000${list[j]}`)!.paragraphs! += 1;
+    }
+  }
   const edges = [...weights.values()].sort((a, b) => byCodeUnit(a.kind, b.kind) || byCodeUnit(a.from, b.from) || byCodeUnit(a.to, b.to));
   return { nodes, edges };
+}
+
+const paragraphCache = new WeakMap<Source, number[]>();
+
+/** The paragraph number of each line of a text (0-based lines): it grows at each line with text after a blank line. */
+function paragraphNumbers(source: Source): number[] {
+  let found = paragraphCache.get(source);
+  if (found) return found;
+  found = [];
+  let paragraph = 0;
+  let seenText = false;
+  let blankBefore = false;
+  for (const line of source.text.split('\n')) {
+    if (line.trim() === '') blankBefore = true;
+    else {
+      if (seenText && blankBefore) paragraph += 1;
+      seenText = true;
+      blankBefore = false;
+    }
+    found.push(paragraph);
+  }
+  paragraphCache.set(source, found);
+  return found;
 }
 
 const adjacencies = new WeakMap<StoryGraph, Map<string, string[]>>();
@@ -434,4 +479,240 @@ export function components(graph: StoryGraph): string[][] {
 export function orphans(graph: StoryGraph): GraphNode[] {
   const adj = adjacency(graph);
   return graph.nodes.filter((node) => node.kind === 'note' && adj.get(node.id)!.length === 0);
+}
+
+/**
+ * Plain-text mentions of note `ofNote` (its name or an alias, whole words, outside links and code) in
+ * the body of note `inNote`, at most `max`: literal passages a proposal can turn into `[[ofNote]]`.
+ */
+export function linkAnchors(analysis: Analysis, inNote: string, ofNote: string, max = 3): { note: string; line: number; column: number; text: string; context: string }[] {
+  const info = analysis.notes.find((note) => note.name === ofNote);
+  if (!info) throw new Error(`unknown note: ${ofNote}`);
+  const source = analysis.sources.find((s) => s.kind === 'note' && s.id === inNote);
+  if (!source) return [];
+  const terms = [...new Set([info.name, ...info.aliases].map(foldName).filter(Boolean))];
+  return plainMentions(source, terms).slice(0, max).map(([start, end]) => {
+    const { line, column } = positionAt(sentencesOf(source).lines, start);
+    return { note: inNote, line, column, text: source.text.slice(start, end), context: contextOf(source, start, end) };
+  });
+}
+
+/** What knowsEdges reads from a claim: the fields of a stored claim it needs, nothing else. */
+export interface KnowledgeClaim {
+  claim_id: string;
+  subject: string;
+  source_file: string;
+  editorial_status: string;
+  story_time?: number;
+  knowledge?: { holder: string; fact: string; mode: 'displays' | 'acquires' | 'hears' };
+}
+export interface KnowsEdge {
+  kind: 'knows';
+  /** The note of the character who knows (the claim's knowledge.holder). */
+  from: string;
+  /** The note the knowledge is about (the claim's subject). */
+  to: string;
+  mode: 'displays' | 'acquires' | 'hears';
+  fact: string;
+  /** The scene whose text establishes it: the claim's source_file. */
+  scene: string;
+  claim_id: string;
+  story_time: number | null;
+  editorial_status: string;
+}
+export interface KnowsProblem { claim_id: string; role: 'holder' | 'subject'; name: string; scene: string }
+
+/**
+ * Who knows what, as edges between notes: one `knows` edge per claim with knowledge that is not
+ * rejected, from the holder's note to the subject's note. Holder and subject are free text, resolved
+ * like a wikilink (name, then alias, folded); a name that matches no note or several is reported in
+ * `unresolved` or `ambiguous` and gives no edge. With `asOfScene`, only claims whose scene is at or
+ * before it in reading order count, problems included. Claims on a scene that no longer exists are
+ * left out. Edges come in reading order of their scene, then by claim id.
+ */
+export function knowsEdges(analysis: Analysis, claims: KnowledgeClaim[], asOfScene?: string): { edges: KnowsEdge[]; unresolved: KnowsProblem[]; ambiguous: (KnowsProblem & { candidates: string[] })[] } {
+  let scenes = analysis.scenes;
+  if (asOfScene !== undefined) {
+    const last = scenes.indexOf(asOfScene);
+    if (last === -1) throw new Error(`unknown scene: ${asOfScene}`);
+    scenes = scenes.slice(0, last + 1);
+  }
+  const position = new Map(scenes.map((file, i) => [file, i]));
+  const kept = claims
+    .filter((claim) => claim.knowledge && claim.editorial_status !== 'rejected' && position.has(claim.source_file))
+    .sort((a, b) => position.get(a.source_file)! - position.get(b.source_file)! || byCodeUnit(a.claim_id, b.claim_id));
+  const edges: KnowsEdge[] = [];
+  const unresolved: KnowsProblem[] = [];
+  const ambiguous: (KnowsProblem & { candidates: string[] })[] = [];
+  for (const claim of kept) {
+    const knowledge = claim.knowledge!;
+    const ends: string[] = [];
+    for (const [role, name] of [['holder', knowledge.holder], ['subject', claim.subject]] as const) {
+      const found = analysis.index.resolve(name);
+      const problem = { claim_id: claim.claim_id, role, name, scene: claim.source_file };
+      if (found.status === 'resolved') ends.push(noteNode(found.note));
+      else if (found.status === 'ambiguous') ambiguous.push({ ...problem, candidates: found.candidates });
+      else unresolved.push(problem);
+    }
+    if (ends.length < 2) continue;
+    edges.push({
+      kind: 'knows', from: ends[0], to: ends[1], mode: knowledge.mode, fact: knowledge.fact, scene: claim.source_file,
+      claim_id: claim.claim_id, story_time: claim.story_time ?? null, editorial_status: claim.editorial_status,
+    });
+  }
+  return { edges, unresolved, ambiguous };
+}
+
+/**
+ * The most steps betweenness or link suggestions may take on one graph. Betweenness costs about
+ * nodes × (nodes + edges) steps and suggestions the sum of each neighbour's degree squared; above
+ * this the call is refused with GraphTooLargeError instead of holding the single-threaded server.
+ */
+export const MAX_GRAPH_WORK = 25_000_000;
+
+export class GraphTooLargeError extends Error {
+  constructor(operation: string, nodes: number, edges: number) {
+    super(`the graph is too large for ${operation} (${nodes} nodes, ${edges} edges); use degree or pagerank instead`);
+    this.name = 'GraphTooLargeError';
+  }
+}
+
+const round6 = (x: number) => Math.round(x * 1e6) / 1e6;
+
+/**
+ * PageRank of every node, in node order, rounded to six decimals. Edges point the way they are
+ * written (link: note to note, mention: scene to note) and co-occurrence points both ways; parallel
+ * edges count once. Damping 0.85; a node with no outgoing edge spreads its rank over every node.
+ * At most 100 iterations of O(nodes + edges) each, stopping earlier once the ranks settle.
+ */
+export function pageRank(graph: StoryGraph, damping = 0.85): Map<string, number> {
+  const ids = graph.nodes.map((node) => node.id);
+  const n = ids.length;
+  const index = new Map(ids.map((id, i) => [id, i]));
+  const outSets = ids.map(() => new Set<number>());
+  for (const edge of graph.edges) {
+    const from = index.get(edge.from);
+    const to = index.get(edge.to);
+    if (from === undefined || to === undefined || from === to) continue;
+    outSets[from].add(to);
+    if (edge.kind === 'cooccurs') outSets[to].add(from);
+  }
+  const out = outSets.map((set) => [...set]);
+  let rank = new Float64Array(n).fill(1 / n);
+  for (let iteration = 0; iteration < 100 && n > 0; iteration += 1) {
+    let dangling = 0;
+    for (let i = 0; i < n; i += 1) if (out[i].length === 0) dangling += rank[i];
+    const next = new Float64Array(n).fill((1 - damping) / n + (damping * dangling) / n);
+    for (let i = 0; i < n; i += 1) for (const to of out[i]) next[to] += (damping * rank[i]) / out[i].length;
+    let change = 0;
+    for (let i = 0; i < n; i += 1) change += Math.abs(next[i] - rank[i]);
+    rank = next;
+    if (change < 1e-12) break;
+  }
+  return new Map(ids.map((id, i) => [id, round6(rank[i])]));
+}
+
+/**
+ * Betweenness centrality (Brandes) of every node, in node order: for each pair of other nodes, the
+ * share of their shortest paths that pass through it, summed. Edges count in both directions, once
+ * per pair of neighbours, so each unordered pair is counted once. O(nodes × (nodes + edges)), refused
+ * above `maxWork`.
+ */
+export function betweenness(graph: StoryGraph, maxWork = MAX_GRAPH_WORK): Map<string, number> {
+  const adj = adjacency(graph);
+  const ids = graph.nodes.map((node) => node.id);
+  const n = ids.length;
+  const index = new Map(ids.map((id, i) => [id, i]));
+  const near = ids.map((id) => adj.get(id)!.map((other) => index.get(other)!));
+  const arcs = near.reduce((sum, list) => sum + list.length, 0);
+  if (n * (n + arcs) > maxWork) throw new GraphTooLargeError('betweenness', n, arcs / 2);
+  const score = new Float64Array(n);
+  const sigma = new Float64Array(n);
+  const delta = new Float64Array(n);
+  const distance = new Int32Array(n);
+  const order = new Int32Array(n);
+  for (let s = 0; s < n; s += 1) {
+    sigma.fill(0);
+    delta.fill(0);
+    distance.fill(-1);
+    sigma[s] = 1;
+    distance[s] = 0;
+    let head = 0;
+    let tail = 0;
+    order[tail++] = s;
+    while (head < tail) {
+      const v = order[head++];
+      for (const w of near[v]) {
+        if (distance[w] < 0) { distance[w] = distance[v] + 1; order[tail++] = w; }
+        if (distance[w] === distance[v] + 1) sigma[w] += sigma[v];
+      }
+    }
+    // The visit order reversed is farthest first: each node's dependency is complete before its parents read it.
+    for (let k = tail - 1; k > 0; k -= 1) {
+      const w = order[k];
+      for (const v of near[w]) if (distance[v] === distance[w] - 1) delta[v] += (sigma[v] / sigma[w]) * (1 + delta[w]);
+      score[w] += delta[w];
+    }
+  }
+  return new Map(ids.map((id, i) => [id, round6(score[i] / 2)]));
+}
+
+export type SuggestMetric = 'adamic_adar' | 'jaccard';
+export interface LinkSuggestion {
+  from: string;
+  to: string;
+  score: number;
+  /** How many neighbours the two notes share. */
+  common: number;
+  /** The first shared neighbours by id, at most MAX_VIA: why the pair is suggested. */
+  via: string[];
+}
+export const MAX_VIA = 5;
+
+/**
+ * Notes that could be linked: pairs of notes with at least one shared neighbour (a scene that
+ * mentions both, a note linked to both, a note they co-occur with) and no `[[link]]` between them in
+ * either direction. Adamic-Adar sums 1 / ln(degree) over the shared neighbours, so a rare shared
+ * neighbour weighs more than a hub; Jaccard divides the shared neighbours by all the neighbours of
+ * the pair. With `node`, its best `top` partners (from = node); without, the best `top` pairs of the
+ * book (from < to). Highest score first, then more shared neighbours, then ids. Costs the sum of the
+ * squared degrees of the neighbours visited, refused above `maxWork`.
+ */
+export function suggestLinks(graph: StoryGraph, query: { metric: SuggestMetric; node?: string; top: number }, maxWork = MAX_GRAPH_WORK): LinkSuggestion[] {
+  const adj = adjacency(graph);
+  const kind = new Map(graph.nodes.map((node) => [node.id, node.kind]));
+  if (query.node !== undefined) {
+    if (!kind.has(query.node)) throw new Error(`unknown node: ${query.node}`);
+    if (kind.get(query.node) !== 'note') throw new Error(`suggestions are between notes; ${query.node} is a scene`);
+  }
+  const linked = new Set<string>();
+  for (const edge of graph.edges) if (edge.kind === 'link') linked.add(`${edge.from}\u0000${edge.to}`).add(`${edge.to}\u0000${edge.from}`);
+  const sources = query.node !== undefined ? [query.node] : graph.nodes.filter((node) => node.kind === 'note').map((node) => node.id);
+  const pairs = new Map<string, { from: string; to: string; sum: number; common: number; via: string[] }>();
+  let work = 0;
+  for (const u of sources) {
+    for (const w of adj.get(u)!) {
+      const around = adj.get(w)!;
+      const weight = 1 / Math.log(around.length);
+      for (const v of around) {
+        work += 1;
+        if (work > maxWork) throw new GraphTooLargeError('link suggestions', graph.nodes.length, graph.edges.length);
+        if (v === u || kind.get(v) !== 'note' || (query.node === undefined && v < u) || linked.has(`${u}\u0000${v}`)) continue;
+        const key = `${u}\u0000${v}`;
+        const pair = pairs.get(key) ?? { from: u, to: v, sum: 0, common: 0, via: [] };
+        pair.sum += weight;
+        pair.common += 1;
+        if (pair.via.length < MAX_VIA) pair.via.push(w);
+        pairs.set(key, pair);
+      }
+    }
+  }
+  return [...pairs.values()]
+    .map(({ from, to, sum, common, via }) => ({
+      from, to, common, via,
+      score: round6(query.metric === 'adamic_adar' ? sum : common / (adj.get(from)!.length + adj.get(to)!.length - common)),
+    }))
+    .sort((a, b) => b.score - a.score || b.common - a.common || byCodeUnit(a.from, b.from) || byCodeUnit(a.to, b.to))
+    .slice(0, query.top)
+    .map(({ from, to, score, common, via }) => ({ from, to, score, common, via }));
 }
