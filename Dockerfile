@@ -1,5 +1,6 @@
-# The review page's scene editor (editor/, docs/deployment.md) is built here and only its one
-# output file is copied into the image; the built file is not part of the repository.
+# The review page's scene editor (editor/, docs/deployment.md) is built here and only its output
+# (dist/: editor.js, the chunks it imports later and their manifest) is copied into the image;
+# the built files are not part of the repository.
 FROM node:24-slim AS editor
 WORKDIR /editor
 COPY editor/package.json editor/package-lock.json ./
@@ -25,7 +26,7 @@ ARG WITH_ENGINE=0
 COPY engine ./engine
 RUN if [ "$WITH_ENGINE" = "1" ]; then cd engine && npm ci --omit=dev --ignore-scripts && npm cache clean --force; fi
 COPY fixtures ./fixtures
-COPY --from=editor /editor/dist/editor.js ./editor/dist/editor.js
+COPY --from=editor /editor/dist ./editor/dist
 # COPY keeps the build context's file modes; a checkout made under a strict umask would leave
 # files the node user cannot read.
 RUN chmod -R a+rX /app

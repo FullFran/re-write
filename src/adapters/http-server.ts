@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -64,6 +64,30 @@ function loadEditorAsset(file: string): EditorAsset | null {
   // Weak, because the gzipped and the plain bytes are the same module.
   const etag = `W/"${createHash('sha256').update(plain).digest('base64url').slice(0, 27)}"`;
   return { plain, gzip: gzipSync(plain, { level: 9 }), etag };
+}
+
+const CHUNK_NAME = /^[A-Za-z0-9_-]{1,100}\.js$/;
+
+// The chunks the editor imports later (the graph view and its layout worker), read once at
+// startup from the manifest the build writes next to the editor module. Only plain file names
+// listed there, present in chunks/, are kept; a chunk is then found by its exact name, so no
+// request path ever reaches the file system. Without a readable manifest there are no chunks
+// and the editor works as before.
+function loadEditorChunks(editorFile: string): Map<string, EditorAsset> {
+  const chunks = new Map<string, EditorAsset>();
+  let names: unknown;
+  try {
+    names = (JSON.parse(readFileSync(join(dirname(editorFile), 'manifest.json'), 'utf8')) as { chunks?: unknown }).chunks;
+  } catch {
+    return chunks;
+  }
+  if (!Array.isArray(names)) return chunks;
+  for (const name of names) {
+    if (typeof name !== 'string' || !CHUNK_NAME.test(name)) continue;
+    const asset = loadEditorAsset(join(dirname(editorFile), 'chunks', name));
+    if (asset) chunks.set(name, asset);
+  }
+  return chunks;
 }
 
 const MAX_BODY_BYTES = 1_048_576;
@@ -396,6 +420,7 @@ export function createHandler(
   const engineHost = config.engine ? new URL(config.engine.mcpUrl).host : null;
   const resourcePath = new URL(config.resource).pathname;
   const editorAsset = loadEditorAsset(config.editorBundle ?? EDITOR_BUNDLE);
+  const editorChunks = loadEditorChunks(config.editorBundle ?? EDITOR_BUNDLE);
   const metadataUrl = metadataUrlFor(config.resource);
   const metadata = {
     resource: config.resource,
@@ -1065,6 +1090,10 @@ export function createHandler(
       // With the engine on, the assistant panel's styles and script follow the page's own.
       if (req.method === 'GET' && path === '/review/app.js') return serveAsset(res, 'text/javascript; charset=utf-8', engine ? REVIEW_JS + ASSISTANT_JS : REVIEW_JS);
       if (req.method === 'GET' && path === '/review/editor.js' && editorAsset) return serveEditor(req, res, editorAsset);
+      if (req.method === 'GET' && path.startsWith('/review/chunks/')) {
+        const chunk = editorChunks.get(path.slice('/review/chunks/'.length));
+        if (chunk) return serveEditor(req, res, chunk);
+      }
       if (req.method === 'GET' && path === '/review/app.css') return serveAsset(res, 'text/css; charset=utf-8', engine ? REVIEW_CSS + ASSISTANT_CSS : REVIEW_CSS);
       throw new HttpError(404, 'not found');
     })().catch((error) => {
