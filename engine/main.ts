@@ -10,7 +10,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Credential, CredentialStore } from '@earendil-works/pi-ai';
+import type { Api, Credential, CredentialStore, Model } from '@earendil-works/pi-ai';
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex';
 import {
   createAgentSession, createMcpExtension, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, VERSION,
@@ -18,7 +18,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import {
   DEVICE_VERIFICATION_URI, encode, LineDecoder, MCP_SERVER_NAME, MCP_TOOL_PREFIX, parseCredential, toolActivity, composePrompt,
-  type ChildMessage, type EngineErrorCode, type ParentMessage,
+  type ChildMessage, type Effort, type EngineErrorCode, type ModelInfo, type ParentMessage,
 } from '../src/adapters/engine-protocol.ts';
 
 const PROVIDER = 'openai-codex';
@@ -43,10 +43,13 @@ process.env.PI_CODING_AGENT_DIR = agentDir;
 process.on('exit', () => rmSync(home, { recursive: true, force: true }));
 
 class Reconnect extends Error {}
+/** The operator's allowlist leaves no model of this account. */
+class NoAllowedModel extends Error {}
 
 /** Maps anything thrown or reported by the SDK to a fixed code. The text never leaves. */
 function codeOf(error: unknown): EngineErrorCode {
   if (error instanceof Reconnect) return 'reconnect';
+  if (error instanceof NoAllowedModel) return 'model_unavailable';
   const text = error instanceof Error ? error.message : String(error ?? '');
   if (/\b(429|503|529)\b|overloaded|rate.?limit|capacity|too many requests/i.test(text)) return 'model_busy';
   if (/\b(401|403)\b|unauthori[sz]ed|invalid.?(token|grant)|token.*(expired|revoked)|sign in again|reconnect/i.test(text)) return 'reconnect';
@@ -129,15 +132,67 @@ async function refresh(message: Extract<ParentMessage, { type: 'refresh' }>): Pr
 
 // --- The conversation --------------------------------------------------------------------
 
-let runtime: ModelRuntime | undefined;
+let runtimeReady: Promise<ModelRuntime> | undefined;
 let session: Promise<AgentSession> | undefined;
-let modelChosen = false;
+/** The operator's allowlist, from `start`; unset means every model of the account. */
+let allowedModels: string[] | undefined;
+/** The account's models, listed once per process (a process lives at most an hour). */
+let catalog: readonly Model<Api>[] | undefined;
+let catalogReported = false;
 let running = false;
 let aborting = false;
 
+/** No network here: the model catalog is refreshed when a list is first needed. */
+function modelRuntime(): Promise<ModelRuntime> {
+  runtimeReady ??= ModelRuntime.create({ credentials, modelsPath: null, allowModelNetwork: true, refreshOnCreate: false });
+  return runtimeReady;
+}
+
+const modelInfo = (model: Model<Api>): ModelInfo => ({ id: model.id, name: model.name, reasoning: model.reasoning === true });
+
+/** The visible models of the writer's account, in the provider's own order, allowlist applied. */
+async function listModels(): Promise<readonly Model<Api>[]> {
+  const runtime = await modelRuntime();
+  const result = await runtime.refresh({ allowNetwork: true, providers: [PROVIDER], signal: AbortSignal.timeout(20_000) });
+  const failure = result.errors.get(PROVIDER);
+  if (failure) throw failure;
+  const available = await runtime.getAvailable();
+  // Only the writer's own account may serve a request, whatever else Pi has registered.
+  if (available.some((model) => model.provider !== PROVIDER)) throw new Error('unexpected provider');
+  const allowed = allowedModels;
+  catalog = allowed ? available.filter((model) => allowed.includes(model.id)) : available;
+  return catalog;
+}
+
+async function answerModels(id: string): Promise<void> {
+  try {
+    const models = await listModels();
+    send({ type: 'models', id, models: models.map(modelInfo) });
+  } catch (error) {
+    send({ type: 'models.failed', id, code: codeOf(error) });
+  }
+}
+
+/**
+ * Clears the conversation's history and keeps everything else: the process, the MCP
+ * connection, the model and the effort. Pi's session manager starts a new, empty session
+ * and the agent's messages are rebuilt from it.
+ */
+async function resetHistory(): Promise<void> {
+  try {
+    if (session && !running) {
+      const active = await session;
+      active.sessionManager.newSession();
+      active.refreshContext();
+    }
+  } catch {
+    // No session could be created: there is no history to clear.
+  }
+  send({ type: 'reset.done' });
+}
+
 async function createSession(start: Extract<ParentMessage, { type: 'start' }>): Promise<AgentSession> {
-  // No network here: the model catalog is refreshed on the first prompt.
-  runtime = await ModelRuntime.create({ credentials, modelsPath: null, allowModelNetwork: true, refreshOnCreate: false });
+  const runtime = await modelRuntime();
   const settingsManager = SettingsManager.inMemory({ transport: 'sse' });
   const resourceLoader = new DefaultResourceLoader({
     cwd,
@@ -221,22 +276,24 @@ async function createSession(start: Extract<ParentMessage, { type: 'start' }>): 
   return created.session;
 }
 
-/** The first visible model of the writer's account, in the provider's own order. */
-async function chooseModel(active: AgentSession): Promise<void> {
-  if (modelChosen || !runtime) return;
-  const result = await runtime.refresh({ allowNetwork: true, providers: [PROVIDER], signal: AbortSignal.timeout(20_000) });
-  const failure = result.errors.get(PROVIDER);
-  if (failure) throw failure;
-  const available = await runtime.getAvailable();
-  // Only the writer's own account may serve a request, whatever else Pi has registered.
-  if (available.some((model) => model.provider !== PROVIDER)) throw new Error('unexpected provider');
-  const first = available[0];
-  if (!first) throw new Reconnect('reconnect');
-  await active.setModel(first);
-  modelChosen = true;
+/**
+ * The model the server asked for when the account offers it (and the allowlist allows
+ * it), else the first one; and the reasoning effort when that model takes one.
+ */
+async function chooseModel(active: AgentSession, wanted: string | undefined, effort: Effort | undefined): Promise<void> {
+  const models = catalog ?? await listModels();
+  const pick = models.find((model) => model.id === wanted) ?? models[0];
+  if (!pick) throw allowedModels ? new NoAllowedModel() : new Reconnect('reconnect');
+  if (active.model?.provider !== PROVIDER || active.model.id !== pick.id) await active.setModel(pick);
+  // Pi clamps the level to what the model supports.
+  if (effort && pick.reasoning) active.setThinkingLevel(effort);
+  if (!catalogReported) {
+    catalogReported = true;
+    send({ type: 'models', models: models.map(modelInfo), current: pick.id });
+  }
 }
 
-async function prompt(text: string): Promise<void> {
+async function prompt(text: string, model?: string, effort?: Effort): Promise<void> {
   if (running) return send({ type: 'error', code: 'turn_in_progress' });
   if (!session) return send({ type: 'error', code: 'engine_unavailable' });
   running = true;
@@ -249,7 +306,7 @@ async function prompt(text: string): Promise<void> {
       send({ type: 'error', code: 'engine_unavailable' });
       return process.exit(1);
     }
-    await chooseModel(active);
+    await chooseModel(active, model, effort);
     await active.prompt(text);
     const last = active.messages.at(-1) as { role?: string; stopReason?: string; errorMessage?: string } | undefined;
     if (aborting || last?.stopReason === 'aborted') send({ type: 'done', aborted: true });
@@ -265,6 +322,7 @@ async function prompt(text: string): Promise<void> {
 function handle(message: ParentMessage): void {
   switch (message.type) {
     case 'start':
+      if (!session && Array.isArray(message.allowedModels)) allowedModels = message.allowedModels;
       session ??= createSession(message);
       session.catch(() => {});
       return;
@@ -279,7 +337,11 @@ function handle(message: ParentMessage): void {
       tokenWaiters.delete(message.id);
       return;
     case 'prompt':
-      return void prompt(composePrompt(message.context, message.text));
+      return void prompt(composePrompt(message.context, message.text), message.model, message.effort);
+    case 'models.get':
+      return void answerModels(message.id);
+    case 'reset':
+      return void resetHistory();
     case 'abort':
       aborting = running;
       return void session?.then((active) => active.abort(), () => {});

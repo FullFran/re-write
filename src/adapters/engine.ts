@@ -1,9 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { CredentialVault, EngineTokens } from './engine-auth.ts';
 import {
-  DEVICE_VERIFICATION_URI, encode, LineDecoder, MCP_TOOL_PREFIX, parseChildMessage,
-  type ChildMessage, type EngineErrorCode, type ParentMessage, type StoredCredential,
+  DEFAULT_EFFORT, DEVICE_VERIFICATION_URI, EFFORTS, encode, LineDecoder, MCP_TOOL_PREFIX, MODEL_ID, parseChildMessage,
+  type ChildMessage, type Effort, type EngineErrorCode, type ModelInfo, type ParentMessage, type StoredCredential,
 } from './engine-protocol.ts';
 
 export interface EngineSettings {
@@ -35,6 +37,8 @@ export interface EngineSettings {
   abortGraceMs?: number;
   /** How long a stopping process is kept so a refresh already sent can come back. */
   refreshGraceMs?: number;
+  /** The operator's model allowlist (REWRITE_ENGINE_MODELS). Unset: every model of the account. */
+  allowedModels?: string[];
 }
 
 export class EngineError extends Error {
@@ -57,11 +61,75 @@ export const ENGINE_HTTP_STATUS: Record<EngineErrorCode, number> = {
   provider_error: 502,
   login_failed: 502,
   turn_limit: 504,
+  model_unavailable: 400,
 };
 
 export type EngineStatus =
-  | { state: 'disconnected' | 'connected' | 'reconnect' }
+  | { state: 'disconnected' | 'reconnect' }
+  /** `conversation`: a running engine process holds this person's conversation so far. */
+  | { state: 'connected'; conversation?: true }
   | { state: 'pending'; user_code?: string; verification_uri: string };
+
+/** What the settings section of the panel shows and changes. */
+export interface AssistantSettings {
+  /** The models the person may choose, in the provider's order, allowlist applied. */
+  models: ModelInfo[];
+  /** The model the next turn uses; null when the account offers none that is allowed. */
+  model: string | null;
+  effort: Effort;
+  efforts: Effort[];
+}
+
+/** A person's remembered choices; nothing else is ever stored with them. */
+interface Preferences {
+  model?: string;
+  effort?: Effort;
+}
+
+const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
+
+/**
+ * A person's assistant preferences, one small JSON file per person under the data
+ * directory, named by a hash of the subject like the credential vault but apart from it:
+ * they are not secret, and a damaged file only means the defaults.
+ */
+class PreferenceStore {
+  private readonly dir: string;
+
+  constructor(dataDir: string) {
+    this.dir = join(dataDir, 'engine', 'settings');
+  }
+
+  read(subject: string): Preferences {
+    let value: { model?: unknown; effort?: unknown };
+    try {
+      value = JSON.parse(readFileSync(join(this.dir, `${sha256(subject)}.json`), 'utf8')) as typeof value;
+    } catch {
+      return {};
+    }
+    const out: Preferences = {};
+    if (typeof value?.model === 'string' && MODEL_ID.test(value.model)) out.model = value.model;
+    if ((EFFORTS as readonly unknown[]).includes(value?.effort)) out.effort = value.effort as Effort;
+    return out;
+  }
+
+  write(subject: string, preferences: Preferences): void {
+    mkdirSync(this.dir, { recursive: true, mode: 0o700 });
+    chmodSync(this.dir, 0o700);
+    const target = join(this.dir, `${sha256(subject)}.json`);
+    const temp = `${target}.${randomBytes(6).toString('hex')}.tmp`;
+    try {
+      writeFileSync(temp, JSON.stringify({ model: preferences.model, effort: preferences.effort }), { mode: 0o600, flag: 'wx' });
+      renameSync(temp, target);
+    } catch (error) {
+      rmSync(temp, { force: true });
+      throw error;
+    }
+  }
+}
+
+/** How long a model list is reused before the engine process is asked again. */
+const CATALOG_TTL_MS = 60 * 60_000;
 
 export interface TurnSink {
   event(name: 'delta' | 'tool' | 'done' | 'error', data: object): void;
@@ -109,6 +177,10 @@ interface Proc {
   idle?: NodeJS.Timeout;
   turn?: Turn;
   refreshes: Map<string, Deferred<StoredCredential>>;
+  /** Model lists asked for, by request id. */
+  catalogs: Map<string, Deferred<ModelInfo[]>>;
+  /** A history reset sent and not yet confirmed. */
+  resetting?: { reply: Deferred<void>; timeout: NodeJS.Timeout };
   /** Detached from its person: it takes no new work. It may still deliver a refresh. */
   stopped: boolean;
   /** The person disconnected: a refresh that comes back is thrown away. */
@@ -160,8 +232,12 @@ function hookProcess(): void {
  */
 export class EngineManager {
   readonly tokens = new EngineTokens();
-  private readonly settings: Required<EngineSettings>;
+  private readonly settings: Required<Omit<EngineSettings, 'allowedModels'>>;
+  private readonly allowedModels: string[] | undefined;
   private readonly vault: CredentialVault;
+  private readonly preferences: PreferenceStore;
+  /** The last model list of each person, allowlist applied. Gone on disconnect. */
+  private readonly catalogs = new Map<string, { models: ModelInfo[]; at: number }>();
   private readonly people = new Map<string, Person>();
   /** Every process not yet torn down, attached to a person or finishing a refresh. */
   private readonly alive = new Set<Proc>();
@@ -174,7 +250,9 @@ export class EngineManager {
       turnTimeoutMs: 10 * 60_000, turnMaxBytes: 2 * 1024 * 1024, abortGraceMs: 5_000, refreshGraceMs: 10_000,
       ...settings,
     };
+    this.allowedModels = settings.allowedModels;
     this.vault = new CredentialVault(settings.dataDir, settings.key);
+    this.preferences = new PreferenceStore(settings.dataDir);
     managers.add(this);
     hookProcess();
   }
@@ -202,7 +280,58 @@ export class EngineManager {
     } catch {
       return { state: 'reconnect' };
     }
-    return { state: person?.reconnect ? 'reconnect' : 'connected' };
+    if (person?.reconnect) return { state: 'reconnect' };
+    const proc = person?.proc;
+    return proc?.token && !proc.stopped ? { state: 'connected', conversation: true } : { state: 'connected' };
+  }
+
+  /**
+   * The person's model choices: the account's models as the engine program lists them
+   * (allowlist applied), the model and effort the next turn uses. Asking for the list
+   * starts the person's engine process if none runs; the list is then reused for an hour.
+   */
+  async assistantSettings(subject: string): Promise<AssistantSettings> {
+    if (this.closed) throw new EngineError('engine_unavailable');
+    if (!this.hasCredential(subject)) throw new EngineError('not_connected');
+    return this.settingsView(subject, await this.catalog(subject));
+  }
+
+  /**
+   * Remembers a model and/or an effort for the next turns. A model the person may not
+   * choose is refused here and never reaches an engine process.
+   */
+  async saveSettings(subject: string, change: { model?: string; effort?: Effort }): Promise<AssistantSettings> {
+    if (this.closed) throw new EngineError('engine_unavailable');
+    if (!this.hasCredential(subject)) throw new EngineError('not_connected');
+    const models = await this.catalog(subject);
+    if (change.model !== undefined && !models.some((model) => model.id === change.model)) throw new EngineError('model_unavailable');
+    const current = this.preferences.read(subject);
+    this.preferences.write(subject, {
+      model: change.model ?? current.model,
+      effort: change.effort ?? current.effort,
+    });
+    return this.settingsView(subject, models);
+  }
+
+  /**
+   * Clears the history of the person's conversation in their engine process, which keeps
+   * running. With no process there is nothing to clear. A process that does not confirm
+   * in time is stopped, which clears the history as well.
+   */
+  async reset(subject: string): Promise<void> {
+    const person = this.people.get(subject);
+    const proc = person?.proc;
+    if (!person || !proc?.token || proc.stopped) return;
+    if (proc.turn) throw new EngineError('turn_in_progress');
+    if (!proc.resetting) {
+      const reply = deferred<void>();
+      const timeout = setTimeout(() => this.stop(person, 'reset_timeout', proc), this.settings.replyTimeoutMs);
+      timeout.unref();
+      proc.resetting = { reply, timeout };
+      this.send(proc, { type: 'reset' });
+      this.touch(person, proc);
+    }
+    await proc.resetting.reply.promise;
   }
 
   /**
@@ -243,6 +372,7 @@ export class EngineManager {
     const person = this.people.get(subject);
     if (person) this.stop(person, 'disconnect');
     this.vault.delete(subject);
+    this.catalogs.delete(subject);
     if (person) {
       person.reconnect = false;
       this.forget(person);
@@ -265,13 +395,22 @@ export class EngineManager {
     const proc = this.ensureProc(person, true);
     if (!proc.token) {
       proc.token = this.tokens.mint(subject, this.settings.maxAgeMs);
-      this.send(proc, { type: 'start', mcpUrl: this.settings.mcpUrl, mcpToken: proc.token, systemPrompt });
+      this.send(proc, {
+        type: 'start', mcpUrl: this.settings.mcpUrl, mcpToken: proc.token, systemPrompt,
+        ...(this.allowedModels ? { allowedModels: this.allowedModels } : {}),
+      });
     }
+    // The remembered choice; with a known list, what it resolves to (the first model when
+    // the remembered one is gone). The engine program checks it against its own list.
+    const preferences = this.preferences.read(subject);
+    const known = this.catalogs.get(subject)?.models;
+    const model = known ? this.settingsView(subject, known).model ?? undefined : preferences.model;
+    const effort = preferences.effort ?? DEFAULT_EFFORT;
     return new Promise<void>((resolve) => {
       const timeout = setTimeout(() => this.limitTurn(person, proc), this.settings.turnTimeoutMs);
       timeout.unref();
       proc.turn = { sink, end: resolve, bytes: 0, limited: false, timeout };
-      this.send(proc, { type: 'prompt', text, ...(context === undefined ? {} : { context }) });
+      this.send(proc, { type: 'prompt', text, ...(context === undefined ? {} : { context }), ...(model ? { model } : {}), effort });
       this.touch(person, proc);
     });
   }
@@ -314,6 +453,41 @@ export class EngineManager {
     return person;
   }
 
+  private settingsView(subject: string, models: ModelInfo[]): AssistantSettings {
+    const preferences = this.preferences.read(subject);
+    const model = models.find((m) => m.id === preferences.model)?.id ?? models[0]?.id ?? null;
+    return { models, model, effort: preferences.effort ?? DEFAULT_EFFORT, efforts: [...EFFORTS] };
+  }
+
+  /** Only the models the operator allows, in the account's order. */
+  private allowedOnly(models: ModelInfo[]): ModelInfo[] {
+    const allowed = this.allowedModels;
+    return allowed ? models.filter((model) => allowed.includes(model.id)) : models;
+  }
+
+  /** The person's model list: reused for a while, otherwise asked of their engine process. */
+  private async catalog(subject: string): Promise<ModelInfo[]> {
+    const cached = this.catalogs.get(subject);
+    if (cached && Date.now() - cached.at < CATALOG_TTL_MS) return cached.models;
+    const person = this.personOf(subject);
+    const proc = this.ensureProc(person, false);
+    const id = randomUUID();
+    const reply = deferred<ModelInfo[]>();
+    proc.catalogs.set(id, reply);
+    const timeout = setTimeout(() => reply.reject(new EngineError('engine_unavailable')), this.settings.replyTimeoutMs);
+    timeout.unref();
+    this.send(proc, { type: 'models.get', id });
+    this.touch(person, proc);
+    try {
+      const models = this.allowedOnly(await reply.promise);
+      this.catalogs.set(subject, { models, at: Date.now() });
+      return models;
+    } finally {
+      clearTimeout(timeout);
+      proc.catalogs.delete(id);
+    }
+  }
+
   /** True when a credential file exists, readable or not. */
   private hasCredential(subject: string): boolean {
     try {
@@ -348,7 +522,7 @@ export class EngineManager {
     // engine, and stderr is discarded because provider errors can quote response bodies.
     const child = spawn(process.execPath, [this.settings.entry], { stdio: ['pipe', 'pipe', 'ignore'], env: { PATH: process.env.PATH ?? '' } });
     const proc: Proc = {
-      child, decoder: new LineDecoder(), startedAt: Date.now(), toolsChecked: false, refreshes: new Map(),
+      child, decoder: new LineDecoder(), startedAt: Date.now(), toolsChecked: false, refreshes: new Map(), catalogs: new Map(),
       stopped: false, discard: false, exited: false,
     };
     person.proc = proc;
@@ -454,6 +628,27 @@ export class EngineManager {
       case 'error':
         if (message.code === 'reconnect') person.reconnect = true;
         return this.endTurn(person, proc, 'error', { code: message.code });
+      case 'models': {
+        if (message.id) {
+          proc.catalogs.get(message.id)?.resolve(message.models);
+          return;
+        }
+        // A turn reports the list it chose from: settings reuse it.
+        this.catalogs.set(person.subject, { models: this.allowedOnly(message.models), at: Date.now() });
+        return;
+      }
+      case 'models.failed':
+        if (message.code === 'reconnect') person.reconnect = true;
+        proc.catalogs.get(message.id)?.reject(new EngineError(message.code));
+        return;
+      case 'reset.done': {
+        const resetting = proc.resetting;
+        if (!resetting) return;
+        proc.resetting = undefined;
+        clearTimeout(resetting.timeout);
+        resetting.reply.resolve();
+        return;
+      }
     }
   }
 
@@ -586,6 +781,13 @@ export class EngineManager {
     clearTimeout(proc.idle);
     if (proc.token) this.tokens.revoke(proc.token);
     this.endTurn(person, proc, 'error', { code: 'engine_unavailable' });
+    for (const reply of proc.catalogs.values()) reply.reject(new EngineError('engine_unavailable'));
+    // A stopped process holds no history: a reset waiting for it is done.
+    if (proc.resetting) {
+      clearTimeout(proc.resetting.timeout);
+      proc.resetting.reply.resolve();
+      proc.resetting = undefined;
+    }
     if (person.login) this.endLogin(person, 'engine_unavailable', false, true);
     this.log('stop', reason);
 
