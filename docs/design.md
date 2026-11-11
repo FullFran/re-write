@@ -117,6 +117,25 @@ the selected rating has `aria-pressed`.
   the same action is **Volver a revisar**. These buttons are outlined, below the card's
   content, never in the sticky `.decision` bar.
 
+## Scene editor
+
+- The editor is a plain text field holding the scene's Markdown exactly as stored, in
+  the manuscript font (`--font-prose`). Markers such as `*` and `#` stay visible; the
+  saved bytes are the bytes in the field (a scene stored with CRLF line breaks keeps
+  them).
+- **Guardar** (or Ctrl/Cmd+S) saves explicitly; there is no autosave. The status line
+  below it (`role="status"`) says **Cambios sin guardar**, **Guardando…**, **Guardado**
+  or the error, and an error always adds that the text is still there.
+- Unsaved text is kept in the tab's `sessionStorage` only, never `localStorage`: it
+  survives a re-render or a reload of the tab and is gone when the tab closes. Leaving
+  the page with unsaved text asks first.
+- When the scene changed since it was opened, the save is refused and the page shows
+  the saved version next to the person's text with two actions: **Usar la versión
+  guardada** and **Guardar mi versión encima**. Nothing is overwritten without that
+  second, explicit choice.
+- An open editor pauses the background refresh like any unfinished work: news waits
+  behind the notice until the editor is closed.
+
 ## Messages
 
 - An error is `role="alert"`; the newest one stays at the top of the screen, below

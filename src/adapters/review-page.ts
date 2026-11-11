@@ -151,6 +151,9 @@ summary { min-height: var(--tap); padding: var(--space-3) 0; color: var(--muted)
 .scenes-grid { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-3) 0; }
 .scenes-grid > button { text-align: left; }
 .scene-viewer { margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--line); }
+/* The scene editor: the stored Markdown as plain text, in the manuscript's own type. */
+.scene-editor-text { display: block; width: 100%; min-height: 60vh; margin: var(--space-3) 0; padding: var(--space-3); font: var(--text-md)/1.6 var(--font-prose); resize: vertical; }
+.scene-conflict pre { max-height: 40vh; overflow-y: auto; }
 
 /* Section navigation: one row under the thumb's reach, scrolled sideways, stuck to the top. */
 .section-nav { position: sticky; top: 0; z-index: 2; margin: 0 calc(-1 * var(--gutter)); padding-top: env(safe-area-inset-top); border-bottom: 1px solid var(--line); background: var(--paper); }
@@ -1325,6 +1328,137 @@ function notionImportSection(book, onImported) {
   return box;
 }
 
+// The scene editor (issue #101, first slice): the scene's Markdown exactly as stored, in a
+// plain text field. Saving sends the version it started from; the server refuses the save
+// when the scene changed meanwhile, and the person's text stays in the field.
+const SCENE_EDITOR_CLASS = 'scene-editor-text';
+let unsavedEdit = null;
+
+// The unsaved text survives a re-render or a reload of this tab, never the tab itself.
+function draftKey(book, file) { return 'rewrite:draft:' + book + ':' + file; }
+function readDraft(book, file) {
+  try {
+    const raw = window.sessionStorage.getItem(draftKey(book, file));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+function writeDraft(book, file, draft) {
+  try {
+    if (draft) window.sessionStorage.setItem(draftKey(book, file), JSON.stringify(draft));
+    else window.sessionStorage.removeItem(draftKey(book, file));
+  } catch {
+    // No storage (a private window, a full quota): the text still stays in the field.
+  }
+}
+
+// A save can be refused with the current text in the answer, so this returns status and body.
+async function apiSave(path, body) {
+  const token = await window.Clerk.session.getToken();
+  const res = await fetch('/review/api' + path, {
+    method: 'POST',
+    headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
+function sceneEditor(book, scene, close) {
+  // A text field reports line breaks as \n; a scene stored with \r\n keeps its own on save.
+  const crlf = scene.text.includes('\r\n');
+  const stored = (value) => crlf ? value.replace(/\r?\n/g, '\r\n') : value;
+  const shown = (text) => text.replace(/\r\n/g, '\n');
+  let base = scene.blob;
+  let saved = scene.text;
+  const box = el('div', undefined, 'scene-editor');
+  const area = el('textarea', undefined, SCENE_EDITOR_CLASS);
+  area.setAttribute('aria-label', 'Texto de la escena ' + scene.file);
+  area.spellcheck = true;
+  const status = el('p', '', 'meta save-status');
+  status.setAttribute('role', 'status');
+  const conflict = el('div', undefined, 'scene-conflict');
+  conflict.hidden = true;
+  const dirty = () => stored(area.value) !== saved;
+  unsavedEdit = dirty;
+
+  const draft = readDraft(book, scene.file);
+  area.value = shown(draft ? draft.text : scene.text);
+  if (draft) {
+    base = draft.base_blob;
+    status.textContent = draft.base_blob === scene.blob
+      ? 'Se recuperó un texto sin guardar de esta pestaña.'
+      : 'Se recuperó un texto sin guardar de esta pestaña, pero la escena cambió después: al guardar podrás comparar.';
+  }
+
+  const remember = () => {
+    writeDraft(book, scene.file, dirty() ? { base_blob: base, text: stored(area.value) } : null);
+    status.textContent = dirty() ? 'Cambios sin guardar' : 'Guardado';
+  };
+  area.addEventListener('input', remember);
+
+  const showConflict = (current) => {
+    status.textContent = 'No se guardó: la escena cambió mientras editabas. Tu versión sigue en el editor.';
+    const useSaved = button('Usar la versión guardada', '', async () => {
+      base = current.blob;
+      saved = current.text;
+      area.value = shown(current.text);
+      conflict.hidden = true;
+      conflict.replaceChildren();
+      remember();
+      status.textContent = 'Se cargó la versión guardada. Tu versión se ha descartado.';
+    });
+    const keepMine = button('Guardar mi versión encima', 'accept', async () => {
+      base = current.blob;
+      conflict.hidden = true;
+      conflict.replaceChildren();
+      await save();
+    });
+    const row = el('div', undefined, 'form-row actions');
+    row.append(useSaved, keepMine);
+    conflict.replaceChildren(el('h4', 'La versión guardada ahora'), el('pre', current.text), row);
+    conflict.hidden = false;
+  };
+
+  const save = async () => {
+    const text = stored(area.value);
+    status.textContent = 'Guardando…';
+    let result;
+    try {
+      result = await apiSave('/books/' + book + '/scenes/' + encodeURIComponent(scene.file), { base_blob: base, text });
+    } catch {
+      status.textContent = 'Error: no se pudo conectar. Tu texto sigue aquí sin guardar.';
+      return;
+    }
+    if (result.ok) {
+      base = result.data.blob;
+      saved = text;
+      remember();
+      return;
+    }
+    if (result.status === 409 && result.data.current) return showConflict(result.data.current);
+    status.textContent = 'Error: ' + (result.data.error || 'no se pudo guardar') + '. Tu texto sigue aquí sin guardar.';
+  };
+
+  area.addEventListener('keydown', (event) => {
+    if ((event.ctrlKey || event.metaKey) && (event.key === 's' || event.key === 'S')) {
+      event.preventDefault();
+      save();
+    }
+  });
+  const closeEditor = button('Cerrar editor', '', async () => {
+    if (dirty() && !window.confirm('Hay cambios sin guardar. ¿Cerrar el editor y descartarlos?')) return;
+    writeDraft(book, scene.file, null);
+    unsavedEdit = null;
+    await close();
+  });
+  const row = el('div', undefined, 'form-row actions');
+  row.append(button('Guardar', 'accept', save), closeEditor);
+  box.append(area, row, status, conflict);
+  return box;
+}
+
 function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
   const box = el('section', undefined, 'card-box');
   box.append(el('h2', 'Navegar escenas'));
@@ -1392,7 +1526,18 @@ function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
       } else {
         pre.textContent = data.text;
       }
-      viewer.append(pre);
+      const textBox = el('div');
+      textBox.append(pre);
+      if (typeof data.blob === 'string') {
+        const edit = button('Editar escena', '', async () => {
+          edit.hidden = true;
+          const editor = sceneEditor(book, data, () => loadScene(canonical, highlight, true));
+          textBox.replaceChildren(editor);
+          editor.getElementsByTagName('textarea')[0].focus();
+        });
+        viewer.append(edit);
+      }
+      viewer.append(textBox);
 
       const citingBox = el('div');
       citingBox.append(el('h3', 'Hallazgos que citan esta escena'));
@@ -1579,6 +1724,8 @@ async function renderApp(selectedBookId, selectedScene, highlight) {
 // yet sent, or an open dialog (the account menu included). The assistant panel is
 // never re-rendered by a refresh, so its field does not count.
 function hasWorkInProgress() {
+  // An open scene editor is work in progress even when nothing is typed yet.
+  for (const area of app.getElementsByTagName('textarea')) if (area.className === SCENE_EDITOR_CLASS) return true;
   const active = document.activeElement;
   const inPanel = active && active.closest && active.closest('#assistant');
   if (active && !inPanel && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return true;
@@ -1690,6 +1837,13 @@ function startRefresh() {
   scheduleRefresh();
 }
 
+// Leaving the page with an unsaved scene edit asks first; the text also stays in this tab's draft.
+window.addEventListener('beforeunload', (event) => {
+  if (unsavedEdit && unsavedEdit()) {
+    event.preventDefault();
+    event.returnValue = '';
+  }
+});
 window.addEventListener('scroll', queueSpy, { passive: true });
 window.addEventListener('resize', queueSpy);
 
