@@ -4,6 +4,8 @@ This checklist guides manual verification of the human review workflow on the re
 
 Target domain: `https://rewrite.fullfran.com`
 
+Items marked *(automated)* are checked on every pull request by the browser tests (`browser-tests/`, see [testing](testing.md)), which drive this page in headless Chromium against the real server and a synthetic book. They are still worth a look on a release, since the tests run without the real Clerk.
+
 ---
 
 ## 1. Sign In
@@ -29,38 +31,38 @@ Target domain: `https://rewrite.fullfran.com`
 ## 3. Reject a Proposal
 
 - [ ] Choose a proposal intended for rejection.
-- [ ] Click **Rechazar**.
-- [ ] Confirm the card remains where you acted, now with the **Rechazada** badge and no decision buttons.
-- [ ] Reload the page and scroll to **Historial de cambios del manuscrito** (Manuscript change history).
-- [ ] Confirm the rejected proposal is listed with the **Rechazada** badge.
-- [ ] Confirm the original scene text remains byte-identical and unmodified.
+- [ ] Click **Rechazar**. *(automated)*
+- [ ] Confirm the card remains where you acted, now with the **Rechazada** badge and no decision buttons. *(automated)*
+- [ ] Reload the page and scroll to **Historial de cambios del manuscrito** (Manuscript change history). *(automated)*
+- [ ] Confirm the rejected proposal is listed with the **Rechazada** badge. *(automated)*
+- [ ] Confirm the original scene text remains byte-identical and unmodified. *(automated)*
 
 ## 4. Accept a Proposal
 
 - [ ] Choose a valid pending proposal that you wish to incorporate.
-- [ ] Click **Aceptar cambio**.
-- [ ] Confirm the card remains where you acted, now with the **Aceptada** badge and no decision buttons.
-- [ ] Reload the page and scroll to **Historial de cambios del manuscrito**.
-- [ ] Confirm the proposal appears with the **Aceptada** badge and displays the version commit hash (e.g., `versión a1b2c3d4e5`).
+- [ ] Click **Aceptar cambio**. *(automated)*
+- [ ] Confirm the card remains where you acted, now with the **Aceptada** badge and no decision buttons. *(automated)*
+- [ ] Reload the page and scroll to **Historial de cambios del manuscrito**. *(automated)*
+- [ ] Confirm the proposal appears with the **Aceptada** badge and displays the version commit hash (e.g., `versión a1b2c3d4e5`). *(automated)*
 
 ## 5. Confirm History and Audit Trail
 
-- [ ] In the **Historial de cambios del manuscrito** section, verify each decided proposal displays its outcome (**Aceptada** or **Rechazada**).
-- [ ] Confirm the previous manuscript text is preserved in repository history: an accepted change creates a new commit while prior commits remain intact.
-- [ ] Confirm **Canon** explains that only human-accepted narrated facts with valid evidence belong there; accepting manuscript text does not approve claims.
-- [ ] Confirm proposed claims show **Pendiente** and do not enter **Canon**.
+- [ ] In the **Historial de cambios del manuscrito** section, verify each decided proposal displays its outcome (**Aceptada** or **Rechazada**). *(automated)*
+- [ ] Confirm the previous manuscript text is preserved in repository history: an accepted change creates a new commit while prior commits remain intact. *(automated)*
+- [ ] Confirm **Canon** explains that only human-accepted narrated facts with valid evidence belong there; accepting manuscript text does not approve claims. *(automated)*
+- [ ] Confirm proposed claims show **Pendiente** and do not enter **Canon**. *(automated)*
 - [ ] Confirm accepted rumors/beliefs and claims with stale evidence appear under **Afirmaciones fuera del Canon**, each with a reason.
 - [ ] Confirm rejected claims remain visible under **Afirmaciones rechazadas** with **Rechazada** badges.
 
 ## 6. Verify Stale Proposal Handling
 
-- [ ] Locate a proposal whose base scene text was changed by an earlier accepted proposal or edited in the source.
-- [ ] Confirm the proposal card displays the warning message:
+- [ ] Locate a proposal whose base scene text was changed by an earlier accepted proposal or edited in the source. *(automated)*
+- [ ] Confirm the proposal card displays the warning message *(automated)*:
   > **No aplicable: la escena ha cambiado**
   > *"La escena ha cambiado desde esta propuesta: ya no se puede aplicar."*
-- [ ] Confirm the **Aceptar cambio** button is hidden or prevented from applying.
-- [ ] Confirm the reviewer can safely dismiss the stale proposal by clicking **Rechazar**.
-- [ ] Confirm clicking **Rechazar** preserves the source text without alteration and records the rejection in the change history.
+- [ ] Confirm the **Aceptar cambio** button is hidden or prevented from applying. *(automated)*
+- [ ] Confirm the reviewer can safely dismiss the stale proposal by clicking **Rechazar**. *(automated)*
+- [ ] Confirm clicking **Rechazar** preserves the source text without alteration and records the rejection in the change history. *(automated)*
 
 
 ## 7. Review Notes Without Data Loss
@@ -84,7 +86,7 @@ The page asks for the review queue again every 5 seconds while its tab is visibl
 
 Automated tests pin the stylesheet's tokens and rules (`tests/review-mobile.test.ts`) but cannot see a layout. Check these on a real phone, or in a browser's device mode at 360 px wide, in light and dark. The rules behind them are in `docs/design.md`.
 
-- [ ] Nothing scrolls sideways in any state: empty book, a long diff, a proposal or quote with a very long word or URL, the Notion mapping form, an error, the **Hay novedades en este libro…** notice.
+- [ ] Nothing scrolls sideways in any state: empty book, a long diff, a proposal or quote with a very long word or URL, the Notion mapping form, an error, the **Hay novedades en este libro…** notice. *(automated at 390 px for a book with pending work and a long URL in a rationale; the other states stay manual)*
 - [ ] Focusing the note field or **Título del libro** does not zoom the page (iOS Safari).
 - [ ] While reading a long proposal under **Cambios propuestos**, **Aceptar cambio** and **Rechazar** stay at the bottom of the screen, clearly apart, and the text scrolls out from under the bar instead of staying hidden. The bar belongs to the card on screen: it does not appear for the next card until that card's badge and rationale are visible.
 - [ ] On a phone with a home indicator, the bar's buttons are not under it; in landscape, no text sits under the notch.
@@ -98,7 +100,7 @@ Automated tests pin the stylesheet's tokens and rules (`tests/review-mobile.test
 
 Tests pin the order, the landmark, the counts and the fold state (`tests/review-mobile.test.ts`, `tests/review-refresh.test.ts`); what the bar covers and how it scrolls is checked here.
 
-- [ ] On a phone, the first pending proposal under **Cambios propuestos** is on the first screen, above both import forms.
+- [ ] On a phone, the first pending proposal under **Cambios propuestos** is on the first screen, above both import forms. *(automated)*
 - [ ] The row of section links stays at the top of the screen while scrolling and scrolls sideways with one thumb; the page itself never scrolls sideways. A number beside a link is the count of items waiting there.
 - [ ] While reading a long proposal, the navigation row is at the top and **Aceptar cambio** / **Rechazar** are at the bottom: neither covers the other, in portrait or landscape.
 - [ ] Tap **Historial**: the section opens and its heading lands just below the row, not under it. The link is shown as current, and it changes as you scroll through the sections.
