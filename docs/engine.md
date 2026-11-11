@@ -139,7 +139,7 @@ Tests run against a fake engine process and call no provider. The real engine pr
 Use the synthetic book only.
 
 1. Build with `--build-arg WITH_ENGINE=1`, set `REWRITE_ENGINE=1` and `REWRITE_ENGINE_KEY`, deploy, and confirm `GET /health` still answers.
-2. Open `/review` on a phone, signed in, and press **Asistente** (a person who cannot use any book is told to create one first). Press "Conectar ChatGPT": a code and the OpenAI link appear.
+2. Open `/review` on a phone, signed in, and press **Asistente** (a person who cannot use any book is told to create one first). Before any code, the panel shows **RE;write: sesión iniciada** and **ChatGPT: sin conectar**, and **Qué necesitas** says the RE;write account is enough for books, imports and review, that the assistant also needs the writer's own ChatGPT account connected with a code at OpenAI (never a password in RE;write), and that the ChatGPT connector is another way in. Press "Conectar ChatGPT": a code and the OpenAI link appear.
 3. Approve at OpenAI. Within a few seconds the panel shows its quick questions. In the container, `ls -l /data/engine/credentials/` shows one file with mode `-rw-------` and no readable token inside.
 4. Ask "¿Qué libros tengo?". The answer streams, and a step says how many books it found.
 5. Ask it to propose a claim with a literal quote. The claim appears in `/review` as pending; the assistant has not accepted it and says it cannot.
