@@ -151,3 +151,47 @@ test('note and graph tools are read-only, declare an output schema, and warn tha
   const propose = tools.find((t) => t.name === 'propose_note')!;
   assert.equal(propose.annotations?.readOnlyHint, false);
 });
+
+test('every note and graph tool answers for the book it is given, never another book of the same person', async () => {
+  const { lib, call, addNotes } = await setup();
+  await addNotes(NOTES);
+  const other = join(lib.dataDir, 'books', 'otro');
+  const src = tempDir();
+  writeFileSync(join(src, '900-otro.md'), '[[Elena]] encendió el [[Faro]].\n');
+  cli('init', other);
+  cli('import', other, join(src, '900-otro.md'));
+  lib.grant('otro', 'user_fran');
+  const project = lib.open('otro', 'user_fran');
+  for (const [name, text] of Object.entries({ Elena: 'Otra Elena.\n', Faro: 'Un faro.\n', Solo: 'Nadie lo nombra.\n' })) {
+    project.reviewProposal(project.proposeNote({ name, text, rationale: 'r' }).proposal.proposal_id, 'accept', 'user_fran');
+  }
+  const ids = (nodes: any[]) => nodes.map((node) => node.id);
+  const both = async (name: string, args: object) => [await call(name, args), await call(name, { ...args, book: 'otro' })];
+
+  const [salNotes, otroNotes] = await both('list_notes', {});
+  assert.deepEqual(salNotes.data.notes.map((n: any) => n.name), ['Carta', 'Elena', 'Puente de Sal', 'Tomás']);
+  assert.deepEqual(otroNotes.data.notes.map((n: any) => n.name), ['Elena', 'Faro', 'Solo']);
+
+  const [salNote, otroNote] = await both('read_note', { name: 'Elena' });
+  assert.equal(salNote.data.text, NOTES.Elena);
+  assert.equal(otroNote.data.text, 'Otra Elena.\n');
+  assert.deepEqual(salNote.data.backlinks.linked.map((m: any) => m.source), ['scenes/001-lluvia.md', 'scenes/002-carta.md']);
+  assert.deepEqual(otroNote.data.backlinks.linked.map((m: any) => m.source), ['scenes/900-otro.md']);
+  assert.deepEqual(otroNote.data.backlinks.unlinked, []);
+
+  const [salNear, otroNear] = await both('graph_neighbors', { node: 'Elena' });
+  assert.deepEqual(ids(salNear.data.nodes), ['note:Elena', 'note:Puente de Sal', 'scene:scenes/001-lluvia.md', 'scene:scenes/002-carta.md']);
+  assert.deepEqual(ids(otroNear.data.nodes), ['note:Elena', 'note:Faro', 'scene:scenes/900-otro.md']);
+
+  const [salOrphans, otroOrphans] = await both('graph_orphans', {});
+  assert.deepEqual(ids(salOrphans.data.orphans), ['note:Carta']);
+  assert.deepEqual(ids(otroOrphans.data.orphans), ['note:Solo']);
+
+  const [salPath, otroPath] = await both('graph_path', { from: 'Elena', to: 'Faro' });
+  assert.match(salPath.text, /unknown note: Faro/);
+  assert.deepEqual(ids(otroPath.data.path), ['note:Elena', 'note:Faro']);
+
+  const [salCentral, otroCentral] = await both('graph_central', {});
+  assert.deepEqual(salCentral.data.ranking.map((n: any) => [n.id, n.degree]), [['note:Puente de Sal', 4], ['note:Elena', 3], ['note:Tomás', 2], ['note:Carta', 0]]);
+  assert.deepEqual(otroCentral.data.ranking.map((n: any) => [n.id, n.degree]), [['note:Elena', 2], ['note:Faro', 2], ['note:Solo', 0]]);
+});
