@@ -5,10 +5,10 @@ import { JsonStore, STATE_DIR } from '../adapters/json-store.ts';
 import type { Extraction } from '../adapters/annotation-extractor.ts';
 import { assessAnchor, buildAnchor, matchesRevision } from '../domain/anchor.ts';
 import {
-  claimId, EPISTEMIC_KINDS, isCanon, nextEditorialStatus,
+  claimId, EPISTEMIC_KINDS, isCanon, nextEditorialStatus, reopenTransition, StaleStateError,
   type Claim, type ClaimCandidate, type ClaimView, type Decision,
 } from '../domain/claim.ts';
-import { CONTINUITY_VERDICTS, InvalidFindingVerdictError, inspectContinuity, type Finding, type Verdict, type VerdictHistoryEntry, type VerdictKind } from '../domain/continuity.ts';
+import { activeVerdict, CONTINUITY_VERDICTS, InvalidFindingVerdictError, inspectContinuity, type Finding, type Verdict, type VerdictHistoryEntry, type VerdictKind } from '../domain/continuity.ts';
 import { applyChange, proposalId, type Proposal } from '../domain/proposal.ts';
 import {
   NARRATIVE_VERDICTS, findingId, viewFinding,
@@ -221,6 +221,21 @@ export class Project {
     return { claim: this.view(claim), changed: true };
   }
 
+  /**
+   * A person takes back an accept or reject: the claim is proposed again, so it leaves Canon until
+   * it is accepted again with valid evidence. The text never changes and the history only grows.
+   */
+  reopenClaim(id: string, by: string, expected: number, note?: string): { claim: ClaimView; changed: boolean } {
+    const claim = this.claims.get(id);
+    if (!claim) throw new Error(`unknown claim: ${id}`);
+    if (reopenTransition(claim.editorial_status, claim.history, expected) === 'unchanged') return { claim: this.view(claim), changed: false };
+    claim.history.push({ at: new Date().toISOString(), by, from: claim.editorial_status, to: 'proposed', ...(note ? { note } : {}), action: 'reopen' });
+    claim.editorial_status = 'proposed';
+    this.claims.put(id, claim);
+    this.git.commit(`rewrite: reopen claim ${id}`, [STATE_DIR]);
+    return { claim: this.view(claim), changed: true };
+  }
+
   /** Everything a reviewer needs for one book, recomputed from the text on each read. */
   reviewQueue(): {
     claims: ClaimView[];
@@ -241,7 +256,7 @@ export class Project {
   /** Read-only: it computes findings and attaches any verdict a human already gave. */
   check(): Finding[] {
     return inspectContinuity(this.claimViews()).map((finding) => {
-      const verdict = this.verdicts.get(finding.finding_id);
+      const verdict = activeVerdict(this.verdicts.get(finding.finding_id));
       return verdict ? { ...finding, verdict } : finding;
     });
   }
@@ -262,6 +277,7 @@ export class Project {
         by: existing.by,
         at: existing.at,
         ...(existing.note ? { note: existing.note } : {}),
+        ...(existing.reopened ? { reopened: existing.reopened } : {}),
       });
     }
     const record: Verdict = {
@@ -275,6 +291,25 @@ export class Project {
     this.verdicts.put(id, record);
     this.git.commit(`rewrite: ${verdict} finding ${id}`, [STATE_DIR]);
     return record;
+  }
+
+  /**
+   * A person takes back a verdict, so the finding reads as pending again. The verdict stays in the
+   * record with who reopened it and when, and moves into the history when the next verdict is given.
+   * `expected` is the time of the verdict the person saw.
+   */
+  reopenFinding(id: string, by: string, expected: string, note?: string): { verdict: Verdict; changed: boolean } {
+    const record = this.verdicts.get(id);
+    if (!record) {
+      const known = this.findings.get(id) !== null || this.check().some((finding) => finding.finding_id === id);
+      throw new Error(known ? 'this was not decided yet; there is nothing to reopen' : `unknown finding: ${id}`);
+    }
+    if (record.at !== expected) throw new StaleStateError();
+    if (record.reopened) return { verdict: record, changed: false };
+    record.reopened = { by, at: new Date().toISOString(), ...(note ? { note } : {}) };
+    this.verdicts.put(id, record);
+    this.git.commit(`rewrite: reopen finding ${id}`, [STATE_DIR]);
+    return { verdict: record, changed: true };
   }
 
   /**
@@ -352,7 +387,7 @@ export class Project {
       (file) => this.readScene(file),
       (rev, file) => this.git.showAt(rev, file),
     );
-    const verdict = this.verdicts.get(f.finding_id);
+    const verdict = activeVerdict(this.verdicts.get(f.finding_id));
     return verdict ? { ...view, verdict } : view;
   }
 
@@ -445,6 +480,24 @@ export class Project {
       this.proposals.put(id, previous);
       throw error;
     }
+    return { proposal, changed: true };
+  }
+
+  /**
+   * A person takes back a rejection: the proposal is proposed again and the text does not move. If
+   * the scene changed meanwhile the proposal stays not applicable, as any stale proposal. An accepted
+   * proposal already changed the text, so it is never reopened: it is reverted through a new proposal.
+   */
+  reopenProposal(id: string, by: string, expected: number, note?: string): { proposal: Proposal; changed: boolean } {
+    const proposal = this.proposals.get(id);
+    if (!proposal) throw new Error(`unknown proposal: ${id}`);
+    const transition = reopenTransition(proposal.status, proposal.history, expected);
+    if (transition === 'unchanged') return { proposal, changed: false };
+    if (proposal.status === 'accepted') throw new Error(`${id} already changed the text; revert it instead of reopening it`);
+    proposal.history.push({ at: new Date().toISOString(), by, from: proposal.status, to: 'proposed', ...(note ? { note } : {}), action: 'reopen' });
+    proposal.status = 'proposed';
+    this.proposals.put(id, proposal);
+    this.git.commit(`rewrite: reopen ${id}`, [STATE_DIR]);
     return { proposal, changed: true };
   }
 }

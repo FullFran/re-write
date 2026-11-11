@@ -589,10 +589,11 @@ export function createHandler(
       }
     }
 
-    if (req.method !== 'POST' || parts.length !== 4) throw new HttpError(404, 'not found');
+    const reopen = parts.length === 5 && parts[4] === 'reopen';
+    if (req.method !== 'POST' || !(parts.length === 4 || reopen)) throw new HttpError(404, 'not found');
 
     const project = open(REVIEW_DECIDE);
-    const body = (await readBody(req) ?? {}) as { decision?: unknown; verdict?: unknown; note?: unknown };
+    const body = (await readBody(req) ?? {}) as { decision?: unknown; verdict?: unknown; note?: unknown; expected?: unknown };
     const note = typeof body.note === 'string' ? body.note : undefined;
     if (note !== undefined && note.length > MAX_NOTE) {
       throw new HttpError(400, `La nota supera el límite de ${MAX_NOTE} caracteres.`);
@@ -609,6 +610,20 @@ export function createHandler(
         problem(res, 409, library.publicMessage(error));
       }
     };
+    if (reopen) {
+      // Reopening takes back a decision, so it carries the state the person saw: the history length
+      // of a claim or proposal, the time of a finding's verdict. A different state is refused.
+      if (kind === 'findings') {
+        if (typeof body.expected !== 'string') throw new HttpError(400, 'expected must be the time of the verdict being reopened');
+        const expected = body.expected;
+        return refusable(() => project.reopenFinding(id, subject, expected, note));
+      }
+      if (!Number.isSafeInteger(body.expected) || (body.expected as number) < 0) throw new HttpError(400, 'expected must be the history length being reopened');
+      const expected = body.expected as number;
+      if (kind === 'claims') return refusable(() => project.reopenClaim(id, subject, expected, note));
+      if (kind === 'proposals') return refusable(() => project.reopenProposal(id, subject, expected, note));
+      throw new HttpError(404, 'not found');
+    }
     if (kind === 'claims') return refusable(() => project.reviewClaim(id, decision(), subject, note));
     if (kind === 'proposals') return refusable(() => project.reviewProposal(id, decision(), subject, note));
     if (kind === 'findings') {

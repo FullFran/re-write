@@ -13,11 +13,20 @@ export class InvalidFindingVerdictError extends Error {
   }
 }
 
+/** A person took a verdict back, so the finding is pending again. */
+export interface Reopening {
+  by: string;
+  at: string;
+  note?: string;
+}
+
 export interface VerdictHistoryEntry {
   verdict: VerdictKind;
   by: string;
   at: string;
   note?: string;
+  /** Set when this verdict was reopened before the next one was given. */
+  reopened?: Reopening;
 }
 
 export interface Verdict {
@@ -27,6 +36,13 @@ export interface Verdict {
   at: string;
   note?: string;
   history?: VerdictHistoryEntry[];
+  /** Present while the verdict is reopened: the finding reads as pending, and the verdict is kept. */
+  reopened?: Reopening;
+}
+
+/** The verdict that currently applies, or null when there is none or it was reopened. */
+export function activeVerdict(record: Verdict | null): Verdict | null {
+  return record && !record.reopened ? record : null;
 }
 
 export interface Citation {
