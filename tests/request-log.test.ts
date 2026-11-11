@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
+import { createServer } from 'node:http';
 import { test } from 'node:test';
+import { withRequestLog } from '../src/adapters/request-log.ts';
 import { HcsFailure, hcsError } from '../src/hcs/errors.ts';
 import { reviewApi, startHarness } from './server-helpers.ts';
 
@@ -159,4 +161,86 @@ test('unexpected HTTP 500 retains a sanitized Error subclass name, never its mes
     assert.equal(record.error, `${TYPE}internal-error`);
     assert.ok(!lines.join('\n').includes(marker));
   }
+});
+
+const POLL = '/review/api/books/:book';
+const logged = (lines: string[]) => lines.filter(line => line.startsWith('{')).map(line => JSON.parse(line));
+const until = async (check: () => boolean) => { for (let i = 0; i < 200 && !check(); i++) await new Promise(r => setTimeout(r, 10)); };
+
+async function pollServer(t: any, pollSummaryMs: number) {
+  const lines: string[] = [];
+  t.mock.method(console, 'log', (...args: unknown[]) => lines.push(args.join(' ')));
+  const server = createServer(withRequestLog('http://localhost/mcp', (req, res) => {
+    res.statusCode = Number(req.headers['x-test-status'] ?? 200);
+    res.end();
+  }, 'test-salt', { pollSummaryMs }));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${(server.address() as any).port}`;
+  const get = async (path: string, status: number, method = 'GET') => (await fetch(`${base}${path}`, { method, headers: { 'x-test-status': String(status) } })).arrayBuffer();
+  const close = () => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); });
+  return { lines, get, close };
+}
+
+test('a 304 answer to the review poll is counted into one summary line per interval, never logged alone', async (t) => {
+  const s = await pollServer(t, 300);
+  t.after(s.close);
+  for (let i = 0; i < 12; i++) await s.get('/review/api/books/private-book', 304);
+  assert.deepEqual(logged(s.lines), [], 'no line per unchanged poll');
+  await until(() => logged(s.lines).length > 0);
+  const [summary, ...rest] = logged(s.lines);
+  assert.deepEqual(rest, []);
+  assert.deepEqual(Object.keys(summary), ['event', 'timestamp', 'since', 'door', 'method', 'route', 'status', 'count']);
+  assert.deepEqual({ ...summary, timestamp: 0, since: 0 }, { event: 'http.poll_summary', timestamp: 0, since: 0, door: 'review', method: 'GET', route: POLL, status: 304, count: 12 });
+  assert.ok(Date.parse(summary.since) <= Date.parse(summary.timestamp));
+  assert.doesNotMatch(s.lines.join('\n'), /private-book/);
+  // An interval with no unchanged poll writes nothing.
+  await new Promise(r => setTimeout(r, 400));
+  assert.equal(logged(s.lines).length, 1);
+});
+
+test('every other answer on the poll route, every 304 elsewhere and every error are still logged one by one', async (t) => {
+  const s = await pollServer(t, 60_000);
+  t.after(s.close);
+  const cases: Array<[string, number, string, string]> = [
+    ['/review/api/books/b', 200, 'GET', POLL], ['/review/api/books/b/findings', 304, 'GET', '/review/api/books/:book/findings'],
+    ['/review/api/books/b', 304, 'HEAD', POLL], ['/review/api/books/b', 401, 'GET', POLL], ['/review/api/books/b', 404, 'GET', POLL],
+    ['/review/api/books/b', 500, 'GET', POLL], ['/review', 304, 'GET', '/review'], ['/review/api/books', 304, 'GET', '/review/api/books'],
+  ];
+  for (const [path, status, method] of cases) await s.get(path, status, method);
+  const lines = logged(s.lines);
+  assert.deepEqual(lines.map(line => [line.event, line.method, line.route, line.status]), cases.map(([, status, method, route]) => ['http.request', method, route, status]));
+  for (const line of lines) assert.equal(typeof line.request_id, 'string');
+});
+
+test('a pending poll summary is written when the server closes, so a restart loses no count', async (t) => {
+  const s = await pollServer(t, 60_000);
+  t.after(s.close);
+  for (let i = 0; i < 3; i++) await s.get('/review/api/books/b', 304);
+  assert.deepEqual(logged(s.lines), []);
+  await s.close();
+  assert.deepEqual(logged(s.lines).map(line => [line.event, line.count]), [['http.poll_summary', 3]]);
+});
+
+test('one minute of polling from one open tab writes one poll line instead of twelve', async (t) => {
+  const lines: string[] = [];
+  t.mock.method(console, 'log', (...args: unknown[]) => lines.push(args.join(' ')));
+  const h = await startHarness();
+  let closed = false;
+  t.after(() => { if (!closed) h.close(); });
+  const token = await h.session('user_fran');
+  assert.equal((await reviewApi(h, '/books', token, { slug: 'tab-book', title: 'Tab' })).status, 201);
+  // The page polls every 5 s with the ETag it holds: one 200, then 304 while nothing changes.
+  let etag = '';
+  for (let poll = 0; poll < 12; poll++) {
+    const response = await fetch(`${h.base}/review/api/books/tab-book`, { headers: { authorization: `Bearer ${token}`, ...(etag ? { 'if-none-match': etag } : {}) } });
+    await response.arrayBuffer();
+    assert.equal(response.status, poll === 0 ? 200 : 304);
+    etag = response.headers.get('etag')!;
+  }
+  closed = true;
+  h.close();
+  const pollLines = () => logged(lines).filter(line => line.route === POLL);
+  await until(() => pollLines().some(line => line.event === 'http.poll_summary'));
+  console.error(`poll log lines for 12 polls: ${pollLines().length}`);
+  assert.deepEqual(pollLines().map(line => [line.event, line.status, line.count]), [['http.request', 200, undefined], ['http.poll_summary', 304, 11]]);
 });

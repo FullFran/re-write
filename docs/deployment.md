@@ -38,7 +38,7 @@ The server refuses to start if a setting is missing or the URLs are not HTTPS. I
 
 ## Read the metadata request log
 
-The server writes one JSON line per HTTP request and an additional line per MCP JSON-RPC call to stdout. Docker captures them without a log file or collector:
+The server writes one JSON line per HTTP request (except unchanged review polls, counted below) and an additional line per MCP JSON-RPC call to stdout. Docker captures them without a log file or collector:
 
 ```bash
 docker logs rewrite 2>&1 | grep '"event":"http.request"'
@@ -56,6 +56,18 @@ Replace `rewrite` with the container name. Every response has a server-generated
 | `mcp.call` | Allowlisted JSON-RPC `method`, known `tool` for `tools/call`, optional hashed `book`, and `result`: `ok`, a known product problem type, an HCS code, or `error` |
 
 Dynamic paths are templates such as `/review/api/books/:book/import` and `/review/api/books/:book/scenes/:file`. Unknown paths are `unmatched`; unknown methods and tools are `unknown`, never echoed. Aborted HTTP requests have status 499. JSON-RPC notifications are not calls and do not produce a separate MCP record.
+
+The review page polls `GET /review/api/books/:book` every 5 seconds with the ETag it holds, and the answer is a bodiless `304` while nothing changed: one open tab would write about 12 such lines a minute. Those `304` answers to that route are therefore not logged one by one. They are counted, and one `http.poll_summary` line is written per minute that had any, and when the server stops:
+
+```json
+{"event":"http.poll_summary","timestamp":"2026-11-11T16:01:00.000Z","since":"2026-11-11T16:00:00.412Z","door":"review","method":"GET","route":"/review/api/books/:book","status":304,"count":12}
+```
+
+`count` is the number of unchanged polls between `since` (the first one) and `timestamp`, from every tab and person together; the line has no `request_id`, `subject` or `book`, so it does not say who polled which book. One tab open for an hour writes 60 such lines instead of 720. Everything else is logged one line per request exactly as before, including a `200` on the poll route (the state changed), a `304` on any other route, a `HEAD` and every error. To see all traffic on the poll route:
+
+```bash
+docker logs rewrite 2>&1 | grep '"route":"/review/api/books/:book"'
+```
 
 **Never logged:** manuscript text, quotes, statements, titles, scene or upload file names, concrete request paths, query strings, headers, tokens, raw Clerk subject ids, raw book slugs, MCP arguments or results, error messages or problem `detail`. Authentication failures retain a `reason` from the closed set `expired`, `audience`, `issuer`, `signature`, `malformed`, `other` (derived from known JWT error codes, never the message). Unexpected HTTP 500s retain `error_name` only when the Error subclass name matches `^[A-Za-z]+Error$`, otherwise `Error`. These safe fields preserve the previous rejection/internal-error diagnostics without their free text.
 
