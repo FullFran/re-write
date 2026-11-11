@@ -1924,13 +1924,13 @@ function notesGroups(notes, onOpen) {
 
 const graphNodeName = (node) => (node.kind === 'scene' ? deskSceneName(node.name) : node.name);
 const graphNodeType = (node) => (node.kind === 'scene' ? 'Escena' : NOTE_TYPES[node.type] || 'Sin tipo');
-const plural = (n, one, many) => n.toLocaleString('es') + ' ' + (n === 1 ? one : many);
+const countLabel = (n, one, many) => n.toLocaleString('es') + ' ' + (n === 1 ? one : many);
 
 // How a neighbour is joined to the chosen node, in words.
 function relationText(edge, selected) {
   if (edge.kind === 'link') return edge.from === selected ? 'la enlaza' : 'la enlaza a ella';
-  if (edge.kind === 'cooccurs') return 'coinciden en ' + plural(edge.weight, 'escena', 'escenas');
-  return edge.from === selected ? 'la menciona ' + plural(edge.weight, 'vez', 'veces') : 'aparece ' + plural(edge.weight, 'vez', 'veces');
+  if (edge.kind === 'cooccurs') return 'coinciden en ' + countLabel(edge.weight, 'escena', 'escenas');
+  return edge.from === selected ? 'la menciona ' + countLabel(edge.weight, 'vez', 'veces') : 'aparece ' + countLabel(edge.weight, 'vez', 'veces');
 }
 
 /**
@@ -2064,7 +2064,7 @@ function graphList(book, onOpen) {
     }
     const children = [el('h3', 'Vecinos de ' + graphNodeName(node) + ' (' + neighbours.length + ')'), openIt];
     children.push(visible.length ? list : el('p', neighbours.length ? '' : 'No conecta con ninguna nota ni escena.', 'meta'));
-    if (hiddenScenes) children.push(el('p', 'Y ' + plural(hiddenScenes, 'escena oculta', 'escenas ocultas') + ' (marca «Mostrar escenas»).', 'meta'));
+    if (hiddenScenes) children.push(el('p', 'Y ' + countLabel(hiddenScenes, 'escena oculta', 'escenas ocultas') + ' (marca «Mostrar escenas»).', 'meta'));
     detail.replaceChildren(...children);
     detail.hidden = false;
   }
@@ -2105,7 +2105,7 @@ function graphList(book, onOpen) {
       }));
     }
     const notes = data.nodes.filter((node) => node.kind === 'note').length;
-    live.textContent = plural(notes, 'nota', 'notas') + ' y ' + plural(data.nodes.length - notes, 'escena', 'escenas') + (st.asOf ? ' hasta ' + deskSceneName(st.asOf) : '') + '.';
+    live.textContent = countLabel(notes, 'nota', 'notas') + ' y ' + countLabel(data.nodes.length - notes, 'escena', 'escenas') + (st.asOf ? ' hasta ' + deskSceneName(st.asOf) : '') + '.';
     renderRows();
     renderDetail();
   }
