@@ -1,46 +1,145 @@
+/**
+ * The assistant panel of the review page, run from the script the server really serves
+ * (the review page's script followed by the panel's) against a minimal DOM.
+ */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { ENGINE_CSS, ENGINE_JS, engineHtml } from '../src/adapters/engine-page.ts';
-import { REVIEW_CSS } from '../src/adapters/review-page.ts';
+import { ASSISTANT_CSS, ASSISTANT_JS } from '../src/adapters/engine-page.ts';
+import { REVIEW_JS } from '../src/adapters/review-page.ts';
 
-// Minimal DOM adapter: execute the shipped script, not a second rendering implementation.
+class Text {
+  textContent: string;
+  constructor(text: string) { this.textContent = text; }
+}
+
 class Element {
-  tag: string;
-  children: Element[] = [];
-  ownText = '';
+  tagName: string;
+  children: (Element | Text)[] = [];
+  parent: Element | null = null;
   className = '';
-  value = '';
-  disabled = false;
   id = '';
+  value = '';
+  type = '';
+  disabled = false;
+  hidden = false;
+  tabIndex = 0;
+  rows = 0;
+  maxLength = 0;
+  placeholder = '';
   scrollTop = 0;
   scrollHeight = 0;
+  clientHeight = 0;
+  isConnected = true;
+  scrolled = 0;
   attrs: Record<string, string> = {};
   events: Record<string, Function> = {};
-  constructor(tag: string) { this.tag = tag; }
-  set textContent(text: string) { this.ownText = text; this.children = []; }
-  get textContent(): string { return this.ownText + this.children.map((c) => c.textContent).join(''); }
-  append(...nodes: Element[]) { this.children.push(...nodes); }
-  replaceChildren(...nodes: Element[]) { this.ownText = ''; this.children = [...nodes]; }
-  setAttribute(key: string, value: string) { this.attrs[key] = value; }
+  private doc: FakeDocument;
+  constructor(tag: string, doc: FakeDocument) { this.tagName = tag.toUpperCase(); this.doc = doc; }
+  get childNodes() { return this.children; }
+  set textContent(text: string) { this.children = text ? [new Text(text)] : []; }
+  get textContent(): string { return this.children.map((c) => c.textContent).join(''); }
+  private adopt(nodes: (Element | Text | string)[]) {
+    return nodes.map((n) => {
+      if (typeof n === 'string') return new Text(n);
+      if (n instanceof Element) n.parent = this;
+      return n;
+    });
+  }
+  append(...nodes: (Element | Text | string)[]) { this.children.push(...this.adopt(nodes)); }
+  prepend(...nodes: (Element | Text | string)[]) { this.children.unshift(...this.adopt(nodes)); }
+  replaceChildren(...nodes: (Element | Text | string)[]) { this.children = this.adopt(nodes); }
+  setAttribute(key: string, value: string) { this.attrs[key] = String(value); }
+  getAttribute(key: string) { return this.attrs[key] ?? null; }
+  hasAttribute(key: string) { return key in this.attrs; }
   addEventListener(event: string, fn: Function) { this.events[event] = fn; }
+  focus() { this.doc.activeElement = this; }
+  scrollIntoView() { this.scrolled++; }
+  getBoundingClientRect() { return { top: 0 }; }
+  get offsetParent() { return null; }
+  get classList() {
+    const list = () => this.className.split(' ').filter(Boolean);
+    return {
+      add: (name: string) => { this.className = [...new Set([...list(), name])].join(' '); },
+      remove: (name: string) => { this.className = list().filter((c) => c !== name).join(' '); },
+      toggle: (name: string, on?: boolean) => {
+        const has = list().includes(name);
+        const next = on === undefined ? !has : on;
+        if (next !== has) (next ? this.classList.add(name) : this.classList.remove(name));
+        return next;
+      },
+      contains: (name: string) => list().includes(name),
+    };
+  }
+  matches(selector: string): boolean {
+    if (selector.startsWith('#')) return this.id === selector.slice(1);
+    if (selector === 'section[id^="sec-"]') return this.tagName === 'SECTION' && this.id.startsWith('sec-');
+    if (selector === '[data-item]') return 'data-item' in this.attrs;
+    return false;
+  }
+  closest(selector: string): Element | null {
+    for (let node: Element | null = this; node; node = node.parent) if (node.matches(selector)) return node;
+    return null;
+  }
+  querySelectorAll(selector: string): Element[] { return all(this).filter((n) => n.matches(selector)); }
+  getElementsByTagName(tag: string): Element[] { return all(this).filter((n) => n.tagName === tag.toUpperCase()); }
 }
-function nodes(root: Element, tag: string): Element[] {
-  return [...(root.tag === tag ? [root] : []), ...root.children.flatMap((c) => nodes(c, tag))];
+
+class FakeDocument {
+  activeElement: Element | null = null;
+  body: Element;
+  app: Element;
+  toggle: Element;
+  constructor(withAssistant: boolean) {
+    this.body = new Element('body', this);
+    if (withAssistant) this.body.setAttribute('data-assistant', '');
+    this.app = new Element('main', this);
+    this.app.id = 'app';
+    this.toggle = new Element('button', this);
+    this.toggle.id = 'assistant-toggle';
+    this.body.append(this.toggle, this.app);
+  }
+  getElementById(id: string) { return all(this.body).find((n) => n.id === id) ?? null; }
+  createElement(tag: string) { return new Element(tag, this); }
+  createTextNode(text: string) { return new Text(text); }
+  querySelector() { return null; }
+  addEventListener() {}
 }
-const byText = (root: Element, tag: string, text: string) => nodes(root, tag).find((n) => n.textContent === text);
+
+function all(root: Element): Element[] {
+  return [root, ...root.children.flatMap((c) => (c instanceof Element ? all(c) : []))];
+}
+const byTag = (root: Element, tag: string) => all(root).filter((n) => n.tagName === tag.toUpperCase());
+const byText = (root: Element, tag: string, text: string) => byTag(root, tag).find((n) => n.textContent === text);
 
 interface Reply { status?: number; json?: unknown; chunks?: string[] }
 
-function page(replies: Record<string, Reply | (() => Reply)>) {
-  const app = new Element('main');
+function page(replies: Record<string, Reply | (() => Reply)>, options: { assistant?: boolean } = {}) {
+  const doc = new FakeDocument(options.assistant ?? true);
   const calls: { method: string; path: string; body?: any; authorization: string }[] = [];
-  const context = runInNewContext(`${ENGINE_JS}\n({ state, render, refreshStatus, connect, disconnect, sendPrompt })`, {
-    document: { getElementById: (id: string) => id === 'app' ? app : new Element('div'), createElement: (tag: string) => new Element(tag) },
-    window: { addEventListener() {}, Clerk: { session: { getToken: async () => 'session-token' } } },
+  const listeners: Record<string, Function> = {};
+  const window = {
+    addEventListener: (event: string, fn: Function) => { listeners[event] = fn; },
+    Clerk: { session: { getToken: async () => 'session-token' } },
+    matchMedia: () => ({ matches: false }),
+    location: { search: '', pathname: '/review', hash: '' },
+    history: { replaceState() {} },
+    scrollY: 0,
+    scrollBy() {},
+  };
+  const ui = runInNewContext(`${REVIEW_JS}\n${ASSISTANT_JS}\n({
+    assistantState, panel, formatAnswer, activityLabel, sendAssistant, refreshAssistantStatus, connectAssistant,
+    hasWorkInProgress, setAssistantOpen, startAssistant: () => assistant.start(), ask: (...a) => assistant.ask(...a),
+    pageChanged: () => assistant.pageChanged(),
+    setPage: (book, queue, title, scene) => { view = book ? { book } : null; latestQueue = queue; currentBookTitle = title || ''; openScene = scene || null; },
+  })`, {
+    document: doc,
+    window,
     setInterval: () => 1,
     clearInterval() {},
+    setTimeout: () => 1,
     TextDecoder,
+    URLSearchParams,
     fetch: async (url: string, options: any) => {
       const path = url.replace('/review/api/engine', '');
       calls.push({ method: options.method, path, body: options.body ? JSON.parse(options.body) : undefined, authorization: options.headers.authorization });
@@ -52,138 +151,211 @@ function page(replies: Record<string, Reply | (() => Reply)>) {
         ok: status < 400,
         status,
         json: async () => reply.json,
-        body: { getReader: () => ({ read: async () => chunks.length ? { done: false, value: Buffer.from(chunks.shift()!) } : { done: true } }) },
+        body: { getReader: () => ({ read: async () => (chunks.length ? { done: false, value: Buffer.from(chunks.shift()!) } : { done: true }) }) },
       };
     },
   });
-  return { ...context, app, calls };
+  ui.startAssistant();
+  return { ...ui, doc, calls, root: () => ui.panel.root as Element };
 }
 
-test('a disconnected writer gets one button, and connecting shows the code and the OpenAI address', async () => {
+const connected = { 'GET /status': { json: { state: 'connected' } } };
+const sse = (...events: [string, object][]) => events.map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join('');
+
+test('the panel exists only when the page says the engine is on, and starts closed', () => {
+  const off = page({}, { assistant: false });
+  assert.equal(off.panel.root, undefined);
+  const ui = page({});
+  assert.equal(ui.root().hidden, true);
+  assert.equal(ui.root().tagName, 'ASIDE');
+  assert.equal(ui.root().attrs['aria-label'], 'Asistente');
+  assert.equal(ui.root().attrs.role, undefined, 'not a dialog: the review page pauses its refresh while a dialog is open');
+  assert.equal(ui.panel.fab.attrs['aria-label'], 'Asistente');
+  assert.equal(ui.panel.fab.attrs['aria-expanded'], 'false');
+});
+
+test('opening and closing the panel keeps the page and moves focus sensibly', async () => {
+  const ui = page(connected);
+  ui.setPage('sal', null, 'La puerta de Sal');
+  ui.panel.fab.events.click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(ui.root().hidden, false);
+  assert.ok(ui.doc.body.classList.contains('assistant-open'));
+  assert.equal(ui.panel.fab.attrs['aria-expanded'], 'true');
+  assert.equal(ui.doc.toggle.attrs['aria-expanded'], 'true');
+  assert.ok(ui.panel.context.textContent.includes('La puerta de Sal'), 'the selected book is shown without typing it');
+  ui.panel.input.value = 'texto sin enviar';
+  ui.root().events.keydown({ key: 'Escape' });
+  assert.equal(ui.root().hidden, true);
+  assert.equal(ui.doc.activeElement, ui.panel.fab, 'focus goes back to what opened it');
+  assert.equal(ui.panel.input.value, 'texto sin enviar', 'closing keeps unsent text');
+});
+
+test('a disconnected writer connects inside the panel: code, the fixed OpenAI address, waiting', async () => {
   const ui = page({
     'GET /status': { json: { state: 'disconnected' } },
     'POST /login': { json: { user_code: 'FAKE-1234', verification_uri: 'https://auth.openai.com/codex/device', expires_in: 900 } },
   });
-  await ui.refreshStatus();
-  const connect = byText(ui.app, 'button', 'Conectar ChatGPT');
-  assert.ok(connect);
-  assert.equal(nodes(ui.app, 'textarea').length, 0, 'no chat before connecting');
-
-  await connect.events.click();
-  assert.equal(nodes(ui.app, 'strong')[0].textContent, 'FAKE-1234');
-  const link = nodes(ui.app, 'a')[0];
+  await ui.refreshAssistantStatus();
+  assert.equal(ui.panel.form.hidden, true, 'no prompt before connecting');
+  await byText(ui.panel.log, 'button', 'Conectar ChatGPT')!.events.click();
+  assert.equal(byTag(ui.panel.log, 'strong')[0].textContent, 'FAKE-1234');
+  const link = byTag(ui.panel.log, 'a')[0];
   assert.equal(link.attrs.href, 'https://auth.openai.com/codex/device');
   assert.equal(link.attrs.target, '_blank');
   assert.equal(link.attrs.rel, 'noopener noreferrer');
+  assert.ok(ui.panel.log.textContent.includes('Esperando a que confirmes en OpenAI…'));
+  assert.equal(ui.panel.state.textContent, 'Esperando el código');
   assert.ok(ui.calls.every((call) => call.authorization === 'Bearer session-token'));
 });
 
 test('a refused login shows a fixed Spanish message, whatever the server body says', async () => {
   const ui = page({ 'POST /login': { status: 429, json: { error: 'busy', detail: 'raw detail' } } });
-  await ui.connect();
-  assert.ok(ui.app.textContent.includes('Hay demasiadas personas usando el asistente'));
-  assert.ok(!ui.app.textContent.includes('raw detail'));
+  await ui.connectAssistant();
+  const alert = byTag(ui.panel.log, 'p').find((n) => n.attrs.role === 'alert');
+  assert.equal(alert?.textContent, 'Hay demasiadas personas usando el asistente. Prueba de nuevo en unos minutos.');
+  assert.ok(!ui.panel.log.textContent.includes('raw detail'));
   const odd = page({ 'POST /login': { status: 500, json: { error: 'something new <b>' } } });
-  await odd.connect();
-  assert.ok(odd.app.textContent.includes('El asistente no está disponible ahora mismo.'));
-  assert.ok(!odd.app.textContent.includes('something new'));
+  await odd.connectAssistant();
+  assert.ok(odd.panel.log.textContent.includes('El asistente no está disponible ahora mismo.'));
 });
 
-test('an answer streams into one bubble as text, even when events are split across chunks', async () => {
+test('a connected empty panel offers quick actions that only fill the prompt', async () => {
+  const ui = page(connected);
+  ui.setPage('sal', null, 'La puerta de Sal', { file: 'scenes/003-el-faro.md' });
+  await ui.refreshAssistantStatus();
+  const chips = byTag(ui.panel.log, 'button').map((b) => b.textContent);
+  assert.deepEqual(chips, ['Analiza esta escena', 'Busca incoherencias en el libro', 'Resume los cambios pendientes', '¿Qué hallazgos debería revisar primero?']);
+  await byText(ui.panel.log, 'button', 'Analiza esta escena')!.events.click();
+  assert.equal(ui.panel.input.value, 'Analiza esta escena');
+  assert.equal(ui.doc.activeElement, ui.panel.input);
+  assert.ok(ui.panel.context.textContent.includes('Escena: escena 3'), 'the open scene becomes the item');
+  assert.equal(ui.calls.filter((c) => c.path === '/prompt').length, 0, 'nothing is sent');
+  ui.setPage('sal', null, 'La puerta de Sal', null);
+  ui.assistantState.item = null;
+  await ui.refreshAssistantStatus();
+  assert.equal(byText(ui.panel.log, 'button', 'Analiza esta escena'), undefined, 'no scene open, no scene action');
+});
+
+test('an answer streams as formatted elements with activity labels, and the context goes as ids', async () => {
   const ui = page({
-    'GET /status': { json: { state: 'connected' } },
+    ...connected,
     'POST /prompt': { chunks: [
-      'event: delta\ndata: {"text":"Hola <img src=x onerror=alert(1)> "}\n\neve',
-      'nt: tool\ndata: {"name":"list_books","ok":true}\n\nevent: delta\ndata: {"text":"mundo"}\n\n',
-      'event: done\ndata: {"aborted":false}\n\n',
+      sse(['tool', { name: 'read_scene', phase: 'start', call: 1, scene: 'scenes/003-el-faro.md' }]),
+      sse(['tool', { name: 'read_scene', phase: 'end', ok: true, call: 1, scene: 'scenes/003-el-faro.md' }]) + 'event: delta\ndata: {"text":"Hay **dos** puntos <img src=x onerror=alert(1)>:\\n\\n- uno\\n- dos\\n\\n> cita"}\n\nev',
+      'ent: tool\ndata: {"name":"propose_findings","phase":"end","ok":true,"count":2}\n\n' + sse(['done', { aborted: false }]),
     ] },
   });
-  await ui.refreshStatus();
-  assert.ok(byText(ui.app, 'button', 'Enviar'));
-  await ui.sendPrompt('¿Qué libros tengo?');
-  assert.deepEqual(ui.calls.at(-1), { method: 'POST', path: '/prompt', body: { text: '¿Qué libros tengo?' }, authorization: 'Bearer session-token' });
-  const bubbles = nodes(ui.app, 'div').filter((n) => n.className.startsWith('message '));
-  assert.deepEqual(bubbles.map((n) => [n.className, n.textContent]), [
-    ['message user', '¿Qué libros tengo?'],
-    ['message note', 'Consultado: list_books'],
-    ['message assistant', 'Hola <img src=x onerror=alert(1)> mundo'],
-  ]);
-  assert.equal(nodes(ui.app, 'img').length, 0, 'model output never becomes markup');
-  assert.equal(ui.state.running, false);
+  ui.setPage('sal', { proposals: [], claims: [], finding_views: [] }, 'La puerta de Sal');
+  await ui.refreshAssistantStatus();
+  ui.ask({ kind: 'proposal', id: 'P-1', label: 'Cambio propuesto · 003-el-faro.md' }, 'borrador');
+  await ui.sendAssistant('¿Hay incoherencias?');
+  assert.deepEqual(ui.calls.at(-1)!.body, { text: '¿Hay incoherencias?', context: { book_id: 'sal', item: { kind: 'proposal', id: 'P-1' } } });
+  const steps = byTag(ui.panel.log, 'li').filter((li) => li.parent?.className === 'activity').map((li) => [li.textContent, li.className]);
+  assert.deepEqual(steps, [['Leída: escena 3', ''], ['Propuestos 2 hallazgos', '']]);
+  const answer = byTag(ui.panel.log, 'div').find((n) => n.className === 'answer')!;
+  assert.deepEqual(answer.children.map((c) => (c as Element).tagName), ['P', 'UL', 'BLOCKQUOTE']);
+  assert.equal(byTag(answer, 'strong')[0].textContent, 'dos');
+  assert.ok(answer.textContent.includes('<img src=x onerror=alert(1)>'), 'markup from the model stays text');
+  assert.equal(byTag(answer, 'img').length, 0);
+  assert.ok(byTag(ui.panel.log, 'div').some((n) => n.className === 'turn-user' && n.textContent === 'Sobre: Cambio propuesto · 003-el-faro.md¿Hay incoherencias?'));
+  assert.equal(ui.assistantState.running, false);
+  assert.equal(ui.panel.submit.textContent, 'Enviar');
 });
 
-test('errors in a turn become fixed messages, and an expired connection brings the connect panel back', async () => {
-  const ui = page({
-    'GET /status': { json: { state: 'connected' } },
-    'POST /prompt': { chunks: ['event: error\ndata: {"code":"reconnect"}\n\n'] },
-  });
-  await ui.refreshStatus();
-  await ui.sendPrompt('hola');
-  assert.ok(byText(ui.app, 'h2', 'Vuelve a conectar ChatGPT'));
+test('what the assistant proposed gets a "Ver en la página" action once the page shows it', async () => {
+  const ui = page({ ...connected, 'POST /prompt': { chunks: [sse(['tool', { name: 'propose_findings', phase: 'end', ok: true, count: 1 }], ['done', { aborted: false }])] } });
+  const before = { proposals: [], claims: [], finding_views: [{ finding_id: 'N-old' }] };
+  ui.setPage('sal', before, 'La puerta de Sal');
+  await ui.refreshAssistantStatus();
+  await ui.sendAssistant('Propón hallazgos');
+  assert.ok(ui.panel.log.textContent.includes('Lo propuesto aparecerá en la página en unos segundos.'));
 
-  const refused = page({ 'GET /status': { json: { state: 'connected' } }, 'POST /prompt': { status: 409, json: { error: 'turn_in_progress' } } });
-  await refused.refreshStatus();
-  await refused.sendPrompt('hola');
-  assert.ok(refused.app.textContent.includes('Ya hay una respuesta en curso'));
-  await refused.sendPrompt('   ');
-  assert.equal(refused.calls.filter((call) => call.path === '/prompt').length, 1, 'an empty message is not sent');
+  // The page refreshes and now shows the new finding card.
+  const section = ui.doc.createElement('section');
+  section.id = 'sec-hallazgos';
+  let opened = false;
+  (section as any).fold = { setOpen: (open: boolean) => { opened = open; } };
+  const card = ui.doc.createElement('article');
+  card.setAttribute('data-item', 'narrative_finding:N-new');
+  section.append(card);
+  ui.doc.app.append(section);
+  ui.setPage('sal', { proposals: [], claims: [], finding_views: [{ finding_id: 'N-old' }, { finding_id: 'N-new' }] }, 'La puerta de Sal');
+  ui.setAssistantOpen(true, true);
+  ui.pageChanged();
+  assert.ok(ui.panel.log.textContent.includes('1 hallazgo nuevo'));
+  byText(ui.panel.log, 'button', 'Ver en la página')!.events.click();
+  assert.equal(opened, true, 'a folded section opens');
+  assert.equal(card.scrolled, 1);
+  assert.equal(ui.doc.activeElement, card);
+  assert.ok(card.classList.contains('flash'));
 });
 
-test('disconnect calls the server and clears the conversation', async () => {
-  let connected = true;
-  const ui = page({
-    'GET /status': () => ({ json: { state: connected ? 'connected' : 'disconnected' } }),
-    'DELETE /credential': () => { connected = false; return { json: { state: 'disconnected' } }; },
-    'POST /prompt': { chunks: ['event: delta\ndata: {"text":"hola"}\n\nevent: done\ndata: {"aborted":false}\n\n'] },
-  });
-  await ui.refreshStatus();
-  await ui.sendPrompt('hola');
-  await byText(ui.app, 'button', 'Desconectar ChatGPT')!.events.click();
-  assert.ok(ui.calls.some((call) => call.method === 'DELETE' && call.path === '/credential'));
-  assert.equal(ui.state.messages.length, 0);
-  assert.ok(byText(ui.app, 'button', 'Conectar ChatGPT'));
+test('turn errors become fixed messages; an expired connection brings the connect view back', async () => {
+  const ui = page({ ...connected, 'POST /prompt': { chunks: [sse(['error', { code: 'reconnect' }])] } });
+  await ui.refreshAssistantStatus();
+  await ui.sendAssistant('hola');
+  assert.ok(byText(ui.panel.log, 'h3', 'Vuelve a conectar ChatGPT'));
+
+  const busy = page({ ...connected, 'POST /prompt': { status: 429, json: { error: 'busy' } } });
+  await busy.refreshAssistantStatus();
+  await busy.sendAssistant('hola');
+  assert.equal(byTag(busy.panel.log, 'p').find((n) => n.attrs.role === 'alert')?.textContent, 'Hay demasiadas personas usando el asistente. Prueba de nuevo en unos minutos.');
+  assert.equal(busy.panel.state.textContent, 'Error');
+  await busy.sendAssistant('   ');
+  assert.equal(busy.calls.filter((c) => c.path === '/prompt').length, 1, 'an empty message is not sent');
+
+  const limit = page({ ...connected, 'POST /prompt': { chunks: [sse(['delta', { text: 'a medias' }], ['done', { aborted: true }])] } });
+  await limit.refreshAssistantStatus();
+  await limit.sendAssistant('largo');
+  assert.ok(limit.panel.log.textContent.includes('Respuesta detenida.'));
+  assert.equal(limit.panel.state.textContent, 'Detenida');
 });
 
-test('a person with no book is sent to the review page instead of a connect button', async () => {
-  const ui = page({ 'GET /status': { status: 404, json: {} } });
-  await ui.refreshStatus();
-  assert.ok(byText(ui.app, 'h2', 'Primero necesitas un libro'));
-  assert.equal(nodes(ui.app, 'a')[0].attrs.href, '/review');
-  assert.equal(nodes(ui.app, 'button').length, 0);
+test('asking about a card sets the item and fills only an empty prompt', async () => {
+  const ui = page(connected);
+  ui.setPage('sal', null, 'La puerta de Sal');
+  await ui.refreshAssistantStatus();
+  ui.ask({ kind: 'claim', id: 'C-1', label: 'Afirmación: Elena no duerme' }, '¿Está bien apoyada?');
+  assert.equal(ui.root().hidden, false);
+  assert.equal(ui.panel.input.value, '¿Está bien apoyada?');
+  assert.ok(ui.panel.context.textContent.includes('Afirmación: Elena no duerme'));
+  ui.panel.input.value = 'mi pregunta';
+  ui.ask({ kind: 'proposal', id: 'P-2', label: 'Cambio propuesto · x.md' }, 'otro borrador');
+  assert.equal(ui.panel.input.value, 'mi pregunta', 'text the writer typed is kept');
+  assert.ok(ui.panel.context.textContent.includes('Cambio propuesto · x.md'));
+  byTag(ui.panel.context, 'button').find((b) => b.attrs['aria-label'] === 'Quitar la referencia')!.events.click();
+  assert.equal(ui.assistantState.item, null);
 });
 
-test('errors are announced as alerts and the new limits have their own messages', async () => {
-  const ui = page({ 'POST /login': { status: 429, json: { error: 'rate_limited' } } });
-  await ui.connect();
-  const alert = nodes(ui.app, 'p').find((n) => n.attrs.role === 'alert');
-  assert.equal(alert?.textContent, 'Has pedido demasiados códigos seguidos. Espera unos minutos y prueba de nuevo.');
-
-  const chat = page({ 'GET /status': { json: { state: 'connected' } }, 'POST /prompt': { chunks: ['event: error\ndata: {"code":"turn_limit"}\n\n'] } });
-  await chat.refreshStatus();
-  await chat.sendPrompt('hola');
-  const bubble = nodes(chat.app, 'div').find((n) => n.attrs.role === 'alert');
-  assert.equal(bubble?.textContent, 'La respuesta se ha detenido porque era demasiado larga o tardaba demasiado.');
+test('a focused panel field does not hold back the page refresh, a page field still does', () => {
+  const ui = page({});
+  ui.panel.input.focus();
+  assert.equal(ui.hasWorkInProgress(), false);
+  const note = ui.doc.createElement('textarea');
+  ui.doc.app.append(note);
+  note.focus();
+  assert.equal(ui.hasWorkInProgress(), true);
 });
 
-test('the page follows docs/design.md: shared tokens, one column, 16 px controls of 44 px', () => {
-  const html = engineHtml('https://clerk.example.com/', 'pk_test_"placeholder');
-  assert.match(html, /<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">/);
-  assert.match(html, /<a href="\/review">/);
-  assert.match(html, /data-clerk-publishable-key="pk_test_&quot;placeholder"/);
+test('activity labels say what happens in Spanish and never show raw text', () => {
+  const ui = page({});
+  const label = (step: object) => ui.activityLabel(step);
+  assert.equal(label({ name: 'read_scene', phase: 'start', scene: 'scenes/003-el-faro.md' }), 'Leyendo escena 3…');
+  assert.equal(label({ name: 'read_scene', phase: 'start' }), 'Leyendo una escena…');
+  assert.equal(label({ name: 'list_scenes', phase: 'end', ok: true, count: 1 }), '1 escena');
+  assert.equal(label({ name: 'propose_revision', phase: 'end', ok: true, count: 0 }), 'Ese cambio ya estaba propuesto');
+  assert.equal(label({ name: 'propose_findings', phase: 'end', ok: false }), 'Error: no se pudieron proponer los hallazgos');
+  assert.equal(label({ name: 'read_scene', phase: 'end', ok: true, scene: 'scenes/escena-01.md' }), 'Leída: escena 01');
+  assert.equal(label({ name: 'brand_new_tool', phase: 'start' }), 'Usando brand_new_tool…');
+});
 
-  // The tokens are the review page's own, not a second copy.
-  const tokens = REVIEW_CSS.slice(REVIEW_CSS.indexOf(':root {'), REVIEW_CSS.indexOf('* { box-sizing'));
-  assert.match(tokens, /--tap: 44px/);
-  assert.match(tokens, /prefers-color-scheme: dark/);
-  assert.ok(ENGINE_CSS.includes(tokens));
-  const own = ENGINE_CSS.replace(tokens, '');
-  assert.doesNotMatch(own, /#[0-9a-fA-F]{3,8}\b/, 'no colour literal outside the tokens');
-  assert.doesNotMatch(own, /\b\d+px\b(?<!\b[12]px)/, 'no spacing or size literal outside the scales (1 and 2 px lines aside)');
-  assert.match(own, /button, \.button, textarea \{ min-height: var\(--tap\);[^}]*font: var\(--text-md\)/);
-  assert.match(own, /main \{[^}]*max-width: var\(--measure\)[^}]*flex-direction: column/);
-  assert.deepEqual([...own.matchAll(/@media \((?:max|min)-width: ([^)]+)\)/g)].map((m) => m[1]), ['40em', '48em'], 'only breakpoints the design rules name');
-  assert.match(own, /:focus-visible/);
-  assert.match(own, /prefers-reduced-motion: reduce/);
-  assert.match(own, /env\(safe-area-inset-bottom\)/);
-  assert.doesNotMatch(ENGINE_JS, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
+test('the panel follows docs/design.md: tokens, three breakpoints, 16 px fields, 44 px targets, no markup from text', () => {
+  assert.doesNotMatch(ASSISTANT_CSS, /#[0-9a-fA-F]{3,8}\b/, 'no colour literal: the review page tokens only');
+  assert.deepEqual([...ASSISTANT_CSS.matchAll(/\b(\d+)px\b/g)].map((m) => m[1]).filter((n) => !['1', '2', '3'].includes(n)), [], 'no spacing literal outside the scales');
+  assert.deepEqual([...new Set([...ASSISTANT_CSS.matchAll(/@media \((?:max|min)-width: ([^)]+)\)/g)].map((m) => m[1]))], ['74.99em', '40em', '75em'], 'only the breakpoints the design rules name');
+  assert.match(ASSISTANT_CSS, /\.assistant-fab \{[^}]*min-height: var\(--tap\)/);
+  assert.match(ASSISTANT_CSS, /env\(safe-area-inset-bottom\)/);
+  assert.doesNotMatch(ASSISTANT_CSS, /\.assistant textarea \{[^}]*font-size/, 'the field keeps the 16 px of the page controls');
+  assert.doesNotMatch(ASSISTANT_JS, /innerHTML|outerHTML|insertAdjacentHTML|document\.write|DOMParser/);
 });

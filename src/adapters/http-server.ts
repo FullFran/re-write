@@ -14,7 +14,7 @@ import { TokenVerifier } from './auth.ts';
 import { ENGINE_HTTP_STATUS, EngineError, EngineManager, type EngineSettings } from './engine.ts';
 import { isDirectLoopback, looksLikeEngineToken, parseEngineKey } from './engine-auth.ts';
 import { ACTIVITY_SCENE } from './engine-protocol.ts';
-import { ENGINE_CSS, ENGINE_JS, engineHtml } from './engine-page.ts';
+import { ASSISTANT_CSS, ASSISTANT_JS } from './engine-page.ts';
 import { llmsText } from './llms.ts';
 import { buildMcpServer, logMcpTransport } from './mcp.ts';
 import { recordAuthenticationFailure, recordSubject, recordUnexpectedError, withRequestLog } from './request-log.ts';
@@ -829,19 +829,23 @@ export function createHandler(
         // With the engine off these addresses do not exist, for anyone.
         if (!engine) throw new HttpError(404, 'not found');
         if (path.startsWith('/review/api/engine/')) return await serveEngineApi(req, res, path, engine);
+        // The assistant lives in the review page now; its old address opens it there.
         if (req.method === 'GET' && path === '/review/engine') {
-          return serveAsset(res, 'text/html; charset=utf-8', engineHtml(config.issuer, config.clerkPublishableKey));
+          res.statusCode = 302;
+          res.setHeader('location', '/review?asistente=1');
+          res.setHeader('cache-control', 'no-store');
+          res.end();
+          return;
         }
-        if (req.method === 'GET' && path === '/review/engine/app.js') return serveAsset(res, 'text/javascript; charset=utf-8', ENGINE_JS);
-        if (req.method === 'GET' && path === '/review/engine/app.css') return serveAsset(res, 'text/css; charset=utf-8', ENGINE_CSS);
         throw new HttpError(404, 'not found');
       }
       if (path.startsWith('/review/api/')) return await serveReviewApi(req, res, path);
       if (req.method === 'GET' && path === '/review') {
         return serveAsset(res, 'text/html; charset=utf-8', reviewHtml(config.issuer, config.clerkPublishableKey, { engine: engine !== undefined }));
       }
-      if (req.method === 'GET' && path === '/review/app.js') return serveAsset(res, 'text/javascript; charset=utf-8', REVIEW_JS);
-      if (req.method === 'GET' && path === '/review/app.css') return serveAsset(res, 'text/css; charset=utf-8', REVIEW_CSS);
+      // With the engine on, the assistant panel's styles and script follow the page's own.
+      if (req.method === 'GET' && path === '/review/app.js') return serveAsset(res, 'text/javascript; charset=utf-8', engine ? REVIEW_JS + ASSISTANT_JS : REVIEW_JS);
+      if (req.method === 'GET' && path === '/review/app.css') return serveAsset(res, 'text/css; charset=utf-8', engine ? REVIEW_CSS + ASSISTANT_CSS : REVIEW_CSS);
       throw new HttpError(404, 'not found');
     })().catch((error) => {
       const status = error instanceof HttpError ? error.status : 500;

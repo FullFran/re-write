@@ -2,7 +2,7 @@
 
 Status: experimental, **off by default**. First part of [#40](https://github.com/FullFran/re-write/issues/40). What #40 still needs is in [the last section](#what-40-still-needs).
 
-A signed-in writer opens `/review/engine`, connects their own ChatGPT account with a device code, and talks with an assistant that runs on the server. The assistant uses RE;write's MCP tools as that writer: it can read and propose, and it can never accept or reject. It has no other tool.
+A signed-in writer opens the assistant panel in the review page (`/review`), connects their own ChatGPT account with a device code, and talks with an assistant that runs on the server. The assistant uses RE;write's MCP tools as that writer: it can read and propose, and it can never accept or reject. It has no other tool.
 
 ## Read this before enabling it
 
@@ -24,7 +24,7 @@ flowchart LR
 
 | Part | Where | What it does |
 | --- | --- | --- |
-| Routes and page | `src/adapters/http-server.ts`, `src/adapters/engine-page.ts` | The browser side, behind the browser session |
+| Routes and panel | `src/adapters/http-server.ts`, `src/adapters/engine-page.ts` | The browser side, behind the browser session; the panel's styles and script are appended to the review page's |
 | Process manager | `src/adapters/engine.ts` | Starts, feeds and stops engine processes; owns credentials and refresh |
 | Credentials and tokens | `src/adapters/engine-auth.ts` | Encrypted vault; engine tokens for `/mcp` |
 | Protocol | `src/adapters/engine-protocol.ts` | The messages between server and engine process |
@@ -63,9 +63,9 @@ The engine process reaches the server at `http://127.0.0.1:$PORT/mcp`.
 
 ## What a writer sees
 
-1. `/review/engine` asks them to connect ChatGPT.
-2. The page shows a code and a link to `https://auth.openai.com/codex/device`. They sign in there and type the code. Nothing travels from their browser to the server in this step; the server polls OpenAI.
-3. The page turns into a chat. Answers stream in. A small note names each tool the assistant used.
+1. The review page has an **Asistente** button in its header and a floating one. It opens a side panel on wide screens and a bottom sheet on phones, over the same page: nothing reloads and the page keeps its place and its refresh. `/review/engine`, the old address, redirects to `/review?asistente=1`, which opens the panel.
+2. Not connected, the panel asks them to connect ChatGPT, then shows a code and a link to `https://auth.openai.com/codex/device`. They sign in there and type the code. Nothing travels from their browser to the server in this step; the server polls OpenAI.
+3. Connected, the panel offers a few quick questions that only fill the prompt. The book selected in the page is sent with every turn, and **Preguntar al asistente** on a proposal, finding or claim adds that item (see [Page context](#page-context)). Answers stream in with paragraphs, lists, quotes and emphasis, built as elements from text. Each tool call shows as a step while it runs and after (`Leyendo escena 3…`, `Propuestos 2 hallazgos`, `Error: …`). When the assistant proposed something, the panel waits for the page's next refresh and offers **Ver en la página**, which scrolls to the new card.
 4. "Desconectar ChatGPT" deletes the stored credential, stops their engine process and revokes its token.
 
 The model is the first one OpenAI lists for the account; there is no model picker. The conversation is kept in the memory of the engine process only: it is lost when the process stops (idle, disconnect, restart) and is never written to disk.
@@ -76,7 +76,7 @@ All under the browser session, like the review API. An agent's access token and 
 
 | Route | Answer |
 | --- | --- |
-| `GET /review/engine`, `/review/engine/app.js`, `/review/engine/app.css` | The page |
+| `GET /review/engine` | 302 to `/review?asistente=1`. The panel is served with the review page: `/review/app.js` and `/review/app.css` carry it when the engine is on |
 | `GET /review/api/engine/status` | `{state}`: `disconnected`, `pending` (with `user_code` and `verification_uri`), `connected` or `reconnect` |
 | `POST /review/api/engine/login` | Starts a device login: `{user_code, verification_uri, expires_in}`. One pending login per person; a new one cancels the previous. At most 3 starts per person in 15 minutes, then `rate_limited` |
 | `DELETE /review/api/engine/credential` | Disconnects |
@@ -137,14 +137,14 @@ Tests run against a fake engine process and call no provider. The real engine pr
 Use the synthetic book only.
 
 1. Build with `--build-arg WITH_ENGINE=1`, set `REWRITE_ENGINE=1` and `REWRITE_ENGINE_KEY`, deploy, and confirm `GET /health` still answers.
-2. Open `/review/engine` on a phone, signed in (the review page header links to it as "Asistente" when the engine is enabled; a person who cannot use any book gets 404 there). Press "Conectar ChatGPT": a code and the OpenAI link appear.
-3. Approve at OpenAI. Within a few seconds the page becomes a chat. In the container, `ls -l /data/engine/credentials/` shows one file with mode `-rw-------` and no readable token inside.
-4. Ask "¿Qué libros tengo?". The answer streams, and a note says `Consultado: list_books`.
+2. Open `/review` on a phone, signed in, and press **Asistente** (a person who cannot use any book is told to create one first). Press "Conectar ChatGPT": a code and the OpenAI link appear.
+3. Approve at OpenAI. Within a few seconds the panel shows its quick questions. In the container, `ls -l /data/engine/credentials/` shows one file with mode `-rw-------` and no readable token inside.
+4. Ask "¿Qué libros tengo?". The answer streams, and a step says how many books it found.
 5. Ask it to propose a claim with a literal quote. The claim appears in `/review` as pending; the assistant has not accepted it and says it cannot.
 6. Start a long answer and press "Detener": it stops, and the next message works.
 7. Wait past `REWRITE_ENGINE_IDLE_SECONDS`, send again: it answers, with the earlier conversation gone. `docker logs` shows `engine.process` stop and start lines and no token, code or message text.
 8. After more than an hour, send again: the turn still works (a refresh happened) and the credential file has a new modification time.
-9. Press "Desconectar ChatGPT": the file is gone and the page asks to connect again.
+9. Press "Desconectar ChatGPT": the file is gone and the panel asks to connect again.
 10. From another account with no connection, confirm the page asks to connect and shows nothing of the first account.
 
 If step 3, 4 or 8 fails, the page shows a fixed message only. Run the engine by hand in the container to see the real error; it is deliberately not logged.
