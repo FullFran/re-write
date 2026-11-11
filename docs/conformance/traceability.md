@@ -106,25 +106,25 @@ Generated from HCS release 0.1.0-draft.6 (vendor/hcs/PIN.json); do not edit.
 
 | Requirement | Keyword | Status | Where | Issue or reason |
 | --- | --- | --- | --- | --- |
-| HCS-0007-R001 | MUST | planned |  | [#32](https://github.com/FullFran/re-write/issues/32) |
-| HCS-0007-R002 | MUST | planned |  | [#32](https://github.com/FullFran/re-write/issues/32) |
-| HCS-0007-R003 | MUST | planned |  | [#32](https://github.com/FullFran/re-write/issues/32) |
-| HCS-0007-R004 | MUST NOT | planned |  | [#32](https://github.com/FullFran/re-write/issues/32) |
-| HCS-0007-R005 | MUST NOT | planned |  | [#32](https://github.com/FullFran/re-write/issues/32) |
-| HCS-0007-R006 | MUST NOT | planned |  | [#32](https://github.com/FullFran/re-write/issues/32) |
-| HCS-0007-R007 | MUST NOT | planned |  | [#32](https://github.com/FullFran/re-write/issues/32) |
-| HCS-0007-R008 | MUST NOT | planned |  | [#32](https://github.com/FullFran/re-write/issues/32) |
-| HCS-0007-R009 | MUST | planned |  | [#32](https://github.com/FullFran/re-write/issues/32) |
-| HCS-0007-R010 | MUST | planned |  | [#32](https://github.com/FullFran/re-write/issues/32) |
-| HCS-0007-R011 | MUST NOT | planned |  | [#32](https://github.com/FullFran/re-write/issues/32) |
-| HCS-0007-R012 | MUST NOT | planned |  | [#32](https://github.com/FullFran/re-write/issues/32) |
-| HCS-0007-R013 | MUST NOT | planned |  | [#32](https://github.com/FullFran/re-write/issues/32) |
-| HCS-0007-R014 | MUST | planned |  | [#32](https://github.com/FullFran/re-write/issues/32) |
+| HCS-0007-R001 | MUST | implemented | `src/hcs/canonical-json.ts`, `src/hcs/distribution.ts`, `tests/hcs-distribution.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0007-R002 | MUST | implemented | `src/hcs/canonical-json.ts`, `src/hcs/distribution.ts`, `tests/hcs-distribution.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0007-R003 | MUST | implemented | `src/hcs/canonical-json.ts`, `src/hcs/distribution.ts`, `tests/hcs-canonical-json.test.ts`, `tests/hcs-distribution.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0007-R004 | MUST NOT | implemented | `src/hcs/canonical-json.ts`, `src/hcs/distribution.ts`, `tests/hcs-canonical-json.test.ts`, `tests/hcs-distribution.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0007-R005 | MUST NOT | implemented | `src/hcs/distribution.ts`, `tests/hcs-distribution.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0007-R006 | MUST NOT | implemented | `src/hcs/distribution.ts`, `tests/hcs-distribution.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0007-R007 | MUST NOT | implemented | `src/hcs/distribution.ts`, `tests/hcs-distribution.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0007-R008 | MUST NOT | implemented | `src/hcs/distribution.ts`, `tests/hcs-distribution.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0007-R009 | MUST | implemented | `src/hcs/distribution.ts`, `tests/hcs-distribution.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0007-R010 | MUST | implemented | `src/hcs/distribution.ts`, `tests/hcs-distribution.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0007-R011 | MUST NOT | implemented | `src/hcs/distribution.ts`, `tests/hcs-distribution.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0007-R012 | MUST NOT | implemented | `src/hcs/distribution.ts`, `tests/hcs-distribution.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0007-R013 | MUST NOT | implemented | `src/hcs/distribution.ts`, `tests/hcs-distribution.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0007-R014 | MUST | implemented | `src/hcs/distribution.ts`, `tests/hcs-distribution.test.ts`, `tests/hcs-conformance.test.ts` |  |
 | HCS-0007-R015 | MUST | planned |  | [#33](https://github.com/FullFran/re-write/issues/33) |
 | HCS-0007-R016 | MUST | planned |  | [#33](https://github.com/FullFran/re-write/issues/33) |
-| HCS-0007-R017 | MUST NOT | planned |  | [#32](https://github.com/FullFran/re-write/issues/32) |
+| HCS-0007-R017 | MUST NOT | planned |  | [#33](https://github.com/FullFran/re-write/issues/33) |
 | HCS-0007-R018 | MUST | planned |  | [#33](https://github.com/FullFran/re-write/issues/33) |
-| HCS-0007-R019 | SHOULD | planned |  | [#32](https://github.com/FullFran/re-write/issues/32) |
+| HCS-0007-R019 | SHOULD | planned |  | [#34](https://github.com/FullFran/re-write/issues/34) |
 | HCS-0007-R020 | SHOULD | planned |  | [#34](https://github.com/FullFran/re-write/issues/34) |
 | HCS-0007-R021 | SHOULD | planned |  | [#43](https://github.com/FullFran/re-write/issues/43) |
 

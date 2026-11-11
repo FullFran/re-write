@@ -22,7 +22,7 @@ Rules live in [`tests/fixtures/hcs/divergences.json`](../tests/fixtures/hcs/dive
 
 The test fails only on a **regression**: a case that passes in [`tests/fixtures/hcs/baseline.json`](../tests/fixtures/hcs/baseline.json) and does not pass now. A new case that fails does not block anything; it shows up as `fail` in the report. After fixing a `fail` or moving to a new release, regenerate the baseline with `HCS_BASELINE=write node --test tests/hcs-conformance.test.ts` and review its diff in the pull request. `node --test --test-reporter=tap tests/hcs-conformance.test.ts` prints the per-level table.
 
-Measured with HCS `0.1.0-draft.6`: 105 pass, 0 fail, 233 not applicable (94 host, 41 projection, 37 distribution, 17 recovery, 7 client, 37 document cases of schemas without a runner), 0 divergences.
+Measured with HCS `0.1.0-draft.6`: 155 pass, 0 fail, 183 not applicable (94 host, 41 projection, 17 recovery, 7 client, 24 document cases of schemas without a runner), 0 divergences.
 
 ## Updating to a new HCS release
 
@@ -37,6 +37,24 @@ One pull request per HCS release:
 A release of another contract version (for example `0.2.x`) is refused until `HCS_VERSION` is changed, because instance documents carry `hcsVersion`.
 
 The reference runner (`vendor/hcs/<version>/conformance/runner/run.py`) will run against re-write in M7 ([#44](https://github.com/FullFran/re-write/issues/44)).
+
+## Signed catalogs (HCS-0007)
+
+`src/hcs/distribution.ts` verifies a root-signed key set and a signed catalog envelope (HCS-0007-R001 to R014). It is a pair of pure functions: the trust anchor, the assignment, the accepted state and the clock are arguments in the shape of HCS-0007 section 3.3, and nothing is read from disk, the environment or the system clock. Where a host keeps its trust anchor and how it persists the accepted state are not decided here ([#33](https://github.com/FullFran/re-write/issues/33)); no command calls the verifier yet.
+
+- `verifyKeySet(text, { trustAnchor, lastAccepted?, now })` checks, in this order, shape and unique `keyid` (R002), the trust anchor's threshold of root signatures (R011), rollback (R012) and that at least one key is inside its validity window (R013). It returns the verified key set, frozen, and its accepted state `{ version, digest }`.
+- `verifyEnvelope(text, { keySet, assignment, lastAccepted?, now })` applies the order of section 5.2 and reports only the first check that fails (R009): version and shape (R001), signatures (R005, R014), binding (R006), expiry (R007), sequence (R008) and then the catalog through `readCatalog` (R010). `keySet` must be the object `verifyKeySet` returned; any other value is a `TypeError`, so an envelope cannot be checked against keys the trust anchor did not sign. It returns the catalog and the accepted state `{ sequence, digest }`, which the caller records only then (R015).
+- `readEnvelope` and `readKeySet` check version and shape only; `signingInput` and `contentDigest` expose the signature input and the content digest of section 4.
+
+Both documents are read from their text or bytes with a strict parser (`src/hcs/canonical-json.ts`), because `JSON.parse` keeps the last of two members with the same name and accepts unpaired surrogates. A duplicated member name, an unpaired surrogate, invalid JSON or UTF-8, or nesting deeper than 64 levels reports `manifest_invalid` with HCS-0007-R003. A number that is not an integer between -(2^53-1) and 2^53-1 reports `manifest_invalid` with HCS-0007-R004, wherever it appears in the document: the catalog and `x-` extension members included. Integrality is decided on the digits of the token, without floating point: `1.0000000000000000001` and `1e-400` are refused although they round to 1 and 0 as doubles. The version is checked before the number rule, so an envelope of another `hcsVersion` reports `unsupported_hcs_version` even when it also holds such a number (R001). Error messages carry an offset or a JSON pointer, never text of the document.
+
+Pending upstream (HCS-0007 does not settle them; re-write's current reading may change):
+
+- Value or spelling in R004: a spelling whose exact value is an integer in range, such as `1.0`, `1e2` or `0.0000001e7`, is read as that integer (1, 100, 1) instead of being refused.
+- A key set of another `hcsVersion` reports `manifest_invalid` with HCS-0007-R002; R001 defines `unsupported_hcs_version` for envelopes only.
+- A repeated `keyid` in `signatures`: only the first signature of each `keyid` is tried and the others are ignored, so a document cannot make the host verify more than once per key.
+
+A threshold counts distinct public keys: unknown `keyid`s are ignored, the same key signing twice counts once, and two `keyid`s for one public key are one key. Signatures are Ed25519 through `node:crypto`. Timestamps must be real UTC instants (`2026-02-30T00:00:00Z` is `manifest_invalid`) and are compared to the nanosecond. A document larger than 8 MiB is refused before it is parsed, and a document with more than 1024 keys or 1024 signatures is refused as `manifest_invalid` before any key is imported or any signature verified; these are local limits (`MAX_KEYS`, `MAX_SIGNATURES`), HCS-0007 states none. Trust-anchor validation checks shape only: it does not refuse small-order Ed25519 public keys, which `node:crypto` accepts. Host inputs that are not what section 3.3 defines (an empty trust anchor, a malformed accepted state, an invalid `Date`) throw a `TypeError` instead of producing an HCS error: they are configuration faults of the host, not properties of the document.
 
 ## Package archives
 
