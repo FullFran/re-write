@@ -138,8 +138,9 @@ node src/cli/main.ts check <data-dir>/books/la-puerta-de-sal
 
 ## A guided tour
 
-1. **Concentración.** Open scene 4, *El paño seco*, in Concentración and read it with the links
-   shown as text; switch to the source mode to see `[[Padre Damián|padre Damián]]`.
+1. **Concentración.** Open scene 4, *El paño seco*, in Concentración. In *Vista previa en vivo*
+   the links show only their text; put the cursor on `padre Damián` to see
+   `[[Padre Damián|padre Damián]]`, and switch to *Lectura* to read it clean.
 2. **Follow a link.** Open `Clara` from the scene. Her note lists its linked mentions (scenes 2,
    4, 6, 9, ...) and the unlinked ones, where her name appears as plain text.
 3. **The graph.** Open the Grafo panel and the drawing: four colours, one per community. Turn on
@@ -151,7 +152,7 @@ node src/cli/main.ts check <data-dir>/books/la-puerta-de-sal
    three possible contradictions, A, B and C above. A is the honest case for a verdict: scene 11
    says Elena guessed, a reading the finding already lists. B and C are real slips to fix.
 7. **A proposal, undo and revert.** Accept a fix for C (for example, make Tomás only suspect in
-   scene 8), then revert it from the review page and see the scene come back.
+   scene 8), then use *Revertir cambio de texto* in the review page and see the scene come back.
 8. **Ask the assistant.** "¿Dónde está Bruno?" with the cut at scene 10, then without the cut.
    Then "¿Cuántos años lleva Elena en el puente?": Canon holds both answers (D), and a careful
    reader, or the assistant, should notice.

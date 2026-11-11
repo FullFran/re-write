@@ -1,0 +1,617 @@
+{
+  "id": "showcase-tour",
+  "title": "Tour the showcase book: notes, the story graph, who knows what, continuity and a finding",
+  "guarantee": "On a complete novel, notes reach the book only when a person accepts them; the graph answers paths, centrality and orphans from the links; who-knows-what edges keep the mystery hidden until its scene; the continuity check finds the planted knowledge-order problems; and a finding needs a literal quote.",
+  "book": {
+    "id": "puerta",
+    "title": "La puerta de Sal",
+    "scenes": [
+      "fixtures/la-puerta-de-sal/scenes/001-la-puerta-de-sal.md",
+      "fixtures/la-puerta-de-sal/scenes/002-el-altar.md",
+      "fixtures/la-puerta-de-sal/scenes/003-la-taberna-del-ancla.md",
+      "fixtures/la-puerta-de-sal/scenes/004-el-pano-seco.md",
+      "fixtures/la-puerta-de-sal/scenes/005-la-barquera.md",
+      "fixtures/la-puerta-de-sal/scenes/006-la-casa-del-peso.md",
+      "fixtures/la-puerta-de-sal/scenes/007-el-senor-de-ribera.md",
+      "fixtures/la-puerta-de-sal/scenes/008-la-ronda-de-noche.md",
+      "fixtures/la-puerta-de-sal/scenes/009-tinta-nueva.md",
+      "fixtures/la-puerta-de-sal/scenes/010-el-trato.md",
+      "fixtures/la-puerta-de-sal/scenes/011-lo-que-dijo-elena.md",
+      "fixtures/la-puerta-de-sal/scenes/012-la-verguenza-de-tomas.md",
+      "fixtures/la-puerta-de-sal/scenes/013-antes-de-la-lluvia.md",
+      "fixtures/la-puerta-de-sal/scenes/014-la-otra-orilla.md",
+      "fixtures/la-puerta-de-sal/scenes/015-la-crecida.md",
+      "fixtures/la-puerta-de-sal/scenes/016-la-capilla-vacia.md",
+      "fixtures/la-puerta-de-sal/scenes/017-la-puerta.md",
+      "fixtures/la-puerta-de-sal/scenes/018-el-libro-mojado.md",
+      "fixtures/la-puerta-de-sal/scenes/019-la-medida-de-la-sal.md",
+      "fixtures/la-puerta-de-sal/scenes/020-la-losa.md"
+    ]
+  },
+  "steps": [
+    {
+      "id": "start",
+      "do": "call",
+      "tool": "list_notes",
+      "args": {
+        "book": "puerta"
+      },
+      "checks": [
+        {
+          "name": "the book starts without notes",
+          "path": "start.data.notes",
+          "equals": []
+        },
+        {
+          "name": "links in the scenes name notes that do not exist yet, the planted one among them",
+          "path": "start.data.unresolved.*.target",
+          "contains": "Salinas del Norte"
+        }
+      ]
+    },
+    {
+      "id": "elena",
+      "do": "call",
+      "tool": "propose_note",
+      "args": {
+        "book": "puerta",
+        "name": "Elena",
+        "text": "---\ntype: personaje\naliases: [la guardiana]\n---\nGuardiana del puente. Amiga de [[Bruno]].\n",
+        "rationale": "Ficha del libro de muestra"
+      },
+      "checks": [
+        {
+          "name": "the note Elena is proposed",
+          "path": "elena.data.created",
+          "equals": true
+        }
+      ]
+    },
+    {
+      "id": "accept_elena",
+      "do": "person_reviews_proposal",
+      "proposal_id": {
+        "ref": "elena.data.proposal.proposal_id"
+      },
+      "decision": "accept",
+      "checks": [
+        {
+          "name": "the person accepts Elena",
+          "path": "accept_elena.status",
+          "equals": "accepted"
+        }
+      ]
+    },
+    {
+      "id": "bruno",
+      "do": "call",
+      "tool": "propose_note",
+      "args": {
+        "book": "puerta",
+        "name": "Bruno",
+        "text": "---\ntype: personaje\naliases: [el llavero]\n---\nLlavero de la compuerta.\n",
+        "rationale": "Ficha del libro de muestra"
+      },
+      "checks": [
+        {
+          "name": "the note Bruno is proposed",
+          "path": "bruno.data.created",
+          "equals": true
+        }
+      ]
+    },
+    {
+      "id": "accept_bruno",
+      "do": "person_reviews_proposal",
+      "proposal_id": {
+        "ref": "bruno.data.proposal.proposal_id"
+      },
+      "decision": "accept",
+      "checks": [
+        {
+          "name": "the person accepts Bruno",
+          "path": "accept_bruno.status",
+          "equals": "accepted"
+        }
+      ]
+    },
+    {
+      "id": "ines",
+      "do": "call",
+      "tool": "propose_note",
+      "args": {
+        "book": "puerta",
+        "name": "Inés",
+        "text": "---\ntype: personaje\naliases: [la barquera]\n---\nBarquera de Ribera.\n",
+        "rationale": "Ficha del libro de muestra"
+      },
+      "checks": [
+        {
+          "name": "the note Inés is proposed",
+          "path": "ines.data.created",
+          "equals": true
+        }
+      ]
+    },
+    {
+      "id": "accept_ines",
+      "do": "person_reviews_proposal",
+      "proposal_id": {
+        "ref": "ines.data.proposal.proposal_id"
+      },
+      "decision": "accept",
+      "checks": [
+        {
+          "name": "the person accepts Inés",
+          "path": "accept_ines.status",
+          "equals": "accepted"
+        }
+      ]
+    },
+    {
+      "id": "anselmo",
+      "do": "call",
+      "tool": "propose_note",
+      "args": {
+        "book": "puerta",
+        "name": "Anselmo",
+        "text": "---\ntype: personaje\naliases: [el recaudador]\n---\nRecaudador del concejo.\n",
+        "rationale": "Ficha del libro de muestra"
+      },
+      "checks": [
+        {
+          "name": "the note Anselmo is proposed",
+          "path": "anselmo.data.created",
+          "equals": true
+        }
+      ]
+    },
+    {
+      "id": "accept_anselmo",
+      "do": "person_reviews_proposal",
+      "proposal_id": {
+        "ref": "anselmo.data.proposal.proposal_id"
+      },
+      "decision": "accept",
+      "checks": [
+        {
+          "name": "the person accepts Anselmo",
+          "path": "accept_anselmo.status",
+          "equals": "accepted"
+        }
+      ]
+    },
+    {
+      "id": "marcos",
+      "do": "call",
+      "tool": "propose_note",
+      "args": {
+        "book": "puerta",
+        "name": "Marcos Ferrer",
+        "text": "---\ntype: personaje\naliases: [el señor de Ribera]\n---\nSeñor de Ribera.\n",
+        "rationale": "Ficha del libro de muestra"
+      },
+      "checks": [
+        {
+          "name": "the note Marcos Ferrer is proposed",
+          "path": "marcos.data.created",
+          "equals": true
+        }
+      ]
+    },
+    {
+      "id": "accept_marcos",
+      "do": "person_reviews_proposal",
+      "proposal_id": {
+        "ref": "marcos.data.proposal.proposal_id"
+      },
+      "decision": "accept",
+      "checks": [
+        {
+          "name": "the person accepts Marcos Ferrer",
+          "path": "accept_marcos.status",
+          "equals": "accepted"
+        }
+      ]
+    },
+    {
+      "id": "damian",
+      "do": "call",
+      "tool": "propose_note",
+      "args": {
+        "book": "puerta",
+        "name": "Padre Damián",
+        "text": "---\ntype: personaje\naliases: [el cura]\n---\nCura de la capilla.\n",
+        "rationale": "Ficha del libro de muestra"
+      },
+      "checks": [
+        {
+          "name": "the note Padre Damián is proposed",
+          "path": "damian.data.created",
+          "equals": true
+        }
+      ]
+    },
+    {
+      "id": "accept_damian",
+      "do": "person_reviews_proposal",
+      "proposal_id": {
+        "ref": "damian.data.proposal.proposal_id"
+      },
+      "decision": "accept",
+      "checks": [
+        {
+          "name": "the person accepts Padre Damián",
+          "path": "accept_damian.status",
+          "equals": "accepted"
+        }
+      ]
+    },
+    {
+      "id": "salina",
+      "do": "call",
+      "tool": "propose_note",
+      "args": {
+        "book": "puerta",
+        "name": "Salina Vieja",
+        "text": "---\ntype: lugar\n---\nBalsas abandonadas. Nadie las nombra todavía.\n",
+        "rationale": "Ficha del libro de muestra"
+      },
+      "checks": [
+        {
+          "name": "the note Salina Vieja is proposed",
+          "path": "salina.data.created",
+          "equals": true
+        }
+      ]
+    },
+    {
+      "id": "accept_salina",
+      "do": "person_reviews_proposal",
+      "proposal_id": {
+        "ref": "salina.data.proposal.proposal_id"
+      },
+      "decision": "accept",
+      "checks": [
+        {
+          "name": "the person accepts Salina Vieja",
+          "path": "accept_salina.status",
+          "equals": "accepted"
+        }
+      ]
+    },
+    {
+      "id": "notes",
+      "do": "call",
+      "tool": "list_notes",
+      "args": {
+        "book": "puerta"
+      },
+      "checks": [
+        {
+          "name": "the accepted notes are listed",
+          "path": "notes.data.notes.*.name",
+          "equals": [
+            "Anselmo",
+            "Bruno",
+            "Elena",
+            "Inés",
+            "Marcos Ferrer",
+            "Padre Damián",
+            "Salina Vieja"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "read_elena",
+      "do": "call",
+      "tool": "read_note",
+      "args": {
+        "book": "puerta",
+        "name": "Elena"
+      },
+      "checks": [
+        {
+          "name": "the note links to Bruno",
+          "path": "read_elena.data.links.*.target",
+          "equals": [
+            "Bruno"
+          ]
+        },
+        {
+          "name": "scene 1 links back to Elena first",
+          "path": "read_elena.data.backlinks.linked.0.source",
+          "equals": "scenes/001-la-puerta-de-sal.md"
+        }
+      ]
+    },
+    {
+      "id": "near",
+      "do": "call",
+      "tool": "graph_neighbors",
+      "args": {
+        "book": "puerta",
+        "node": "Elena"
+      },
+      "checks": [
+        {
+          "name": "Elena's neighbours include the man she defends",
+          "path": "near.data.nodes.*.name",
+          "contains": "Bruno"
+        }
+      ]
+    },
+    {
+      "id": "path",
+      "do": "call",
+      "tool": "graph_path",
+      "args": {
+        "book": "puerta",
+        "from": "Marcos Ferrer",
+        "to": "Padre Damián"
+      },
+      "checks": [
+        {
+          "name": "two people who never share a scene are joined through Anselmo",
+          "path": "path.data.path.*.name",
+          "equals": [
+            "Marcos Ferrer",
+            "Anselmo",
+            "Padre Damián"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "central",
+      "do": "call",
+      "tool": "graph_central",
+      "args": {
+        "book": "puerta",
+        "metric": "betweenness"
+      },
+      "checks": [
+        {
+          "name": "the story passes through Elena",
+          "path": "central.data.ranking.0.name",
+          "equals": "Elena"
+        }
+      ]
+    },
+    {
+      "id": "orphans",
+      "do": "call",
+      "tool": "graph_orphans",
+      "args": {
+        "book": "puerta"
+      },
+      "checks": [
+        {
+          "name": "the note nothing links is the orphan",
+          "path": "orphans.data.orphans.*.name",
+          "equals": [
+            "Salina Vieja"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "claims",
+      "do": "call",
+      "tool": "propose_claims",
+      "args": {
+        "book": "puerta",
+        "extractor": "scripted-agent",
+        "candidates": [
+          {
+            "statement": "Elena states that the key lies under the altar slab.",
+            "subject": "Elena",
+            "source_file": "scenes/001-la-puerta-de-sal.md",
+            "quote": "La llave está bajo la losa del altar",
+            "scope": "book",
+            "epistemic_kind": "belief",
+            "story_time": 1,
+            "reveal_order": 3,
+            "knowledge": {
+              "holder": "Elena",
+              "fact": "key-under-altar",
+              "mode": "displays"
+            }
+          },
+          {
+            "statement": "Elena knew nothing about the hiding place before that night.",
+            "subject": "Elena",
+            "source_file": "scenes/002-el-altar.md",
+            "quote": "Elena, que hasta esa noche no había sabido nada del escondite",
+            "scope": "book",
+            "epistemic_kind": "narrated_fact",
+            "story_time": 4,
+            "reveal_order": 5,
+            "knowledge": {
+              "holder": "Elena",
+              "fact": "key-under-altar",
+              "mode": "acquires"
+            }
+          },
+          {
+            "statement": "Tomás says the tax collector forged Bruno's signatures.",
+            "subject": "Anselmo",
+            "source_file": "scenes/008-la-ronda-de-noche.md",
+            "quote": "Las firmas del libro las puso él, el recaudador, con su mano.",
+            "scope": "book",
+            "epistemic_kind": "belief",
+            "story_time": 9,
+            "reveal_order": 13,
+            "knowledge": {
+              "holder": "Tomás",
+              "fact": "ledger-forged",
+              "mode": "displays"
+            }
+          },
+          {
+            "statement": "Tomás learns from Elena that Bruno's debts are forged.",
+            "subject": "Anselmo",
+            "source_file": "scenes/012-la-verguenza-de-tomas.md",
+            "quote": "¿Las deudas de Bruno son falsas?",
+            "scope": "book",
+            "epistemic_kind": "narrated_fact",
+            "story_time": 13,
+            "reveal_order": 22,
+            "knowledge": {
+              "holder": "Tomás",
+              "fact": "ledger-forged",
+              "mode": "acquires"
+            }
+          },
+          {
+            "statement": "Elena finds Bruno alive in Ribera, hidden in Inés's hut.",
+            "subject": "Bruno",
+            "source_file": "scenes/014-la-otra-orilla.md",
+            "quote": "con la barba de dos semanas y la cara flaca y pálida, estaba",
+            "scope": "book",
+            "epistemic_kind": "narrated_fact",
+            "story_time": 14,
+            "reveal_order": 26,
+            "knowledge": {
+              "holder": "Elena",
+              "fact": "bruno-in-ribera",
+              "mode": "acquires"
+            }
+          },
+          {
+            "statement": "Inés has hidden Bruno since the night he disappeared.",
+            "subject": "Bruno",
+            "source_file": "scenes/014-la-otra-orilla.md",
+            "quote": "Inés lo había escondido desde la primera noche",
+            "scope": "book",
+            "epistemic_kind": "narrated_fact",
+            "story_time": 0,
+            "reveal_order": 27,
+            "knowledge": {
+              "holder": "Inés",
+              "fact": "bruno-in-ribera",
+              "mode": "acquires"
+            }
+          }
+        ]
+      },
+      "checks": [
+        {
+          "name": "every claim quotes the text literally",
+          "path": "claims.data.created.length",
+          "equals": 6
+        },
+        {
+          "name": "nothing is rejected",
+          "path": "claims.data.rejected",
+          "equals": []
+        }
+      ]
+    },
+    {
+      "id": "knows_early",
+      "do": "call",
+      "tool": "graph_neighbors",
+      "args": {
+        "book": "puerta",
+        "node": "Bruno",
+        "knows": true,
+        "as_of_scene": "scenes/013-antes-de-la-lluvia.md"
+      },
+      "checks": [
+        {
+          "name": "before the reveal, nobody is shown to know where Bruno is",
+          "path": "knows_early.data.knows.edges.*.fact",
+          "not_contains": "bruno-in-ribera"
+        }
+      ]
+    },
+    {
+      "id": "knows_reveal",
+      "do": "call",
+      "tool": "graph_neighbors",
+      "args": {
+        "book": "puerta",
+        "node": "Bruno",
+        "knows": true,
+        "as_of_scene": "scenes/014-la-otra-orilla.md"
+      },
+      "checks": [
+        {
+          "name": "at the reveal, the edge about where Bruno is appears",
+          "path": "knows_reveal.data.knows.edges.*.fact",
+          "contains": "bruno-in-ribera"
+        }
+      ]
+    },
+    {
+      "id": "continuity",
+      "do": "call",
+      "tool": "inspect_continuity",
+      "args": {
+        "book": "puerta"
+      },
+      "checks": [
+        {
+          "name": "two knowledge-order problems are found",
+          "path": "continuity.data.findings.*.classification",
+          "equals": [
+            "possible_contradiction",
+            "possible_contradiction"
+          ]
+        },
+        {
+          "name": "Tomás and Elena show knowledge before learning it",
+          "path": "continuity.data.findings.*.holder",
+          "equals": [
+            "Tomás",
+            "Elena"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "finding",
+      "do": "call",
+      "tool": "propose_findings",
+      "args": {
+        "book": "puerta",
+        "findings": [
+          {
+            "question": "knowledge",
+            "kind": "interpretation",
+            "statement": "Elena names the altar slab before she learns it; scene 11 says she guessed, so the first contradiction is a lucky lie, not a slip.",
+            "characters": [
+              "Elena"
+            ],
+            "evidence": [
+              {
+                "file": "scenes/011-lo-que-dijo-elena.md",
+                "quote": "No lo sabía —dijo Elena—. Lo dije para que callara."
+              }
+            ]
+          }
+        ]
+      },
+      "checks": [
+        {
+          "name": "the finding with a literal quote is proposed",
+          "path": "finding.data.created.length",
+          "equals": 1
+        }
+      ]
+    },
+    {
+      "id": "after",
+      "do": "book_state",
+      "checks": [
+        {
+          "name": "the assistant's claims wait for a person: Canon is still empty",
+          "path": "after.canon",
+          "equals": []
+        }
+      ]
+    }
+  ]
+}
