@@ -56,6 +56,9 @@ export function previewRanges(state, visible) {
         } else if (name === 'HorizontalRule') {
           lineStyle(node.from, node.to, 'cm-lp-break');
           if (!isActive(node.from)) out.push({ kind: 'break', from: node.from, to: node.to });
+        } else if (name === 'Link' && doc.sliceString(node.from - 1, node.from) === '[' && doc.sliceString(node.to, node.to + 1) === ']') {
+          // The inner brackets of a wikilink, which wikilinks.js styles.
+          return false;
         } else if (name === 'Link') {
           out.push({ kind: 'mark', from: node.from, to: node.to, cls: INLINE.Link });
           const open = node.node.firstChild;

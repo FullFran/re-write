@@ -10,6 +10,10 @@ import { tags } from '@lezer/highlight';
 import { livePreview } from './live-preview.js';
 import { markdown } from './markdown.js';
 import { renderReading } from './reading.js';
+import { setNotes, wikilinkPreview, wikilinks } from './wikilinks.js';
+
+// The page resolves a followed link with the same rules the editor styles it by.
+export { noteIndex } from './wikilinks.js';
 
 export const VIEWS = [
   { id: 'live', label: 'Vista previa en vivo' },
@@ -46,6 +50,13 @@ const theme = EditorView.theme({
   '.cm-lp-break': { textAlign: 'center' },
   '.cm-lp-scene-break': { color: 'var(--muted)', letterSpacing: '0.3em' },
   '.cm-lp-bullet': { color: 'var(--muted)' },
+  // Wikilinks: a link to a note reads as a link; one that names no note is dashed and muted.
+  '.cm-wikilink': { color: 'var(--accept)', textDecoration: 'underline', textDecorationColor: 'var(--accept)', textUnderlineOffset: '0.15em', cursor: 'pointer' },
+  '.cm-wikilink-unresolved': { color: 'var(--muted)', textDecorationStyle: 'dashed', textDecorationColor: 'var(--edge)' },
+  '.cm-tooltip.cm-tooltip-autocomplete': { backgroundColor: 'var(--paper)', color: 'var(--ink)', border: '1px solid var(--edge)', borderRadius: 'var(--radius)', fontFamily: 'var(--font-ui)' },
+  '.cm-tooltip.cm-tooltip-autocomplete > ul > li': { minHeight: 'var(--tap)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)', padding: '0 var(--space-3)' },
+  '.cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]': { backgroundColor: 'var(--pressed)', color: 'var(--ink)' },
+  '.cm-completionDetail': { color: 'var(--muted)', fontStyle: 'normal' },
 });
 
 // Source highlighting: structure in weight and slant, Markdown punctuation muted.
@@ -61,19 +72,21 @@ const highlight = HighlightStyle.define([
 
 function viewExtension(id) {
   if (id === 'source') return [lineNumbers(), EditorView.editorAttributes.of({ 'data-view': 'source' })];
-  return [livePreview, EditorView.editorAttributes.of({ 'data-view': 'live' })];
+  return [livePreview, wikilinkPreview, EditorView.editorAttributes.of({ 'data-view': 'live' })];
 }
 
 const editability = (editable) => [EditorView.editable.of(editable), EditorState.readOnly.of(!editable)];
 
 /**
  * Builds an editor. `onChange` runs after each edit by the person, `onSave` on Ctrl/Cmd+S,
- * `onViewChange` when the person picks another view. Returns the same small surface as the
- * page's plain text field: dom, getValue, setValue, setEditable, isEditable, select, focus,
- * destroy. New behaviour (wikilinks, for example) belongs in its own extension module added
- * to the list below, as live-preview.js is.
+ * `onViewChange` when the person picks another view. `notes` ({ name, type, aliases }) are the
+ * book's notes that wikilinks resolve and `[[` completes against, and `onOpenNote(target)` runs
+ * when the person follows a link. Returns the same small surface as the page's plain text
+ * field: dom, getValue, setValue, setEditable, isEditable, select, focus, destroy, plus
+ * setNotes. New behaviour belongs in its own extension module added to the list below, as
+ * live-preview.js and wikilinks.js are.
  */
-export function createSceneEditor({ text, label, view = 'live', onChange = () => {}, onSave = () => {}, onViewChange = () => {} }) {
+export function createSceneEditor({ text, label, view = 'live', notes = [], onChange = () => {}, onSave = () => {}, onViewChange = () => {}, onOpenNote = () => {} }) {
   const doc = document;
   let current = isView(view) ? view : 'live';
   let editable = true;
@@ -111,6 +124,7 @@ export function createSceneEditor({ text, label, view = 'live', onChange = () =>
           if (update.docChanged && !update.transactions.some((tr) => tr.annotation(fromPage))) onChange();
         }),
         theme,
+        wikilinks({ notes, onOpen: (target) => onOpenNote(target) }),
         modeSlot.of(viewExtension(current)),
         editSlot.of(editability(true)),
       ],
@@ -157,6 +171,9 @@ export function createSceneEditor({ text, label, view = 'live', onChange = () =>
       cm.dispatch({ effects: editSlot.reconfigure(editability(value)) });
     },
     isEditable: () => editable,
+    setNotes(list) {
+      cm.dispatch({ effects: setNotes.of(list) });
+    },
     // Selects [from, to) of the text and scrolls it to the middle of the editor. The reading
     // view cannot show a selection, so it gives way to the live preview (not remembered).
     select(from, to) {

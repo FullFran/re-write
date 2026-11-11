@@ -31,3 +31,9 @@ test('HTML and links in a scene stay text: no element comes from the scene\'s ow
 test('an empty scene reads as nothing', () => {
   assert.deepEqual(readingTree(''), []);
 });
+
+test('reading shows a wikilink as the text a reader sees, and leaves embeds as written', () => {
+  assert.deepEqual(readingTree('Vio a [[Elena|la capitana]] en [[Sal#Puerto]], ![[Mapa]] y [[Nadie]].\n'), [
+    { tag: 'p', children: ['Vio a ', { tag: 'span', children: ['la capitana'] }, ' en ', { tag: 'span', children: ['Sal'] }, ', ![[Mapa]] y ', { tag: 'span', children: ['Nadie'] }, '.'] },
+  ]);
+});

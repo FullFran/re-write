@@ -43,3 +43,13 @@ test('live preview shows the markers of the line with the cursor, and only that 
   const onBreak = preview(TEXT, TEXT.indexOf('***') + 1);
   assert.ok(!onBreak.some(([kind]) => kind === 'break'), 'a scene break under the cursor shows its source');
 });
+
+test('live preview leaves wikilinks to their own extension: the inner brackets are not a Markdown link', () => {
+  const text = 'Vio a [[Elena|la capitana]] y un [enlace](x).\n';
+  const got = preview(text, text.length);
+  assert.deepEqual(got.filter(([kind]) => kind !== 'line'), [
+    ['hide', '[', null],
+    ['mark', '[enlace](x)', 'cm-lp-link'],
+    ['hide', '](x)', null],
+  ]);
+});
