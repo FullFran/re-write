@@ -100,7 +100,8 @@ function readEngineSettings(env: Record<string, string | undefined>, dataDir: st
   return {
     key: parseEngineKey(env.REWRITE_ENGINE_KEY),
     dataDir,
-    entry: join(env.REWRITE_ENGINE_DIR ?? resolve(import.meta.dirname, '../../engine'), 'main.ts'),
+    // Beside `src/`, because the engine program imports the protocol module from it.
+    entry: resolve(import.meta.dirname, '../../engine/main.ts'),
     // The engine process dials this server directly, never through the public address.
     mcpUrl: `http://127.0.0.1:${port}${resourcePath}`,
     maxProcesses: positive('REWRITE_ENGINE_MAX_PROCESSES', 2),

@@ -48,8 +48,8 @@ test('the engine is off unless enabled, and cannot be enabled without a key', ()
   assert.equal(engine.mcpUrl, 'http://127.0.0.1:9000/mcp');
   assert.match(engine.entry, /engine\/main\.ts$/);
   assert.equal(engine.dataDir, '/data');
-  const tuned = readConfig({ ...ENV, REWRITE_ENGINE: '1', REWRITE_ENGINE_KEY: FAKE_KEY, REWRITE_ENGINE_MAX_PROCESSES: '5', REWRITE_ENGINE_IDLE_SECONDS: '30', REWRITE_ENGINE_DIR: '/opt/engine' }).config.engine!;
-  assert.deepEqual([tuned.maxProcesses, tuned.idleMs, tuned.entry], [5, 30_000, '/opt/engine/main.ts']);
+  const tuned = readConfig({ ...ENV, REWRITE_ENGINE: '1', REWRITE_ENGINE_KEY: FAKE_KEY, REWRITE_ENGINE_MAX_PROCESSES: '5', REWRITE_ENGINE_IDLE_SECONDS: '30' }).config.engine!;
+  assert.deepEqual([tuned.maxProcesses, tuned.idleMs], [5, 30_000]);
   assert.throws(() => readConfig({ ...ENV, REWRITE_ENGINE: '1', REWRITE_ENGINE_KEY: FAKE_KEY, REWRITE_ENGINE_MAX_PROCESSES: 'many' }), /REWRITE_ENGINE_MAX_PROCESSES/);
 });
 
