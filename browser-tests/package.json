@@ -1,0 +1,15 @@
+{
+  "name": "rewrite-browser-tests",
+  "private": true,
+  "description": "Browser tests of the review page. Kept apart so the product and its unit tests add no dependency.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.0"
+  }
+}
