@@ -6,7 +6,7 @@
  * it prints one JSON line with the addresses and exits when its stdin closes.
  *
  * With `--engine` the embedded engine is on, behind a stand-in engine process (below) that
- * calls no model: it logs in at once and answers each prompt by echoing its first line.
+ * calls no model: it logs in at once and answers each prompt by echoing the first line the model would get.
  */
 import { randomBytes } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -44,7 +44,7 @@ process.stdin.on('data', (chunk) => {
       send({ type: 'session', tools: ['mcp__rewrite__read_scene'] });
       send({ type: 'tool', phase: 'start', call: 1, name: 'mcp__rewrite__read_scene', scene: 'scenes/escena-01.md' });
       send({ type: 'tool', phase: 'end', call: 1, name: 'mcp__rewrite__read_scene', ok: true, scene: 'scenes/escena-01.md' });
-      send({ type: 'delta', text: '**Recibido:**\n\n> ' + m.text.split('\n')[0] + '\n\n- uno\n- dos' });
+      send({ type: 'delta', text: '**Recibido:**\n\n> ' + (m.context === undefined ? m.text : m.context + '\n' + m.text).split('\n')[0] + '\n\n- uno\n- dos' });
       send({ type: 'done' });
     }
     if (m.type === 'shutdown') process.exit(0);

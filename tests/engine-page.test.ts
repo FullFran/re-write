@@ -359,3 +359,19 @@ test('the panel follows docs/design.md: tokens, three breakpoints, 16 px fields,
   assert.doesNotMatch(ASSISTANT_CSS, /\.assistant textarea \{[^}]*font-size/, 'the field keeps the 16 px of the page controls');
   assert.doesNotMatch(ASSISTANT_JS, /innerHTML|outerHTML|insertAdjacentHTML|document\.write|DOMParser/);
 });
+
+test('a tool named like an object property gets the generic label', () => {
+  const ui = page({});
+  assert.equal(ui.activityLabel({ name: '__proto__', phase: 'start' }), 'Usando __proto__…');
+  assert.equal(ui.activityLabel({ name: 'constructor', phase: 'end', ok: true }), 'constructor');
+  assert.equal(ui.activityLabel({ name: 'toString', phase: 'end', ok: false }), 'Error: toString');
+});
+
+test('a line separator inside a delta stays in the answer', async () => {
+  const ui = page({ ...connected, 'POST /prompt': { chunks: [sse(['delta', { text: 'antes después fin' }], ['done', { aborted: false }])] } });
+  await ui.refreshAssistantStatus();
+  await ui.sendAssistant('hola');
+  const answer = byTag(ui.panel.log, 'div').find((n) => n.className === 'answer');
+  assert.equal(answer?.textContent, 'antes después fin');
+  assert.equal(byTag(ui.panel.log, 'p').filter((n) => n.attrs.role === 'alert').length, 0);
+});

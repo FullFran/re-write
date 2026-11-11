@@ -52,7 +52,8 @@ export type ParentMessage =
   | { type: 'login.cancel' }
   | { type: 'refresh'; id: string; credential: StoredCredential }
   | { type: 'token'; id: string; access?: string; accountId?: string; expires?: number; error?: EngineErrorCode }
-  | { type: 'prompt'; text: string }
+  /** `context` is the host's first line for this turn; the writer's text never comes before it. */
+  | { type: 'prompt'; text: string; context?: string }
   | { type: 'abort' }
   | { type: 'shutdown' };
 
@@ -74,9 +75,9 @@ export interface ToolMessage {
 
 /**
  * A scene path as the MCP tools name it (`scenes/003-el-faro.md`), short enough to label
- * a step. Stricter than the import rule: no control characters and at most 120 characters.
+ * a step. Stricter than the import rule: no control or invisible format characters (bidi controls included) and at most 120 characters.
  */
-export const ACTIVITY_SCENE = /^scenes\/(?![.])[^/\u0000-\u001f\u007f\u2028\u2029]{1,110}\.md$/u;
+export const ACTIVITY_SCENE = /^scenes\/(?![.])[^/\p{Cc}\p{Cf}\u2028\u2029]{1,110}\.md$/u;
 export const MAX_ACTIVITY_COUNT = 999;
 const MAX_CALL = 100_000;
 
@@ -106,9 +107,17 @@ export function toolActivity(name: string, args: unknown, result?: unknown): { s
     if (typeof data.created === 'boolean') out.count = data.created ? 1 : 0;
     return out;
   }
-  const list = COUNTED[tool] ? data[COUNTED[tool]] : undefined;
+  const list = Object.hasOwn(COUNTED, tool) ? data[COUNTED[tool]] : undefined;
   if (Array.isArray(list)) out.count = Math.min(list.length, MAX_ACTIVITY_COUNT);
   return out;
+}
+
+/**
+ * The message the engine program gives the model: the host's line first, then the writer's
+ * text. Kept here so the engine program and the tests compose it the same way.
+ */
+export function composePrompt(context: string | undefined, text: string): string {
+  return context === undefined ? text : `${context}\n${text}`;
 }
 
 export type ChildMessage =

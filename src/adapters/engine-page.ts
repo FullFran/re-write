@@ -154,7 +154,8 @@ const TOOL_LABELS = {
 };
 
 function activityLabel(step) {
-  const labels = TOOL_LABELS[step.name];
+  // Own properties only: a tool called "constructor" gets the generic label.
+  const labels = Object.hasOwn(TOOL_LABELS, step.name) ? TOOL_LABELS[step.name] : null;
   const pick = (label) => typeof label === 'function' ? label(step) : label;
   if (step.phase === 'start') return (labels ? pick(labels[0]) : 'Usando ' + step.name) + '…';
   if (!step.ok) return 'Error: ' + (labels ? labels[2] : step.name);
@@ -297,9 +298,14 @@ function parseEvents(buffer, onEvent) {
   while ((index = buffer.indexOf('\n\n')) >= 0) {
     const block = buffer.slice(0, index);
     buffer = buffer.slice(index + 2);
-    const event = /^event: (.*)$/m.exec(block);
-    const data = /^data: (.*)$/m.exec(block);
-    if (event && data) onEvent(event[1], JSON.parse(data[1]));
+    // Lines end only at CR, LF or CRLF (the SSE rule): U+2028 inside JSON is text.
+    let event = null;
+    let data = null;
+    for (const line of block.split(/\r\n|\r|\n/)) {
+      if (line.startsWith('event: ')) event = line.slice(7);
+      else if (line.startsWith('data: ')) data = line.slice(6);
+    }
+    if (event !== null && data !== null) onEvent(event, JSON.parse(data));
   }
   return buffer;
 }

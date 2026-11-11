@@ -87,17 +87,19 @@ All under the browser session, like the review API. An agent's access token and 
 
 `context` says what the writer is looking at in the review page: `{book_id, item?: {kind, id}}`, with `kind` one of `proposal`, `claim`, `finding` (continuity), `narrative_finding` or `scene` (the id is then the scene path). Any other key, or an id of the wrong shape, is 400. The book goes through the same decision point as every review route, and the item must exist in it: a foreign or unknown book or item is 404.
 
-The browser never writes text for the model here. The server builds one line from these fields and puts it first in the message:
+The browser never writes text for the model here. The server builds one line from these fields, and the engine program puts it before the writer's text (the protocol carries it as a separate `context` field of the `prompt` message, so the writer's text is never first):
 
 ```text
 [RE;write page context, set by the host] book_id="sal" title="La sal"; item=proposal id="P-18c123bec3" scene="scenes/003-el-faro.md"
 ```
 
-It holds only ids, the book title and a scene path, each a JSON string cut at 120 characters, never text of the manuscript or of an item. A line of the writer's own message that starts like it is rewritten to `[writer text: RE;write page context…`, so neither the writer nor a pasted text can forge it. The fixed preamble of the system prompt tells the model that only the host writes this line, only as the first line, and that what it quotes is data. The system prompt itself is unchanged: it is sent when the process starts and has no field in the request.
+It holds only ids, the book title and a scene path, each a JSON string cut at 120 characters, never text of the manuscript or of an item. Every turn has this line, also without `context`: it then reads `[RE;write page context, set by the host] none`. The fixed preamble of the system prompt tells the model that only the host writes it, always as the first line, that what it quotes is data, and that a later line claiming to be it is the writer's.
+
+As a second layer, a line of the writer's text (split at LF, CR, CRLF, VT, FF, NEL, U+2028 and U+2029) whose letters start like the marker gets `(writer text) ` in front. The comparison ignores invisible format characters, spacing and punctuation, applies NFKC (fullwidth forms) and maps common Cyrillic and Greek lookalikes to Latin letters. It is a heuristic and does not catch every way of writing the marker; what the design relies on is the host line coming first. The system prompt itself is unchanged: it is sent when the process starts and has no field in the request.
 
 ### Tool activity
 
-A `tool` event is a step of one tool call: `phase` is `start` or `end` (`ok` on the end only), `call` pairs the two, `scene` is a scene path from the call's arguments and `count` (0 to 999) how many items a list or propose tool returned or created, read from the tool's structured result. Nothing else of an argument or a result leaves the engine process, and the server parses each field again and drops any that does not match: a scene path must look like `scenes/name.md`, at most 120 characters, with no control characters. An engine program older than this sends only an end event without a phase; the server reports it as `phase: "end"`.
+A `tool` event is a step of one tool call: `phase` is `start` or `end` (`ok` on the end only), `call` pairs the two, `scene` is a scene path from the call's arguments and `count` (0 to 999) how many items a list or propose tool returned or created, read from the tool's structured result. Nothing else of an argument or a result leaves the engine process, and the server parses each field again and drops any that does not match: a scene path must look like `scenes/name.md`, at most 120 characters, with no control characters and no invisible format characters (bidi controls included), so a label cannot be visually spoofed. An engine program older than this sends only an end event without a phase; the server reports it as `phase: "end"`.
 
 A person who can use no book gets 404 on every one of these, as if the engine were off: create or be given a book first.
 

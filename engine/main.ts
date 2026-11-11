@@ -17,7 +17,7 @@ import {
   type AgentSession,
 } from '@earendil-works/pi-coding-agent';
 import {
-  DEVICE_VERIFICATION_URI, encode, LineDecoder, MCP_SERVER_NAME, MCP_TOOL_PREFIX, parseCredential, toolActivity,
+  DEVICE_VERIFICATION_URI, encode, LineDecoder, MCP_SERVER_NAME, MCP_TOOL_PREFIX, parseCredential, toolActivity, composePrompt,
   type ChildMessage, type EngineErrorCode, type ParentMessage,
 } from '../src/adapters/engine-protocol.ts';
 
@@ -279,7 +279,7 @@ function handle(message: ParentMessage): void {
       tokenWaiters.delete(message.id);
       return;
     case 'prompt':
-      return void prompt(message.text);
+      return void prompt(composePrompt(message.context, message.text));
     case 'abort':
       aborting = running;
       return void session?.then((active) => active.abort(), () => {});
