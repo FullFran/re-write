@@ -578,21 +578,21 @@ export class Project {
     const file = this.scenePath(edit.file);
     const path = this.sceneFile(file);
     if (path === null) throw new SceneNotFoundError(file);
-    return this.editFile(file, path, edit);
+    return this.editFile('scene', file, path, edit);
   }
 
   /** A person's own edit of a note, with the same rules as editScene. */
   editNote(edit: NoteEdit): { file: string; blob: string; revision: string; changed: boolean } {
     const path = this.noteFile(edit.name);
     if (path === null) throw new NoteNotFoundError(edit.name);
-    return this.editFile(this.notePath(edit.name), path, edit);
+    return this.editFile('note', this.notePath(edit.name), path, edit);
   }
 
-  private editFile(file: string, path: string, edit: { base_blob: string; text: string; by: string }): { file: string; blob: string; revision: string; changed: boolean } {
+  private editFile(kind: 'scene' | 'note', file: string, path: string, edit: { base_blob: string; text: string; by: string }): { file: string; blob: string; revision: string; changed: boolean } {
     checkSceneText(edit.text);
     const raw = readFileSync(path);
     if (!isExactUtf8(raw)) throw new SceneEditRefusal(`${file} is not valid UTF-8 text, so it cannot be edited here`);
-    if (this.git.isDirty(file)) throw new SceneEditRefusal(`${file} has uncommitted edits; commit them before editing it`);
+    if (this.git.isDirty(file)) throw new SceneEditRefusal(`${file} has uncommitted edits; commit them before editing the ${kind}`);
     const current = raw.toString('utf8');
     const blob = this.git.blobOf(file);
     if (blob !== edit.base_blob) throw new SceneConflictError(file, current, blob);
@@ -774,7 +774,7 @@ export class Project {
     if (proposal.history.length !== expected) throw new StaleStateError();
 
     const current = this.readText(proposal.file);
-    if (current === null) throw new Error(`not found: ${proposal.file}`);
+    if (current === null) throw new Error(`${NOTE_FILE.test(proposal.file) ? 'note' : 'scene'} not found: ${proposal.file}`);
     if (this.git.isDirty(proposal.file)) throw new Error(`${proposal.file} has uncommitted edits; commit them before reverting a change`);
     const base = this.git.showAt(proposal.base_revision, proposal.file);
     const change = base === null ? null : inverseChange(base, proposal.find, proposal.replace, current);

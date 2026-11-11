@@ -140,3 +140,14 @@ test('a new note is refused while notas/<name>.md has uncommitted changes, at pr
   assert.equal(later.git.head(), head);
   assert.equal(later.showProposal(proposal.proposal_id).applicable, false);
 });
+
+test('a scene edit keeps the refusal wording it had, and a note edit names the note', () => {
+  const project = bookWith({ Elena: 'Capitana.\n' });
+  const scene = 'scenes/escena-01.md';
+  const sceneBlob = project.git.blobOf(scene);
+  writeFileSync(join(project.dir, scene), 'cambio local');
+  assert.throws(() => project.editScene({ file: scene, base_blob: sceneBlob, text: 'x', by: 'u' }), { message: `${scene} has uncommitted edits; commit them before editing the scene` });
+  const noteBlob = project.git.blobOf('notas/Elena.md');
+  writeFileSync(join(project.dir, 'notas', 'Elena.md'), 'cambio local');
+  assert.throws(() => project.editNote({ name: 'Elena', base_blob: noteBlob, text: 'x', by: 'u' }), { message: 'notas/Elena.md has uncommitted edits; commit them before editing the note' });
+});
