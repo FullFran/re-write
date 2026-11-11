@@ -119,11 +119,27 @@ the selected rating has `aria-pressed`.
 
 ## Scene editor
 
-- The editor is a plain text field holding the scene's Markdown exactly as stored, in
-  the manuscript font (`--font-prose`). Markers such as `*` and `#` stay visible; the
-  saved bytes are the bytes in the field. A text field shows every line break as LF, so
-  a scene stored with only LF or only CRLF keeps its breaks on save, and opening and
-  closing a scene is never an unsaved change.
+- The editor is CodeMirror 6 (`editor/`, served as `/review/editor.js`) holding the
+  scene's Markdown exactly as stored. Three views of that one text, chosen above it and
+  remembered per account in `localStorage` (`rewrite:editor-view:<hash of the person>`, as the drafts):
+  - **Vista previa en vivo** (default): as in Obsidian's live preview, Markdown markers
+    are hidden except on the lines the cursor or the selection touches; headings,
+    `*cursiva*`, `**negrita**`, quotes, lists (`•`) and scene breaks (`***`, shown as
+    `⁂`) are styled in place. The manuscript font (`--font-prose`), soft wrap, a 40em
+    measure and no gutter.
+  - **Markdown**: the source with every marker visible, highlighted, in `--font-code`,
+    with line numbers.
+  - **Lectura**: the scene rendered and read-only. It is built as elements from the
+    Markdown syntax tree; scene text only becomes text nodes, HTML in a scene stays
+    text and links keep their words without becoming links.
+- The views are decorations only: the saved bytes are the text in the editor, whatever
+  the view. Text is 16 px or more in every view, so iOS does not zoom on focus; the
+  browser's spellcheck, autocorrect, capitals, dictation and IME work as in a text field.
+- When `/review/editor.js` is missing or does not load within 10 s, **Editar escena**
+  opens a plain text field instead, with the same saving rules below and no views.
+- The editor (CodeMirror or the text field) shows every line break as LF, so a scene
+  stored with only LF or only CRLF keeps its breaks on save, and opening and closing a
+  scene is never an unsaved change.
 - A scene that mixes line breaks (or has a lone CR) opens read-only, with one line
   explaining why and **Normalizar los finales de línea y editar**: that action is the
   only way its breaks change, and the save says so.

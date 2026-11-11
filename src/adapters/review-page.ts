@@ -154,6 +154,16 @@ summary { min-height: var(--tap); padding: var(--space-3) 0; color: var(--muted)
 /* The scene editor: the stored Markdown as plain text, in the manuscript's own type. */
 .scene-editor-text { display: block; width: 100%; min-height: 60vh; margin: var(--space-3) 0; padding: var(--space-3); font: var(--text-md)/1.6 var(--font-prose); resize: vertical; }
 .scene-conflict pre { max-height: 40vh; overflow-y: auto; }
+/* The CodeMirror editor (/review/editor.js): three views of the same Markdown, chosen above it. */
+.scene-cm { margin: var(--space-3) 0; border: 1px solid var(--line); border-radius: var(--radius); }
+.scene-views { display: flex; flex-wrap: wrap; gap: var(--space-1); padding: var(--space-1); border-bottom: 1px solid var(--line); }
+.scene-views > button { flex: 1 1 auto; padding: var(--space-1) var(--space-3); font-size: var(--text-sm); }
+.scene-cm-host, .scene-reading { padding: 0 var(--space-3); }
+.scene-reading { max-width: 40em; margin: 0 auto; padding-bottom: var(--space-5); font: var(--text-md)/1.7 var(--font-prose); }
+.scene-reading blockquote { margin: var(--space-3) 0; padding-left: var(--space-3); border-left: 3px solid var(--line); color: var(--muted); }
+.scene-reading hr { border: 0; margin: var(--space-5) 0; text-align: center; }
+.scene-reading hr::after { content: '⁂'; color: var(--muted); letter-spacing: .3em; }
+.scene-reading pre { white-space: pre-wrap; }
 
 /* Section navigation: one row under the thumb's reach, scrolled sideways, stuck to the top. */
 .section-nav { position: sticky; top: 0; z-index: 2; margin: 0 calc(-1 * var(--gutter)); padding-top: env(safe-area-inset-top); border-bottom: 1px solid var(--line); background: var(--paper); }
@@ -1328,9 +1338,11 @@ function notionImportSection(book, onImported) {
   return box;
 }
 
-// The scene editor (issue #101, first slice): the scene's Markdown exactly as stored, in a
-// plain text field. Saving sends the version it started from; the server refuses the save
-// when the scene changed meanwhile, and the person's text stays in the field.
+// The scene editor (issue #101): the scene's Markdown exactly as stored. Saving sends the
+// version it started from; the server refuses the save when the scene changed meanwhile, and
+// the person's text stays in the editor. The editor itself is CodeMirror, loaded from
+// /review/editor.js (built from editor/), with three views of the same text; when that module
+// is missing or fails to load, a plain text field takes its place with the same behaviour.
 const SCENE_EDITOR_CLASS = 'scene-editor-text';
 let unsavedEdit = null;
 
@@ -1378,6 +1390,65 @@ async function rememberPerson() {
   return key;
 }
 
+// The editor module, asked for once per page. null means the plain text field.
+const EDITOR_LOAD_MS = 10000;
+let editorModule = null;
+function loadEditorModule() {
+  if (!editorModule) {
+    // A module that never arrives counts as missing, so Editar escena always opens something.
+    const late = new Promise((resolve) => setTimeout(() => resolve(null), EDITOR_LOAD_MS));
+    const loaded = import('/review/editor.js')
+      .then((mod) => typeof mod.createSceneEditor === 'function' ? mod : null)
+      .catch(() => null);
+    editorModule = Promise.race([loaded, late]);
+  }
+  return editorModule;
+}
+
+// The view the person chose last ("live", "source" or "reading"), kept in this browser under
+// the same hash of the signed-in person as the drafts (rememberPerson).
+function viewKey() {
+  return 'rewrite:editor-view:' + (personKey || '');
+}
+function readView() {
+  try {
+    return window.localStorage.getItem(viewKey()) || 'live';
+  } catch {
+    return 'live';
+  }
+}
+function writeView(view) {
+  try {
+    window.localStorage.setItem(viewKey(), view);
+  } catch {
+    // No storage: the view is only remembered while the editor stays open.
+  }
+}
+
+// The slice 1 editor, a plain text field, behind the same surface as the CodeMirror one.
+function plainSurface({ text, label, onChange, onSave }) {
+  const area = el('textarea', undefined, SCENE_EDITOR_CLASS);
+  area.setAttribute('aria-label', label);
+  area.spellcheck = true;
+  area.value = text;
+  area.addEventListener('input', onChange);
+  area.addEventListener('keydown', (event) => {
+    if ((event.ctrlKey || event.metaKey) && (event.key === 's' || event.key === 'S')) {
+      event.preventDefault();
+      onSave();
+    }
+  });
+  return {
+    dom: area,
+    getValue: () => area.value,
+    setValue(value) { area.value = value; },
+    setEditable(editable) { area.readOnly = !editable; },
+    isEditable: () => !area.readOnly,
+    focus: () => area.focus(),
+    destroy() {},
+  };
+}
+
 // The unsaved text survives a re-render or a reload of this tab, never the tab itself.
 function draftKey(book, file) { return 'rewrite:draft:' + personKey + ':' + book + ':' + file; }
 function readDraft(book, file) {
@@ -1422,7 +1493,7 @@ function lineEndings(text) {
   return crlf === cr && crlf === lf ? 'crlf' : 'mixed';
 }
 
-function sceneEditor(book, scene, close) {
+function sceneEditor(book, scene, close, editorLib) {
   const file = scene.file;
   // The text as the field shows it: every line break as \n.
   const shown = (text) => text.replace(/\r\n?/g, '\n');
@@ -1433,9 +1504,11 @@ function sceneEditor(book, scene, close) {
   let saving = false;
   const stored = (value) => endings === 'crlf' ? value.replace(/\n/g, '\r\n') : value;
   const box = el('div', undefined, 'scene-editor');
-  const area = el('textarea', undefined, SCENE_EDITOR_CLASS);
-  area.setAttribute('aria-label', 'Texto de la escena ' + file);
-  area.spellcheck = true;
+  const surfaceOptions = { text: '', label: 'Texto de la escena ' + file, onChange: () => remember(), onSave: () => save() };
+  const area = editorLib
+    ? editorLib.createSceneEditor({ ...surfaceOptions, view: readView(), onViewChange: writeView })
+    : plainSurface(surfaceOptions);
+  box.focusEditor = () => area.focus();
   const mixedNote = el('p', 'Esta escena mezcla finales de línea (de Windows y de otros sistemas). Para no cambiarlos sin querer, solo se puede leer aquí.', 'meta');
   const normalise = button('Normalizar los finales de línea y editar', '', async () => {
     endings = 'lf';
@@ -1452,11 +1525,11 @@ function sceneEditor(book, scene, close) {
   conflict.hidden = true;
   // Unsaved means different from what the field showed for the saved text: opening a scene
   // and closing it again is never a change.
-  const dirty = () => normalising || area.value !== savedShown;
+  const dirty = () => normalising || area.getValue() !== savedShown;
   unsavedEdit = dirty;
 
   function setEditable(editable) {
-    area.readOnly = !editable;
+    area.setEditable(editable);
     mixedNote.hidden = editable;
     normalise.hidden = editable;
     saveButton.hidden = !editable;
@@ -1467,7 +1540,7 @@ function sceneEditor(book, scene, close) {
     endings = lineEndings(text);
     normalising = false;
     savedShown = shown(text);
-    area.value = savedShown;
+    area.setValue(savedShown);
     setEditable(endings !== 'mixed');
   }
   load(scene.text, scene.blob);
@@ -1483,17 +1556,16 @@ function sceneEditor(book, scene, close) {
     }
     if (lineEndings(draft.text) === 'crlf') endings = 'crlf';
     base = draft.base_blob;
-    area.value = shown(draft.text);
+    area.setValue(shown(draft.text));
     status.textContent = draft.base_blob === scene.blob
       ? 'Se recuperó un texto sin guardar de esta pestaña.'
       : 'Se recuperó un texto sin guardar de esta pestaña, pero la escena cambió después: al guardar podrás comparar.';
   }
 
   function remember() {
-    writeDraft(book, file, dirty() ? { base_blob: base, text: stored(area.value) } : null);
+    writeDraft(book, file, dirty() ? { base_blob: base, text: stored(area.getValue()) } : null);
     status.textContent = dirty() ? 'Cambios sin guardar' : 'Guardado';
   }
-  area.addEventListener('input', remember);
 
   const showConflict = (current) => {
     status.textContent = 'No se guardó: la escena cambió mientras editabas. Tu versión sigue en el editor.';
@@ -1519,10 +1591,10 @@ function sceneEditor(book, scene, close) {
   // One save at a time: a second Guardar or Ctrl+S while one is in flight would be based on
   // the old version and come back as a conflict with the person's own text.
   async function save() {
-    if (saving || area.readOnly || !dirty()) return;
+    if (saving || !area.isEditable() || !dirty()) return;
     saving = true;
     saveButton.disabled = true;
-    const value = area.value;
+    const value = area.getValue();
     const wasNormalising = normalising;
     status.textContent = 'Guardando…';
     try {
@@ -1549,21 +1621,16 @@ function sceneEditor(book, scene, close) {
     }
   }
 
-  area.addEventListener('keydown', (event) => {
-    if ((event.ctrlKey || event.metaKey) && (event.key === 's' || event.key === 'S')) {
-      event.preventDefault();
-      save();
-    }
-  });
   const closeEditor = button('Cerrar editor', '', async () => {
     if (dirty() && !window.confirm('Hay cambios sin guardar. ¿Cerrar el editor y descartarlos?')) return;
     writeDraft(book, file, null);
     unsavedEdit = null;
+    area.destroy();
     await close();
   });
   const row = el('div', undefined, 'form-row actions');
   row.append(saveButton, closeEditor);
-  box.append(mixedNote, normalise, area, row, status, conflict);
+  box.append(mixedNote, normalise, area.dom, row, status, conflict);
   return box;
 }
 
@@ -1639,9 +1706,9 @@ function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
       if (typeof data.blob === 'string') {
         const edit = button('Editar escena', '', async () => {
           edit.hidden = true;
-          const editor = sceneEditor(book, data, () => loadScene(canonical, highlight, true));
+          const editor = sceneEditor(book, data, () => loadScene(canonical, highlight, true), await loadEditorModule());
           textBox.replaceChildren(editor);
-          editor.getElementsByTagName('textarea')[0].focus();
+          editor.focusEditor();
         });
         viewer.append(edit);
       }
@@ -1833,7 +1900,7 @@ async function renderApp(selectedBookId, selectedScene, highlight) {
 // never re-rendered by a refresh, so its field does not count.
 function hasWorkInProgress() {
   // An open scene editor is work in progress even when nothing is typed yet.
-  for (const area of app.getElementsByTagName('textarea')) if (area.className === SCENE_EDITOR_CLASS) return true;
+  for (const box of app.getElementsByTagName('div')) if (box.className === 'scene-editor') return true;
   const active = document.activeElement;
   const inPanel = active && active.closest && active.closest('#assistant');
   if (active && !inPanel && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return true;

@@ -5,3 +5,4 @@ odd/
 .claude/
 browser-tests/test-results/
 browser-tests/playwright-report/
+editor/dist/

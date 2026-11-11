@@ -23,7 +23,7 @@ npm test        # automated tests
 npm run eval    # agent journeys over the MCP harness, no model and no network (docs/evals.md)
 ```
 
-The review page also has browser tests in their own package, `browser-tests/`; see [testing](docs/testing.md).
+The review page also has browser tests in their own package, `browser-tests/`, and its scene editor is built from a third one, `editor/` (CodeMirror 6, bundled by esbuild; the server works without it); see [testing](docs/testing.md) and [deployment](docs/deployment.md).
 
 `node scripts/demo.ts walkthrough.log` also saves the walkthrough to a file. A saved run is in [docs/demo-log.txt](docs/demo-log.txt).
 
