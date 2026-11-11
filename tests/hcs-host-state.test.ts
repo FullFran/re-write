@@ -7,10 +7,13 @@ import { syncBuiltinESMExports } from 'node:module';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { buildPackage } from '../src/hcs/package.ts';
+import { writeTar } from '../src/hcs/tar.ts';
 import { validateEntryStatus } from '../src/hcs/lifecycle.ts';
 import { HcsFailure } from '../src/hcs/errors.ts';
-import { grantPermission, revokePermission } from '../src/hcs/grants.ts';
+import { DECISIONS_FILE, readDecisionRecords, validateDecisionRecord } from '../src/hcs/decision-records.ts';
+import { grantPermission, readGrants, revokePermission } from '../src/hcs/grants.ts';
 import { applyDesiredSet, statusReport, HostBusyError, HostTakeoverLockError, type Activator } from '../src/hcs/host-state.ts';
 
 interface Fixture {
@@ -435,6 +438,87 @@ test('by default an entry is authorized only when every permission its package r
       }));
     }
     assert.equal(pointer(stateDir), 2);
+  } finally {
+    unseal(dir); rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a malformed or unsafe archive fails its entry with integrity_mismatch in the authorize or prepare step', fixture(async ({ stateDir, storeDir, entry, catalog }) => {
+  await applyDesiredSet(catalog(entry('a')), { stateDir, storeDir });
+  const before = treeHash(join(stateDir, 'generations/1'));
+  const checksum = writeTar([{ name: 'data', data: Buffer.from('payload') }]); checksum[0] ^= 1;
+  const conflict = writeTar([{ name: 'data', data: Buffer.from('payload') }, { name: 'data/child', data: Buffer.from('x') }]);
+  for (const [archive, bytes] of [['malformed', gzipSync(checksum)], ['unsafe-member', gzipSync(conflict)]] as const) {
+    const contentHash = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    writeFileSync(join(storeDir, 'sha256', contentHash.slice(7)), bytes);
+    const bad = entry('bad', { contentHash, size: bytes.length });
+    // The default authorizer reads the archive first; an authorizer that does not leaves it to the prepare step.
+    for (const authorize of [undefined, async () => true]) {
+      const label = `${archive}, ${authorize ? 'prepare' : 'authorize'}`;
+      await assert.rejects(applyDesiredSet(catalog(entry('a'), bad), { stateDir, storeDir, authorize }), failure(e => {
+        assert.deepEqual(e.errors.map(x => [x.code, x.entry, x.details?.['x-rewrite-archive']]), [['integrity_mismatch', 'dev.test.bad', archive]], label);
+      }));
+      assert.equal(pointer(stateDir), 1, label);
+      assert.deepEqual(states(stateDir), [['dev.test.a', 'active', null], ['dev.test.bad', 'failed', 'integrity_mismatch']], label);
+      assert.deepEqual(readdirSync(join(stateDir, 'generations')), ['1'], label);
+      assert.equal(treeHash(join(stateDir, 'generations/1')), before, label);
+    }
+  }
+}));
+
+test('the default authorization writes one decision record per permission it decides, one operation per run (HCS-0005-R010)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hcs-host-records-'));
+  try {
+    const storeDir = join(dir, 'store'), stateDir = join(dir, 'state'), grantsDir = join(dir, 'data');
+    const read = 'com.fullfran.rewrite.book.read', propose = 'com.fullfran.rewrite.claims.propose';
+    const doc = (id: string, permissions: string[]) => ({ hcsVersion: '0.1', entry: id, requests: permissions.map(permission => ({ permission, reason: 'secret reason text' })) });
+    const a = requestingPackage(dir, storeDir, 'dev.test.a', doc('dev.test.a', [read, propose]));
+    const b = requestingPackage(dir, storeDir, 'dev.test.b', doc('dev.test.b', [read]));
+    const plain = requestingPackage(dir, storeDir, 'dev.test.plain', undefined);
+    const apply = (...entries: unknown[]) => applyDesiredSet(JSON.stringify({ hcsVersion: '0.1', id: 'dev.test.catalog', version: '1', entries }), { stateDir, storeDir, grantsDir });
+    const grantOf = (entry: string, permission: string) => readGrants(grantsDir).find(g => g.entry === entry && g.permission === permission)!.id!;
+    const shape = (records: ReturnType<typeof readDecisionRecords>) => records.map(({ id, time, operation, ...rest }) => rest);
+
+    grantPermission(grantsDir, 'dev.test.a', read);
+    await assert.rejects(apply(a), failure(e => assert.deepEqual(e.errors.map(x => [x.code, x.entry]), [['permission_denied', 'dev.test.a']])));
+    const first = readDecisionRecords(grantsDir);
+    assert.deepEqual(shape(first), [
+      { entry: 'dev.test.a', permission: read, outcome: 'allow', decider: { kind: 'grant', id: grantOf('dev.test.a', read) }, channel: 'lifecycle-authorize' },
+      { entry: 'dev.test.a', permission: propose, outcome: 'deny', decider: { kind: 'policy', id: 'HCS-0005-R001' }, channel: 'lifecycle-authorize' },
+    ]);
+    assert.deepEqual(first.flatMap(r => validateDecisionRecord(r)), []);
+    assert.equal(new Set(first.map(r => r.operation)).size, 1);
+    assert.doesNotMatch(readFileSync(join(grantsDir, DECISIONS_FILE), 'utf8'), /secret reason text|payload/);
+    assert.equal(existsSync(join(stateDir, DECISIONS_FILE)), false, 'records are written next to the grants.json that decided');
+
+    grantPermission(grantsDir, 'dev.test.a', propose); grantPermission(grantsDir, 'dev.test.b', read);
+    assert.equal((await apply(a, b, plain)).generation, 1);
+    const second = readDecisionRecords(grantsDir).slice(first.length);
+    assert.deepEqual(second.map(r => [r.entry, r.permission, r.outcome]), [['dev.test.a', read, 'allow'], ['dev.test.a', propose, 'allow'], ['dev.test.b', read, 'allow']]);
+    assert.equal(new Set(second.map(r => r.operation)).size, 1, 'all entries of one run share its operation');
+    assert.notEqual(second[0].operation, first[0].operation, 'each run has its own operation');
+  } finally {
+    unseal(dir); rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an entry whose authorize decision cannot be recorded is not authorized (HCS-0005-R012)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hcs-host-records-'));
+  try {
+    const storeDir = join(dir, 'store'), stateDir = join(dir, 'state'), grantsDir = join(dir, 'data');
+    const read = 'com.fullfran.rewrite.book.read';
+    const a = requestingPackage(dir, storeDir, 'dev.test.a', { hcsVersion: '0.1', entry: 'dev.test.a', requests: [{ permission: read }] });
+    const plain = requestingPackage(dir, storeDir, 'dev.test.plain', undefined);
+    const apply = (...entries: unknown[]) => applyDesiredSet(JSON.stringify({ hcsVersion: '0.1', id: 'dev.test.catalog', version: '1', entries }), { stateDir, storeDir, grantsDir });
+    grantPermission(grantsDir, 'dev.test.a', read);
+    mkdirSync(join(grantsDir, DECISIONS_FILE));
+    await assert.rejects(apply(plain, a), failure(e => {
+      assert.deepEqual(e.errors.map(x => [x.code, x.entry, x.requirement, x.message]), [['permission_denied', 'dev.test.a', 'HCS-0005-R012', `Permission denied: ${read}`]]);
+    }));
+    assert.equal(pointer(stateDir), null);
+    assert.deepEqual(states(stateDir), [['dev.test.a', 'failed', 'permission_denied']]);
+    // A package that requests nothing involves no decision, so nothing has to be recorded.
+    assert.equal((await apply(plain)).generation, 1);
   } finally {
     unseal(dir); rmSync(dir, { recursive: true, force: true });
   }
