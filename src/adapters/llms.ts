@@ -12,7 +12,7 @@ You are probably an assistant helping someone connect. Guide them one step at a 
 
 ## Current state
 
-- This is an early test version. Use only synthetic text, **never real manuscripts**. There are no backups yet, everyone with access to a book can read all of it, and the agent sends the text it reads to its own model provider.
+- This is an early version. The server makes an encrypted copy of the data every day, and a restore from it has been tested. Everyone with access to a book can read all of it, and the agent sends the text it reads to its own model provider. The writer decides what to share.
 - Connecting through ChatGPT should work, but writing from ChatGPT with a personal plan is still being tested. If a proposal fails there, report it instead of working around it.
 
 ## Step 1: Get access
@@ -92,7 +92,7 @@ Tools for the agent: \`list_books\`, \`list_scenes\`, \`read_scene\`, \`list_cla
 
 ### Paso a paso
 
-Guía a la persona en español, un paso cada vez, y espera a que lo termine. No necesita instalar nada ni usar la terminal. Sigue vigente el aviso de esta versión de prueba: usa solo texto sintético, nunca manuscritos reales.
+Guía a la persona en español, un paso cada vez, y espera a que lo termine. No necesita instalar nada ni usar la terminal. Antes de empezar, cuéntale esto: el servidor hace una copia cifrada de los datos cada día y se ha comprobado que se puede restaurar; quien tenga acceso a un libro puede leerlo entero; y tú, como asistente, envías el texto que lees a tu propio proveedor del modelo. La persona decide qué comparte.
 
 1. Abre ${reviewUrl}, inicia sesión y crea un libro con **Crear libro** (o selecciona uno existente).
 2. Importa el texto: para archivos Markdown (.md), usa **Importar Markdown**; para Notion, ve a **Export -> Markdown & CSV**, incluye las subpáginas y descarga el .zip. Sube ese .zip en **Importar desde Notion**, pulsa **Inspeccionar exportación**, elige la base de datos de capítulos y las columnas de título y orden, comprueba **Vista previa** y pulsa **Importar**.
