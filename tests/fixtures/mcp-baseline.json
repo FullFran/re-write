@@ -779,7 +779,8 @@
               "type": "object",
               "properties": {},
               "additionalProperties": {}
-            }
+            },
+            "description": "The findings of this call only, created or existing; list_findings gives the rest of the book"
           },
           "review_url": {
             "type": "string",
