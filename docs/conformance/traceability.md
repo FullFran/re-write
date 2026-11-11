@@ -1,6 +1,6 @@
 # HCS requirement traceability
 
-Generated from HCS release 0.1.0-draft.3 (vendor/hcs/PIN.json); do not edit.
+Generated from HCS release 0.1.0-draft.6 (vendor/hcs/PIN.json); do not edit.
 
 ## HCS-0000
 
@@ -31,6 +31,8 @@ Generated from HCS release 0.1.0-draft.3 (vendor/hcs/PIN.json); do not edit.
 | HCS-0001-R014 | SHOULD | implemented | `src/hcs/package.ts`, `src/hcs/tar.ts`, `tests/hcs-package.test.ts`, `tests/hcs-tar.test.ts` |  |
 | HCS-0001-R015 | SHOULD | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance.test.ts` |  |
 | HCS-0001-R016 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0001-R017 | MUST | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
+| HCS-0001-R018 | MUST | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
 
 ## HCS-0002
 
@@ -160,3 +162,8 @@ Generated from HCS release 0.1.0-draft.3 (vendor/hcs/PIN.json); do not edit.
 | HCS-0008-R028 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
 | HCS-0008-R029 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
 | HCS-0008-R030 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
+| HCS-0008-R031 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
+| HCS-0008-R032 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
+| HCS-0008-R033 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
+| HCS-0008-R034 | MUST | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |
+| HCS-0008-R035 | MUST NOT | planned |  | [#36](https://github.com/FullFran/re-write/issues/36) |

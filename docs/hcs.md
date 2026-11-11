@@ -22,7 +22,7 @@ Rules live in [`tests/fixtures/hcs/divergences.json`](../tests/fixtures/hcs/dive
 
 The test fails only on a **regression**: a case that passes in [`tests/fixtures/hcs/baseline.json`](../tests/fixtures/hcs/baseline.json) and does not pass now. A new case that fails does not block anything; it shows up as `fail` in the report. After fixing a `fail` or moving to a new release, regenerate the baseline with `HCS_BASELINE=write node --test tests/hcs-conformance.test.ts` and review its diff in the pull request. `node --test --test-reporter=tap tests/hcs-conformance.test.ts` prints the per-level table.
 
-Measured with HCS `0.1.0-draft.3`: 91 pass, 0 fail, 217 not applicable (88 host, 41 projection, 37 distribution, 7 client, 44 document cases of schemas without a runner), 0 divergences.
+Measured with HCS `0.1.0-draft.6`: 91 pass, 4 fail (`contentId`, HCS-0001-R017 and R018), 243 not applicable (94 host, 41 projection, 37 distribution, 17 recovery, 7 client, 44 document cases of schemas without a runner), 0 divergences.
 
 ## Updating to a new HCS release
 
