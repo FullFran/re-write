@@ -1,7 +1,7 @@
 {
   "id": "chatgpt-error-recovery",
   "title": "Recover from the usual mistakes of an assistant",
-  "guarantee": "Every refusal names the tool to call next, a refused proposal stores nothing, and following the hint works.",
+  "guarantee": "Every refusal names the tool to call next, an ambiguous or absent passage asks for a longer or present one from read_scene, a refused proposal stores nothing, and following the hint works.",
   "book": { "id": "puente", "title": "El puente de Sal", "scenes": ["evals/journeys/books/capitulos/001-el-puente.md", "evals/journeys/books/capitulos/002-la-tormenta.md", "evals/journeys/books/capitulos/003-la-carta.md"] },
   "steps": [
     {
@@ -44,10 +44,44 @@
       ]
     },
     {
+      "id": "ambiguous_claim",
+      "do": "call",
+      "tool": "propose_claims",
+      "args": { "book": "puente", "extractor": "chatgpt", "candidates": [{ "statement": "Elena burns the letter.", "subject": "Elena", "source_file": "scenes/003-la-carta.md", "quote": "Elena", "scope": "book", "epistemic_kind": "narrated_fact" }] },
+      "checks": [
+        { "name": "a quote that appears several times is rejected", "path": "ambiguous_claim.data.rejected.length", "equals": 1 },
+        { "name": "the rejection says why", "path": "ambiguous_claim.data.rejected.0.reason", "equals": "quote appears 2 times; use a longer quote" },
+        { "name": "the rejected claim asks for a longer passage from read_scene", "path": "ambiguous_claim.data.rejected.0.next_step", "matches": "read_scene.*longer.*only once" },
+        { "name": "the next step of the call carries the same hint", "path": "ambiguous_claim.data.next_step", "matches": "read_scene.*longer" }
+      ]
+    },
+    {
+      "id": "ambiguous_revision",
+      "do": "call",
+      "tool": "propose_revision",
+      "args": { "book": "puente", "file": "scenes/003-la-carta.md", "find": "la noche", "replace": "aquella noche", "rationale": "Tighter wording." },
+      "checks": [
+        { "name": "a passage that appears twice is refused", "path": "ambiguous_revision.is_error", "equals": true },
+        { "name": "the refusal asks for a longer passage from read_scene", "path": "ambiguous_revision.problem.next_step", "matches": "read_scene.*longer.*only once" }
+      ]
+    },
+    {
+      "id": "absent_revision",
+      "do": "call",
+      "tool": "propose_revision",
+      "args": { "book": "puente", "file": "scenes/003-la-carta.md", "find": "la puerta abierta", "replace": "aquella noche", "rationale": "Tighter wording." },
+      "checks": [
+        { "name": "a passage that is not in the scene is refused", "path": "absent_revision.is_error", "equals": true },
+        { "name": "the refusal asks to read the scene again and to reformulate if it changed", "path": "absent_revision.problem.next_step", "matches": "read_scene.*If the scene changed.*reformulate" }
+      ]
+    },
+    {
       "id": "nothing",
       "do": "book_state",
       "checks": [
-        { "name": "the refused proposal stored nothing", "path": "nothing.findings", "equals": 0 }
+        { "name": "the refused proposals stored no finding", "path": "nothing.findings", "equals": 0 },
+        { "name": "the refused proposals stored no claim", "path": "nothing.claims.length", "equals": 0 },
+        { "name": "the refused proposals stored no revision", "path": "nothing.proposals", "equals": 0 }
       ]
     },
     {
@@ -65,6 +99,22 @@
       },
       "checks": [
         { "name": "the literal quote is accepted as a proposal", "path": "literal.data.created.length", "equals": 1 }
+      ]
+    },
+    {
+      "id": "longer",
+      "do": "call",
+      "tool": "propose_claims",
+      "args": { "book": "puente", "extractor": "chatgpt", "candidates": [{ "statement": "Elena burns the letter.", "subject": "Elena", "source_file": "scenes/003-la-carta.md", "quote": "Elena quemó la carta en el brasero", "scope": "book", "epistemic_kind": "narrated_fact" }] },
+      "checks": [
+        { "name": "the longer literal quote is accepted as a proposal", "path": "longer.data.created.length", "equals": 1 }
+      ]
+    },
+    {
+      "id": "after",
+      "do": "book_state",
+      "checks": [
+        { "name": "the claim stays proposed until the person decides", "path": "after.claims.0.editorial_status", "equals": "proposed" }
       ]
     }
   ]

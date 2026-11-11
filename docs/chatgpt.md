@@ -43,6 +43,14 @@ lists Business, Enterprise and Edu. Check it on the writer's own plan.
 - **A next step on every refusal.** An error ends with `Next step: ...` and carries the same text as
   `next_step` in its problem: an unknown book points to `list_books`, a wrong scene path to
   `list_scenes`, a quote that is not literal to `read_scene`, invalid arguments to the input schema.
+  A quote or passage that appears several times asks for a longer literal passage from `read_scene`
+  that appears only once; one that is not in the scene asks to read the scene again and, if it
+  changed, to reformulate the proposal instead of retrying it. Each rejected candidate of
+  `propose_claims` carries its own `next_step`, the same one a refusal with that message gets.
+- **Proposal results bounded by the call.** `propose_findings` returns in `findings` only the
+  findings of that call, created or already existing, in the order submitted; `list_findings`
+  pages through the rest of the book. `propose_claims` returns ids and rejections only, and
+  `propose_revision` the one proposal it made or found.
 - **Scene lengths.** `list_scenes` adds `chars`, the length of each scene, so the assistant can plan
   `read_scene` pages of up to 20,000 characters.
 

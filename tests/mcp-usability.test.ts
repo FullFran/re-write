@@ -144,6 +144,115 @@ test('a rejected claim candidate names the next step too', async () => {
   assert.match(data.next_step, /read_scene/);
 });
 
+// "Bruno" appears twice in the fixture scene; the longer passage around it appears once.
+const AMBIGUOUS = 'Bruno';
+const UNIQUE = 'Dicen que Bruno vendió la llave del puente';
+const claimCandidate = (quote: string) => ({ statement: 'x', subject: 'Bruno', source_file: SCENE, quote, scope: 'book', epistemic_kind: 'rumor' });
+
+test('an ambiguous quote or passage asks for a longer unique one from read_scene, and the longer one works', async () => {
+  const fresh = await connect(REVIEW_URL);
+  try {
+    const claims = await call(fresh, 'propose_claims', { book: 'sal', extractor: 'chatgpt', candidates: [claimCandidate(AMBIGUOUS)] });
+    const rejected = claims.structuredContent.rejected[0];
+    assert.equal(rejected.reason, 'quote appears 2 times; use a longer quote');
+    assert.match(rejected.next_step, /read_scene.*longer.*only once/);
+    assert.ok(claims.structuredContent.next_step.includes(rejected.next_step));
+    assert.deepEqual(claims.structuredContent.created, []);
+
+    const revision = await call(fresh, 'propose_revision', { book: 'sal', file: SCENE, find: AMBIGUOUS, replace: 'Bruno el herrero', rationale: 'x' });
+    assert.equal(revision.isError, true);
+    assert.match(revision.content[0].text, /^text to change appears 2 times; use a longer passage\nNext step: /);
+    assert.equal(revision.structuredContent.next_step, rejected.next_step);
+
+    const finding = await call(fresh, 'propose_findings', { book: 'sal', findings: [{
+      question: 'knowledge', kind: 'fact', statement: 'x', evidence: [{ file: SCENE, quote: AMBIGUOUS }],
+    }] });
+    assert.equal(finding.isError, true);
+    assert.equal(finding.structuredContent.next_step, rejected.next_step);
+
+    // Nothing was stored, and the longer literal passage is proposed, never accepted.
+    for (const [tool, key] of [['list_claims', 'claims'], ['list_proposals', 'proposals'], ['list_findings', 'findings']]) {
+      assert.equal((await call(fresh, tool, { book: 'sal' })).structuredContent[key].length, 0, tool);
+    }
+    const retried = await call(fresh, 'propose_claims', { book: 'sal', extractor: 'chatgpt', candidates: [claimCandidate(UNIQUE)] });
+    assert.equal(retried.structuredContent.created.length, 1);
+    const longer = await call(fresh, 'propose_revision', { book: 'sal', file: SCENE, find: UNIQUE, replace: 'Dicen que Bruno perdió la llave del puente', rationale: 'x' });
+    assert.equal(longer.structuredContent.proposal.status, 'proposed');
+    assert.equal((await call(fresh, 'list_claims', { book: 'sal' })).structuredContent.claims[0].editorial_status, 'proposed');
+  } finally {
+    await fresh.close();
+  }
+});
+
+test('a passage that is not in the scene asks to read it again and to reformulate if it changed', async () => {
+  const fresh = await connect(REVIEW_URL);
+  try {
+    const revision = await call(fresh, 'propose_revision', { book: 'sal', file: SCENE, find: 'no está en la escena', replace: 'x', rationale: 'x' });
+    assert.equal(revision.isError, true);
+    assert.match(revision.content[0].text, /^text to change was not found in the scene\nNext step: /);
+    assert.match(revision.structuredContent.next_step, /read_scene.*If the scene changed.*reformulate/);
+    assert.equal((await call(fresh, 'list_proposals', { book: 'sal' })).structuredContent.proposals.length, 0);
+  } finally {
+    await fresh.close();
+  }
+});
+
+test('each rejected claim carries the next step of its own error, as a tool error would', async () => {
+  const fresh = await connect(REVIEW_URL);
+  try {
+    const result = await call(fresh, 'propose_claims', { book: 'sal', extractor: 'chatgpt', candidates: [
+      claimCandidate('no aparece'), claimCandidate(AMBIGUOUS),
+    ] });
+    const [absent, ambiguous] = result.structuredContent.rejected;
+    assert.equal(absent.reason, 'quote not found in the scene at this revision');
+    const notFound = await call(fresh, 'propose_revision', { book: 'sal', file: SCENE, find: 'no aparece', replace: 'x', rationale: 'x' });
+    assert.equal(absent.next_step, notFound.structuredContent.next_step);
+    assert.match(ambiguous.next_step, /longer/);
+    assert.ok(result.structuredContent.next_step.includes(absent.next_step));
+    assert.ok(result.structuredContent.next_step.includes(ambiguous.next_step));
+    assert.equal(absent.problem.title, 'Text not literal');
+  } finally {
+    await fresh.close();
+  }
+});
+
+test('propose_findings returns only the findings of its own call, however many the book already has', async (t) => {
+  const finding = (statement: string) => ({ question: 'knowledge', kind: 'fact', statement, evidence: [{ file: SCENE, quote: UNIQUE }] });
+  const submit = async (client: Client, findings: object[]) => {
+    const result = await call(client, 'propose_findings', { book: 'sal', findings });
+    assert.deepEqual(result.structuredContent, JSON.parse(result.content[0].text));
+    return result.structuredContent;
+  };
+  const empty = await connect(REVIEW_URL);
+  const seeded = await connect(REVIEW_URL);
+  try {
+    const alone = await submit(empty, [finding('El guardia repite un rumor.')]);
+    const unrelated = await submit(seeded, Array.from({ length: 40 }, (_, i) => finding(`Hallazgo ajeno ${i}.`)));
+    assert.equal(unrelated.created.length, 40);
+
+    const fresh = await submit(seeded, [finding('El guardia repite un rumor.')]);
+    assert.equal(fresh.created.length, 1);
+    // The response does not grow with the book: same size as the same call on a book with no findings.
+    const bytes = (data: object) => Buffer.byteLength(JSON.stringify(data));
+    t.diagnostic(`propose_findings response: ${bytes(fresh)} bytes with 40 findings in the book, ${bytes(alone)} with none`);
+    assert.ok(bytes(fresh) <= bytes(alone) + 64, `${bytes(fresh)} bytes against ${bytes(alone)}`);
+    assert.deepEqual(fresh.findings.map((f: any) => f.finding_id), fresh.created);
+    assert.equal(fresh.review_url, REVIEW_URL);
+
+    const retried = await submit(seeded, [finding('El guardia repite un rumor.'), finding('Hallazgo ajeno 7.')]);
+    assert.deepEqual(retried.created, []);
+    assert.deepEqual(retried.existing, [fresh.created[0], unrelated.created[7]]);
+    assert.deepEqual(retried.findings.map((f: any) => f.finding_id), retried.existing);
+    assert.equal(retried.findings[0].evidence[0].quote, UNIQUE);
+
+    // list_findings still reads the whole book.
+    assert.equal((await call(seeded, 'list_findings', { book: 'sal', limit: 200 })).structuredContent.total, 41);
+  } finally {
+    await empty.close();
+    await seeded.close();
+  }
+});
+
 let h: Harness;
 test('the served MCP gives the absolute review URL built from the configured origin', async (t) => {
   h = await startHarness();
