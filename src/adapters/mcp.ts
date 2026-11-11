@@ -389,7 +389,7 @@ export function buildMcpServer(library: Library, subject: string, capabilities: 
   }, (args) => data(() => {
     const summary = notesSummary(library.open(args.book, subject));
     const { items, ...rest } = slice(summary.notes, args.offset, args.limit);
-    return { notes: items, ...rest, unresolved: summary.unresolved, ambiguous: summary.ambiguous };
+    return { notes: items, ...rest, unresolved: summary.unresolved, ambiguous: summary.ambiguous, too_large: summary.too_large };
   }));
 
   register('read_note', {
@@ -414,10 +414,7 @@ export function buildMcpServer(library: Library, subject: string, capabilities: 
     return {
       ...note,
       text: note.text.slice(offset, end), total: note.text.length, next_offset: end < note.text.length ? end : null,
-      backlinks: {
-        linked: linked.slice(0, MAX_MENTIONS), linked_total: linked.length,
-        unlinked: unlinked.slice(0, MAX_MENTIONS), unlinked_total: unlinked.length,
-      },
+      backlinks: { ...note.backlinks, linked: linked.slice(0, MAX_MENTIONS), unlinked: unlinked.slice(0, MAX_MENTIONS) },
     };
   }));
 

@@ -90,6 +90,14 @@ A pure, dependency-free module (`src/domain/story-graph.ts`) builds the graph fr
   path (BFS, fewest steps), degree (distinct neighbours) and the degree ranking, connected
   components, and orphans (notes with no edge at all).
 
+**Cost.** Every pass is linear in the text: one forward scan finds code ranges and links, positions
+come from precomputed line starts, exclusions are checked by binary search, and sentence boundaries
+are found once per text. A note or scene longer than 2,097,152 characters (twice the largest scene
+a person can save) is not parsed at all: it is reported in `too_large` by `list_notes` and its
+links and mentions are not counted, so one text cannot hold the server. Backlinks return at most
+500 mentions of each kind, with `linked_total` and `unlinked_total` counting them all (`read_note`
+returns the first 100).
+
 Every list has a fixed order (ids compared by UTF-16 code unit, ties broken by id), so the same
 book always gives the same answer. The graph is rebuilt from the files on each call (linear in the
 size of the book) instead of cached, so it is never stale after an edit made outside RE;write.

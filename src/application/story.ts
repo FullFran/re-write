@@ -80,5 +80,7 @@ export function notesSummary(project: Project) {
     notes: analysis.notes.map((note) => ({ ...note, file: project.notePath(note.name) })),
     unresolved: groupLinks(analysis.unresolved),
     ambiguous: groupLinks(analysis.ambiguous),
+    /** Notes and scenes too large to analyse: their links and mentions are not counted. */
+    too_large: analysis.too_large,
   };
 }

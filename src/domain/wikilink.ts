@@ -35,46 +35,71 @@ function foldChars(text: string): string {
   return text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 }
 
+const WHITESPACE = /\s/u;
+
 /**
  * The folded form of a whole text, with the original index of every folded character, so a match
- * found in the folded text maps back to the original. Whitespace runs fold to one space.
+ * found in the folded text maps back to the original. Whitespace runs fold to one space. One pass;
+ * ASCII takes a fast path.
  */
 export function foldWithMap(text: string): { folded: string; at: number[] } {
-  let folded = '';
+  const parts: string[] = [];
   const at: number[] = [];
   let index = 0;
   let lastSpace = false;
   for (const char of text) {
-    if (/\s/u.test(char)) {
-      if (!lastSpace) { folded += ' '; at.push(index); }
+    const code = char.charCodeAt(0);
+    const space = code < 128 ? code === 32 || (code >= 9 && code <= 13) : WHITESPACE.test(char);
+    if (space) {
+      if (!lastSpace) { parts.push(' '); at.push(index); }
       lastSpace = true;
     } else {
-      for (const out of foldChars(char)) { folded += out; at.push(index); }
+      const out = code < 128 ? (code >= 65 && code <= 90 ? String.fromCharCode(code + 32) : char) : foldChars(char);
+      for (let k = 0; k < out.length; k += 1) at.push(index);
+      parts.push(out);
       lastSpace = false;
     }
     index += char.length;
   }
   at.push(text.length);
-  return { folded, at };
+  return { folded: parts.join(''), at };
+}
+
+/** The index where each line starts (after each `\n`), for positions by binary search. */
+export function lineStartsOf(text: string): number[] {
+  const starts = [0];
+  for (let i = text.indexOf('\n'); i !== -1; i = text.indexOf('\n', i + 1)) starts.push(i + 1);
+  return starts;
+}
+
+/** 1-based line and column of an index, given lineStartsOf(text). */
+export function positionAt(starts: number[], index: number): { line: number; column: number } {
+  let low = 0;
+  let high = starts.length - 1;
+  while (low < high) {
+    const mid = (low + high + 1) >> 1;
+    if (starts[mid] <= index) low = mid; else high = mid - 1;
+  }
+  return { line: low + 1, column: index - starts[low] + 1 };
 }
 
 /**
  * Ranges `[start, end)` of fenced code blocks (``` or ~~~, closed by a fence of the same character at
- * least as long, or by the end of the text) and of code spans outside them.
+ * least as long, or by the end of the text) and of code spans outside them, in text order. Linear:
+ * one pass over the lines for fences, one over the characters for backtick runs, and each run is
+ * paired with the next run of the same length in the same stretch between fences.
  */
 export function codeRanges(text: string): [number, number][] {
-  const ranges: [number, number][] = [];
   const fenced: [number, number][] = [];
   let fence: { char: string; size: number; start: number } | null = null;
   let lineStart = 0;
   while (lineStart <= text.length) {
     const newline = text.indexOf('\n', lineStart);
     const lineEnd = newline === -1 ? text.length : newline + 1;
-    const line = text.slice(lineStart, lineEnd).replace(/\r?\n$/, '');
-    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    const marker = fenceMarker(text, lineStart, newline === -1 ? text.length : newline);
     if (fence === null) {
-      if (marker && !(marker[1][0] === '`' && marker[2].includes('`'))) fence = { char: marker[1][0], size: marker[1].length, start: lineStart };
-    } else if (marker && marker[1][0] === fence.char && marker[1].length >= fence.size && marker[2].trim() === '') {
+      if (marker && !(marker.char === '`' && marker.info.includes('`'))) fence = { char: marker.char, size: marker.size, start: lineStart };
+    } else if (marker && marker.char === fence.char && marker.size >= fence.size && marker.info.trim() === '') {
       fenced.push([fence.start, lineEnd]);
       fence = null;
     }
@@ -83,52 +108,79 @@ export function codeRanges(text: string): [number, number][] {
   }
   if (fence !== null) fenced.push([fence.start, text.length]);
 
-  const fenceAt = (i: number) => fenced.find(([s, e]) => i >= s && i < e);
-  let i = 0;
-  while (i < text.length) {
-    const inFence = fenceAt(i);
-    if (inFence) { i = inFence[1]; continue; }
-    if (text[i] !== '`') { i += 1; continue; }
+  // Backtick runs outside fences, each tagged with the stretch (between fences) it lies in.
+  const runs: { at: number; size: number; stretch: number }[] = [];
+  let f = 0;
+  for (let i = 0; i < text.length;) {
+    if (f < fenced.length && i >= fenced[f][0]) { i = fenced[f][1]; f += 1; continue; }
+    if (text.charCodeAt(i) !== 96) { i += 1; continue; }
     let size = 0;
-    while (text[i + size] === '`') size += 1;
-    // The closing run has exactly the same length and lies before the next fence.
-    const limit = fenced.find(([s]) => s > i)?.[0] ?? text.length;
-    let close = -1;
-    for (let j = i + size; j < limit;) {
-      if (text[j] !== '`') { j += 1; continue; }
-      let run = 0;
-      while (text[j + run] === '`') run += 1;
-      if (run === size && j + run <= limit) { close = j; break; }
-      j += run;
-    }
-    if (close === -1) { i += size; continue; }
-    ranges.push([i, close + size]);
-    i = close + size;
+    while (text.charCodeAt(i + size) === 96) size += 1;
+    const limit = f < fenced.length ? fenced[f][0] : text.length;
+    // A run cut by the next fence still counts only up to it.
+    runs.push({ at: i, size: Math.min(size, limit - i), stretch: f });
+    i += size;
   }
-  return [...fenced, ...ranges].sort((a, b) => a[0] - b[0]);
+  const next = new Array<number>(runs.length).fill(-1);
+  const last = new Map<string, number>();
+  for (let r = runs.length - 1; r >= 0; r -= 1) {
+    const key = `${runs[r].stretch}:${runs[r].size}`;
+    next[r] = last.get(key) ?? -1;
+    last.set(key, r);
+  }
+  const spans: [number, number][] = [];
+  let covered = 0;
+  for (let r = 0; r < runs.length; r += 1) {
+    if (runs[r].at < covered || next[r] === -1) continue;
+    const close = runs[next[r]];
+    spans.push([runs[r].at, close.at + close.size]);
+    covered = close.at + close.size;
+  }
+  const all: [number, number][] = [];
+  for (let a = 0, b = 0; a < fenced.length || b < spans.length;) {
+    if (b >= spans.length || (a < fenced.length && fenced[a][0] < spans[b][0])) all.push(fenced[a++]);
+    else all.push(spans[b++]);
+  }
+  return all;
 }
 
-/** Every wikilink outside code, in text order. */
+/** A fence line: up to three spaces, then three or more ` or ~, then its info string. */
+function fenceMarker(text: string, start: number, end: number): { char: string; size: number; info: string } | null {
+  let i = start;
+  while (i < end && i - start < 3 && text[i] === ' ') i += 1;
+  const char = text[i];
+  if (char !== '`' && char !== '~') return null;
+  let size = 0;
+  while (i + size < end && text[i + size] === char) size += 1;
+  if (size < 3) return null;
+  return { char, size, info: text.slice(i + size, end).replace(/\r$/, '') };
+}
+
+/**
+ * Every wikilink outside code, in text order. One forward scan: from each `[[` the inner text is
+ * read up to the first `[`, `]` or line break, and the scan resumes there, so no character is read
+ * more than a few times.
+ */
 export function parseWikilinks(text: string): Wikilink[] {
   const code = codeRanges(text);
-  const lineStarts = [0];
-  for (let i = text.indexOf('\n'); i !== -1; i = text.indexOf('\n', i + 1)) lineStarts.push(i + 1);
+  const starts = lineStartsOf(text);
   const links: Wikilink[] = [];
+  let c = 0;
   let i = 0;
   while ((i = text.indexOf('[[', i)) !== -1) {
-    const inCode = code.find(([s, e]) => i >= s && i < e);
-    if (inCode) { i = inCode[1]; continue; }
-    const close = text.indexOf(']]', i + 2);
-    const inner = close === -1 ? null : text.slice(i + 2, close);
-    if (inner === null || /[[\]\r\n]/.test(inner)) { i += 1; continue; }
-    const end = close + 2;
-    const embed = i > 0 && text[i - 1] === '!';
-    const link = embed ? null : readInner(inner);
-    if (link) {
-      let line = 0;
-      while (line + 1 < lineStarts.length && lineStarts[line + 1] <= i) line += 1;
-      links.push({ ...link, raw: text.slice(i, end), start: i, end, line: line + 1, column: i - lineStarts[line] + 1 });
+    while (c < code.length && code[c][1] <= i) c += 1;
+    if (c < code.length && code[c][0] <= i) { i = code[c][1]; continue; }
+    let j = i + 2;
+    while (j < text.length) {
+      const ch = text.charCodeAt(j);
+      if (ch === 91 || ch === 93 || ch === 10 || ch === 13) break;
+      j += 1;
     }
+    if (text.charCodeAt(j) !== 93 || text.charCodeAt(j + 1) !== 93) { i = j > i + 2 ? j : i + 1; continue; }
+    const end = j + 2;
+    const embed = i > 0 && text[i - 1] === '!';
+    const link = embed ? null : readInner(text.slice(i + 2, j));
+    if (link) links.push({ ...link, raw: text.slice(i, end), start: i, end, ...positionAt(starts, i) });
     i = end;
   }
   return links;
