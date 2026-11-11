@@ -12,25 +12,56 @@ export class CanonicalError extends TypeError {
 export const DEFAULT_MAX_DEPTH = 64;
 
 const STRING = /"(?:[^"\\\u0000-\u001f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"/y;
-const NUMBER = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/y;
+const NUMBER = /-?(0|[1-9][0-9]*)(?:\.([0-9]+))?(?:[eE]([+-]?[0-9]+))?/y;
 const WHITESPACE = /[ \t\n\r]*/y;
 
-const checkNumber = (value: number) => {
-  if (Number.isSafeInteger(value)) return;
-  const error = new CanonicalError('Number is not an integer between -(2^53-1) and 2^53-1');
+const NOT_AN_INTEGER = 'Number is not an integer between -(2^53-1) and 2^53-1';
+const numberError = (message = NOT_AN_INTEGER) => {
+  const error = new CanonicalError(message);
   error.outOfDomainNumber = true;
-  throw error;
+  return error;
 };
+const checkNumber = (value: number) => { if (!Number.isSafeInteger(value)) throw numberError(); };
 const checkString = (value: string) => {
   if (!value.isWellFormed()) throw new CanonicalError('String has an unpaired surrogate');
 };
 
+// Whether the exact decimal value of a JSON number token is an integer of the safe range. Decided on the digits:
+// `Number("1.0000000000000000001")` is 1 and `Number("1e-400")` is 0, and neither token is an integer.
+function isSafeIntegerToken(integerDigits: string, fractionDigits = '', exponent = '0'): boolean {
+  const digits = (integerDigits + fractionDigits).replace(/^0+/, '');
+  if (digits === '') return true;
+  // The value is `digits` times ten to the `scale`. A huge exponent loses precision as a double and stays huge.
+  const scale = Number(exponent) - fractionDigits.length;
+  let magnitude: string;
+  if (scale >= 0) {
+    if (digits.length + scale > 16) return false;
+    magnitude = digits + '0'.repeat(scale);
+  } else {
+    if (-scale >= digits.length || /[1-9]/.test(digits.slice(scale))) return false;
+    magnitude = digits.slice(0, scale);
+    if (magnitude.length > 16) return false;
+  }
+  return BigInt(magnitude) <= BigInt(Number.MAX_SAFE_INTEGER);
+}
+
 /**
  * Parses JSON text into values of the canonical domain. Throws `CanonicalError` on anything `canonicalize` could not
  * serialise back unambiguously: invalid JSON or UTF-8, a duplicated member name, an unpaired surrogate, a number that
- * is not a safe integer, or nesting deeper than `maxDepth`.
+ * is not a safe integer, or nesting deeper than `maxDepth`. Messages carry an offset, never text of the document.
  */
 export function parseStrictJson(input: string | Uint8Array, maxDepth = DEFAULT_MAX_DEPTH): unknown {
+  const { value, numberError: error } = readStrictJson(input, maxDepth);
+  if (error) throw error;
+  return value;
+}
+
+/**
+ * `parseStrictJson` for a caller that must look at the document before applying the number rule (HCS-0007-R001
+ * reports an unsupported version first). The first number outside the integer domain is returned as `numberError`
+ * instead of thrown, and every such number reads as `null` in `value`: check `numberError` before trusting `value`.
+ */
+export function readStrictJson(input: string | Uint8Array, maxDepth = DEFAULT_MAX_DEPTH): { value: unknown; numberError?: CanonicalError } {
   let text: string;
   if (typeof input === 'string') text = input;
   else {
@@ -38,19 +69,21 @@ export function parseStrictJson(input: string | Uint8Array, maxDepth = DEFAULT_M
     catch { throw new CanonicalError('Document is not valid UTF-8'); }
   }
   let at = 0;
-  const fail = (message: string): never => { throw new CanonicalError(`${message} at offset ${at}`); };
+  let firstNumberError: CanonicalError | undefined;
+  const fail = (message: string, offset = at): never => { throw new CanonicalError(`${message} at offset ${offset}`); };
   const match = (pattern: RegExp) => {
     pattern.lastIndex = at;
     const found = pattern.exec(text);
     if (found) at = pattern.lastIndex;
-    return found?.[0];
+    return found;
   };
   const skip = () => { match(WHITESPACE); };
   const string = () => {
-    const token = match(STRING);
+    const start = at;
+    const token = match(STRING)?.[0];
     if (token === undefined) return fail('Expected a string');
     const value = JSON.parse(token) as string;
-    checkString(value);
+    if (!value.isWellFormed()) fail('String has an unpaired surrogate', start);
     return value;
   };
   const value = (depth: number): unknown => {
@@ -62,14 +95,16 @@ export function parseStrictJson(input: string | Uint8Array, maxDepth = DEFAULT_M
       return ch === '{' ? object(depth + 1) : array(depth + 1);
     }
     if (ch === '"') return string();
-    for (const [literal, result] of [['true', true], ['false', false], ['null', null]] as const) {
-      if (text.startsWith(literal, at)) { at += literal.length; return result; }
-    }
+    if (ch === 't' && text.startsWith('true', at)) { at += 4; return true; }
+    if (ch === 'f' && text.startsWith('false', at)) { at += 5; return false; }
+    if (ch === 'n' && text.startsWith('null', at)) { at += 4; return null; }
+    const start = at;
     const token = match(NUMBER);
-    if (token === undefined) return fail('Expected a JSON value');
-    const number = Number(token);
-    checkNumber(number);
-    return number;
+    if (token === null) return fail('Expected a JSON value');
+    // Number() is exact for a token whose exact value is a safe integer, and keeps the sign of -0 as JSON.parse does.
+    if (isSafeIntegerToken(token[1], token[2], token[3])) return Number(token[0]);
+    firstNumberError ??= numberError(`${NOT_AN_INTEGER} at offset ${start}`);
+    return null;
   };
   const object = (depth: number) => {
     const result: Record<string, unknown> = {};
@@ -77,12 +112,14 @@ export function parseStrictJson(input: string | Uint8Array, maxDepth = DEFAULT_M
     if (text[at] === '}') { at++; return result; }
     for (;;) {
       skip();
+      const start = at;
       const name = string();
-      if (Object.hasOwn(result, name)) fail(`Duplicated member name ${JSON.stringify(name)}`);
+      if (Object.hasOwn(result, name)) fail('Duplicated member name', start);
       skip();
       if (text[at++] !== ':') { at--; fail('Expected ":"'); }
       // defineProperty so that a member named `__proto__` is an own property, as with JSON.parse.
-      Object.defineProperty(result, name, { value: value(depth), enumerable: true, writable: true, configurable: true });
+      if (name === '__proto__') Object.defineProperty(result, name, { value: value(depth), enumerable: true, writable: true, configurable: true });
+      else result[name] = value(depth);
       skip();
       const next = text[at++];
       if (next === '}') return result;
@@ -104,7 +141,7 @@ export function parseStrictJson(input: string | Uint8Array, maxDepth = DEFAULT_M
   const result = value(0);
   skip();
   if (at !== text.length) fail('Unexpected text after the document');
-  return result;
+  return { value: result, numberError: firstNumberError };
 }
 
 /**

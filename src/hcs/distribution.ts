@@ -2,7 +2,7 @@
 // 5.2. Pure functions: the trust anchor, assignment, accepted state and clock are host inputs (section 3.3) passed
 // by the caller; nothing here reads a file, the environment or the system clock, and nothing is persisted (R015).
 import { createHash, createPublicKey, verify, type KeyObject } from 'node:crypto';
-import { CanonicalError, canonicalize, parseStrictJson } from './canonical-json.ts';
+import { CanonicalError, canonicalize, readStrictJson } from './canonical-json.ts';
 import { DEFAULT_LIMITS, readCatalog, type CatalogManifest } from './catalog.ts';
 import { hcsError, type HcsError, type HcsErrorCode } from './errors.ts';
 import { isExtensionName } from './ids.ts';
@@ -10,6 +10,10 @@ import { HCS_VERSION } from './version.ts';
 
 export const ENVELOPE_PAYLOAD_TYPE = 'application/vnd.hcs.catalog-envelope+json';
 export const KEY_SET_PAYLOAD_TYPE = 'application/vnd.hcs.key-set+json';
+// Local limits; HCS-0007 states none. They bound the work an unauthenticated document can cause: a document with
+// more keys or signatures is refused as `manifest_invalid` before any key is imported or any signature verified.
+export const MAX_KEYS = 1024;
+export const MAX_SIGNATURES = 1024;
 
 export interface Signature { keyid: string; sig: string }
 export interface PublicKey { keyid: string; keytype: 'ed25519'; public: string }
@@ -97,13 +101,13 @@ function shape(value: unknown, pointer: string, members: Shape, required: string
   }
   return undefined;
 }
-const list = (item: (v: unknown, pointer: string) => string | undefined, min = 0) => (value: unknown, pointer: string) => {
-  if (!Array.isArray(value) || value.length < min) return pointer;
+const list = (item: (v: unknown, pointer: string) => string | undefined, min: number, max: number) => (value: unknown, pointer: string) => {
+  if (!Array.isArray(value) || value.length < min || value.length > max) return pointer;
   for (let i = 0; i < value.length; i++) { const bad = item(value[i], `${pointer}/${i}`); if (bad !== undefined) return bad; }
   return undefined;
 };
 const keyMembers: Shape = { keyid: leaf(isKeyid), keytype: leaf(v => v === 'ed25519'), public: leaf(isPublic) };
-const signatures = list((v, p) => shape(v, p, { keyid: leaf(isKeyid), sig: leaf(isSig) }, ['keyid', 'sig'], false));
+const signatures = list((v, p) => shape(v, p, { keyid: leaf(isKeyid), sig: leaf(isSig) }, ['keyid', 'sig'], false), 0, MAX_SIGNATURES);
 const onlineKey = (v: unknown, p: string) => shape(v, p, { ...keyMembers, notBefore: leaf(isTimestamp), notAfter: leaf(isTimestamp) }, ['keyid', 'keytype', 'public', 'notBefore', 'notAfter'], true);
 const binding = (value: unknown, pointer: string) => {
   if (!object(value) || Object.keys(value).length === 0) return pointer;
@@ -111,29 +115,33 @@ const binding = (value: unknown, pointer: string) => {
   return undefined;
 };
 const envelopeMembers: Shape = { hcsVersion: leaf(v => v === HCS_VERSION), sequence: leaf(isCounter), expires: leaf(isTimestamp), binding, catalog: leaf(object), signatures };
-const keySetMembers: Shape = { hcsVersion: leaf(v => v === HCS_VERSION), version: leaf(isCounter), threshold: leaf(isThreshold), keys: list(onlineKey, 1), signatures };
+const keySetMembers: Shape = { hcsVersion: leaf(v => v === HCS_VERSION), version: leaf(isCounter), threshold: leaf(isThreshold), keys: list(onlineKey, 1, MAX_KEYS), signatures };
 
 // An envelope wraps a catalog, which has its own limit (HCS-0001-R015), plus signatures and whitespace.
 const MAX_DOCUMENT_BYTES = 2 * DEFAULT_LIMITS.maxBytes;
 
-// Strict parse shared by both documents: text without a canonical form is `manifest_invalid` (section 4, R004).
-function parse(input: string | Uint8Array): { ok: true; value: unknown } | Failure {
+const outOfDomain = (error: CanonicalError) => fail('manifest_invalid', `Document has no canonical form: ${error.message}`, 'HCS-0007-R004');
+
+// Strict parse shared by both documents: text without a canonical form is `manifest_invalid` (section 4). A number
+// outside the integer domain (R004) is handed back as `numberError`, so that an envelope can report its version first.
+function parse(input: string | Uint8Array): { ok: true; value: unknown; numberError?: CanonicalError } | Failure {
   const size = typeof input === 'string' ? Buffer.byteLength(input) : input.byteLength;
   if (size > MAX_DOCUMENT_BYTES) return fail('manifest_invalid', 'Document exceeds the size limit', 'HCS-0007-R003');
-  try { return { ok: true, value: parseStrictJson(input, DEFAULT_LIMITS.maxDepth) }; }
+  try { return { ok: true, ...readStrictJson(input, DEFAULT_LIMITS.maxDepth) }; }
   catch (error) {
     if (!(error instanceof CanonicalError)) throw error;
-    return fail('manifest_invalid', `Document has no canonical form: ${error.message}`, error.outOfDomainNumber ? 'HCS-0007-R004' : 'HCS-0007-R003');
+    return fail('manifest_invalid', `Document has no canonical form: ${error.message}`, 'HCS-0007-R003');
   }
 }
 
-/** Reads an envelope and checks its version, then its shape (R001, R004). Verifies no signature. */
+/** Reads an envelope and checks its version, then the number rule and its shape (R001, R004). Verifies no signature. */
 export function readEnvelope(input: string | Uint8Array): { ok: true; envelope: Envelope } | Failure {
   const parsed = parse(input);
   if (!parsed.ok) return parsed;
   const doc = parsed.value;
   if (!object(doc)) return fail('manifest_invalid', 'Envelope must be an object', 'HCS-0007-R001', '');
   if (doc.hcsVersion !== HCS_VERSION) return fail('unsupported_hcs_version', 'Unsupported HCS version', 'HCS-0007-R001', '/hcsVersion');
+  if (parsed.numberError) return outOfDomain(parsed.numberError);
   const bad = shape(doc, '', envelopeMembers, ['hcsVersion', 'sequence', 'expires', 'binding', 'catalog'], true);
   if (bad !== undefined) return fail('manifest_invalid', 'Invalid envelope member', 'HCS-0007-R001', bad);
   return { ok: true, envelope: doc as unknown as Envelope };
@@ -144,10 +152,14 @@ export function readKeySet(input: string | Uint8Array): { ok: true; keySet: KeyS
   const parsed = parse(input);
   if (!parsed.ok) return parsed;
   const doc = parsed.value;
+  // Same order as an envelope: the version first. For a key set another version is `manifest_invalid` (R002).
+  if (object(doc) && doc.hcsVersion !== HCS_VERSION) return fail('manifest_invalid', 'Invalid key set member', 'HCS-0007-R002', '/hcsVersion');
+  if (parsed.numberError) return outOfDomain(parsed.numberError);
   const bad = shape(doc, '', keySetMembers, ['hcsVersion', 'version', 'keys'], true);
   if (bad !== undefined) return fail('manifest_invalid', 'Invalid key set member', 'HCS-0007-R002', bad);
   const keySet = doc as unknown as KeySet;
-  const repeated = keySet.keys.findIndex((key, i) => keySet.keys.findIndex(other => other.keyid === key.keyid) !== i);
+  const seen = new Set<string>();
+  const repeated = keySet.keys.findIndex(key => seen.size === seen.add(key.keyid).size);
   if (repeated !== -1) return fail('manifest_invalid', 'Key set lists a keyid twice', 'HCS-0007-R002', `/keys/${repeated}/keyid`);
   return { ok: true, keySet };
 }
@@ -156,15 +168,19 @@ const ed25519Key = (key: PublicKey): KeyObject =>
   createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: Buffer.from(key.public, 'base64').toString('base64url') }, format: 'jwk' });
 
 // How many distinct public keys among `keys` have a valid signature over the signing input. A keyid selects a key
-// and proves nothing: unknown keyids are ignored, and two keyids for the same public key count once.
+// and proves nothing: unknown keyids are ignored, and two keyids for the same public key count once. Only the first
+// signature of each keyid is tried (HCS-0007 does not say what a repeated keyid means), so the work is one key
+// import and one verification per key at most, whatever the document repeats.
 function countSigners(payloadType: string, document: { signatures?: Signature[] }, keys: readonly PublicKey[]): number {
   const input = signingInput(payloadType, document);
+  const byKeyid = new Map(keys.map(key => [key.keyid, key]));
+  const tried = new Set<string>();
   const signers = new Set<string>();
   for (const signature of document.signatures ?? []) {
-    const key = keys.find(candidate => candidate.keyid === signature.keyid);
-    if (key === undefined) continue;
+    const key = byKeyid.get(signature.keyid);
+    if (key === undefined || tried.has(key.keyid)) continue;
+    tried.add(key.keyid);
     const identity = Buffer.from(key.public, 'base64').toString('hex');
-    if (signers.has(identity)) continue;
     let valid = false;
     try { valid = verify(null, input, ed25519Key(key), Buffer.from(signature.sig, 'base64')); } catch { /* an unusable key verifies nothing */ }
     if (valid) signers.add(identity);
@@ -176,7 +192,7 @@ function countSigners(payloadType: string, document: { signatures?: Signature[] 
 const inWindow = (key: OnlineKey, now: bigint) => now >= instant(key.notBefore)! && now < instant(key.notAfter)!;
 
 function assertTrustAnchor(anchor: TrustAnchor): void {
-  const bad = shape(anchor, '', { keys: list((v, p) => shape(v, p, keyMembers, ['keyid', 'keytype', 'public'], false), 1), threshold: leaf(isThreshold) }, ['keys'], false);
+  const bad = shape(anchor, '', { keys: list((v, p) => shape(v, p, keyMembers, ['keyid', 'keytype', 'public'], false), 1, MAX_KEYS), threshold: leaf(isThreshold) }, ['keys'], false);
   if (bad !== undefined) throw new TypeError(`Invalid trust anchor at ${bad || '/'}`);
   if (new Set(anchor.keys.map(key => key.keyid)).size !== anchor.keys.length) throw new TypeError('Trust anchor lists a keyid twice');
 }

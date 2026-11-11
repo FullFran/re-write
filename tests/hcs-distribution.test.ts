@@ -1,7 +1,8 @@
 // HCS-0007 verification through the public interface of src/hcs/distribution.ts. Keys are generated per run; the
 // clock, trust anchor, assignment and accepted state are stated by each test, never read from the environment.
 import assert from 'node:assert/strict';
-import { generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
+import crypto, { generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
+import { syncBuiltinESMExports } from 'node:module';
 import test from 'node:test';
 import {
   ENVELOPE_PAYLOAD_TYPE, KEY_SET_PAYLOAD_TYPE, contentDigest, readEnvelope, readKeySet, signingInput, verifyEnvelope, verifyKeySet,
@@ -226,4 +227,65 @@ test('host inputs that are not what section 3.3 defines are refused instead of t
   assert.throws(() => verifyKeySet(keySet, { trustAnchor: ANCHOR, now: NOW, lastAccepted: { version: 3, digest: 'sha256:short' } }), TypeError);
   assert.throws(() => check(envelopeDoc(), [online1], { assignment: {} }), TypeError);
   assert.throws(() => check(envelopeDoc(), [online1], { lastAccepted: { sequence: 0, digest: contentDigest(envelopeDoc()) } }), TypeError);
+});
+
+test('R001: an unsupported version is reported before the number rule of R004', () => {
+  const options = { keySet: KEY_SET, assignment: ASSIGNMENT, now: NOW };
+  refused(verifyEnvelope(text(envelopeDoc({ hcsVersion: '0.2', 'x-example-ratio': 0.5 })), options), 'unsupported_hcs_version', 'HCS-0007-R001');
+  refused(verifyEnvelope('{"x-example-big":1e400,"hcsVersion":"9.9"}', options), 'unsupported_hcs_version', 'HCS-0007-R001');
+  refused(verifyEnvelope(text(envelopeDoc({ 'x-example-ratio': 0.5 })), options), 'manifest_invalid', 'HCS-0007-R004');
+  // A document that cannot be read at all has no version to report.
+  refused(verifyEnvelope('{"hcsVersion":"0.2","x-example-ratio":0.5', options), 'manifest_invalid', 'HCS-0007-R003');
+  refused(verifyEnvelope('{"hcsVersion":"0.2","hcsVersion":"0.1"}', options), 'manifest_invalid', 'HCS-0007-R003');
+  // Key sets: another version is manifest_invalid (R002), also when a number is out of the domain.
+  refused(verifyKeySet(text(keySetDoc({ hcsVersion: '0.2', 'x-example-ratio': 0.5 })), { trustAnchor: ANCHOR, now: NOW }), 'manifest_invalid', 'HCS-0007-R002');
+});
+
+test('error messages of a refused document carry no text of the document', () => {
+  const result = verifyEnvelope('{"hcsVersion":"0.1","secret-name":1,"secret-name":2}', { keySet: KEY_SET, assignment: ASSIGNMENT, now: NOW });
+  assert.equal(result.ok, false);
+  assert.equal(JSON.stringify(result).includes('secret'), false);
+});
+
+test('only the first signature of each keyid is tried', () => {
+  const good = signed(ENVELOPE_PAYLOAD_TYPE, envelopeDoc(), [online1]);
+  const [valid] = good.signatures as { keyid: string; sig: string }[];
+  const invalid = { keyid: 'online-1', sig: Buffer.alloc(64).toString('base64') };
+  const options = { keySet: KEY_SET, assignment: ASSIGNMENT, now: NOW };
+  assert.equal(verifyEnvelope(text({ ...good, signatures: [valid, invalid, invalid] }), options).ok, true);
+  refused(verifyEnvelope(text({ ...good, signatures: [invalid, valid] }), options), 'signature_invalid', 'HCS-0007-R005');
+  const keySet = signed(KEY_SET_PAYLOAD_TYPE, keySetDoc(), [root1]);
+  const rootInvalid = { keyid: 'root-1', sig: invalid.sig };
+  refused(verifyKeySet(text({ ...keySet, signatures: [rootInvalid, ...(keySet.signatures as unknown[])] }), { trustAnchor: ANCHOR, now: NOW }), 'signature_invalid', 'HCS-0007-R011');
+});
+
+test('repeated signatures cost one key import and one verification per keyid', t => {
+  const calls = { verify: 0, createPublicKey: 0 };
+  const original = { verify: crypto.verify, createPublicKey: crypto.createPublicKey };
+  t.after(() => { Object.assign(crypto, original); syncBuiltinESMExports(); });
+  crypto.verify = ((...args: Parameters<typeof original.verify>) => { calls.verify++; return original.verify(...args); }) as typeof crypto.verify;
+  crypto.createPublicKey = ((...args: Parameters<typeof original.createPublicKey>) => { calls.createPublicKey++; return original.createPublicKey(...args); }) as typeof crypto.createPublicKey;
+  syncBuiltinESMExports();
+  const repeated = (keyid: string) => Array.from({ length: 1000 }, () => ({ keyid, sig: Buffer.alloc(64).toString('base64') }));
+  refused(verifyKeySet(text({ ...keySetDoc(), signatures: repeated('root-1') }), { trustAnchor: ANCHOR, now: NOW }), 'signature_invalid', 'HCS-0007-R011');
+  assert.deepEqual(calls, { verify: 1, createPublicKey: 1 });
+  refused(verifyEnvelope(text({ ...envelopeDoc(), signatures: [...repeated('online-1'), ...repeated('unknown')].slice(500, 1500) }), { keySet: KEY_SET, assignment: ASSIGNMENT, now: NOW }), 'signature_invalid', 'HCS-0007-R005');
+  assert.deepEqual(calls, { verify: 2, createPublicKey: 2 });
+});
+
+test('local limits: at most 1024 keys and 1024 signatures per document, refused before any verification', () => {
+  const zero = Buffer.alloc(64).toString('base64');
+  const manySignatures = (count: number) => Array.from({ length: count }, () => ({ keyid: 'r1', sig: zero }));
+  const manyKeys = (count: number) => Array.from({ length: count }, (_, i) => ({ ...onlineKey(online1), keyid: `k-${i}` }));
+  const started = performance.now();
+  refused(verifyKeySet(JSON.stringify({ ...keySetDoc(), signatures: manySignatures(60_000) }), { trustAnchor: ANCHOR, now: NOW }), 'manifest_invalid', 'HCS-0007-R002');
+  refused(verifyKeySet(JSON.stringify(keySetDoc({ keys: manyKeys(24_000) })), { trustAnchor: ANCHOR, now: NOW }), 'manifest_invalid', 'HCS-0007-R002');
+  refused(verifyEnvelope(JSON.stringify({ ...envelopeDoc(), signatures: manySignatures(60_000) }), { keySet: KEY_SET, assignment: ASSIGNMENT, now: NOW }), 'manifest_invalid', 'HCS-0007-R001');
+  // Generous bound: the unbounded version needed about 13 s and 3 s for the first two documents.
+  assert.ok(performance.now() - started < 6000, `took ${Math.round(performance.now() - started)} ms`);
+  refused(verifyKeySet(JSON.stringify(keySetDoc({ keys: manyKeys(1025) })), { trustAnchor: ANCHOR, now: NOW }), 'manifest_invalid', 'HCS-0007-R002');
+  refused(verifyKeySet(JSON.stringify({ ...keySetDoc(), signatures: manySignatures(1025) }), { trustAnchor: ANCHOR, now: NOW }), 'manifest_invalid', 'HCS-0007-R002');
+  assert.equal(readKeySet(JSON.stringify({ ...keySetDoc({ keys: manyKeys(1024) }), signatures: manySignatures(1024) })).ok, true);
+  refused(readKeySet(JSON.stringify(keySetDoc({ keys: [...manyKeys(1023), { ...onlineKey(online2), keyid: 'k-7' }] }))), 'manifest_invalid', 'HCS-0007-R002');
+  assert.throws(() => verifyKeySet(text(keySetDoc()), { trustAnchor: { keys: manyKeys(1025).map(({ keyid }) => ({ ...anchorKey(root1), keyid })) }, now: NOW }), TypeError);
 });

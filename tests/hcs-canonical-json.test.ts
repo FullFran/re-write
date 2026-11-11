@@ -46,9 +46,9 @@ test('parseStrictJson reads what JSON.parse reads for a document of the canonica
 });
 
 test('parseStrictJson refuses a duplicated member name', () => {
-  refuses(() => parseStrictJson('{"sequence":1,"sequence":2}'), /Duplicated member name "sequence"/);
+  refuses(() => parseStrictJson('{"sequence":1,"sequence":2}'), /^Duplicated member name at offset 14$/);
   // The same name spelled with an escape is still the same name.
-  refuses(() => parseStrictJson('{"a":{"k":1,"\\u006b":2}}'), /Duplicated member name "k"/);
+  refuses(() => parseStrictJson('{"a":{"k":1,"\\u006b":2}}'), /^Duplicated member name at offset 12$/);
 });
 
 test('parseStrictJson refuses an unpaired surrogate', () => {
@@ -74,4 +74,19 @@ test('parseStrictJson refuses nesting beyond the depth limit', () => {
   assert.deepEqual(parseStrictJson('[[1]]', 2), [[1]]);
   refuses(() => parseStrictJson('[[[1]]]', 2), /depth limit/);
   refuses(() => parseStrictJson('['.repeat(100_000)), /depth limit/);
+});
+
+test('parseStrictJson decides integrality from the exact decimal value of the token, without floating point', () => {
+  // Each of these rounds to a safe integer as a double, and is not one.
+  for (const number of ['1.0000000000000000001', '1e-400', '-1e-400', '9007199254740991.0000000000000001', '123e-1', '0.1e0', '9007199254740992.0', '900719925474099.2e1', '1e16', '1e99999999999999999999', '5e-99999999999999999999']) {
+    assert.throws(() => parseStrictJson(`[${number}]`), (e: unknown) => e instanceof CanonicalError && e.outOfDomainNumber && /^Number is not an integer .* at offset 1$/.test(e.message), number);
+  }
+  // Spellings whose exact value is an integer in range are read as that integer.
+  assert.deepEqual(parseStrictJson('[1.0,1e2,0.0000001e7,120e-1,0e99999999999999999999,0.000e-5,9007199254740991.0,900719925474099.1e1,-9007199254740991,-0.0]'), [1, 100, 1, 12, 0, 0, 9007199254740991, 9007199254740991, -9007199254740991, -0]);
+});
+
+test('error messages carry a position, never text of the document', () => {
+  for (const text of ['{"secret-name":1,"secret-name":2}', '{"secret-name":"\\ud800"}', '{"secret-name":1.5}', '{"secret-name" 1}']) {
+    assert.throws(() => parseStrictJson(text), (e: unknown) => e instanceof CanonicalError && !e.message.includes('secret') && /at offset [0-9]+$/.test(e.message), text);
+  }
 });
