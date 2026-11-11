@@ -669,6 +669,10 @@
         "tests/auth.test.ts"
       ]
     },
+    "HCS-0006-R006": {
+      "status": "not-applicable",
+      "reason": "re-write has no client that reads an HCS error from a response: it only produces them (HTTP problem documents and MCP tool errors), and its embedded engine and connected agents parse responses with their own code."
+    },
     "HCS-0007-R001": {
       "status": "implemented",
       "code": [

@@ -100,7 +100,7 @@ Generated from HCS release 0.1.0-draft.6 (vendor/hcs/PIN.json); do not edit.
 | HCS-0006-R003 | MUST | implemented | `src/hcs/transport.ts`, `src/adapters/mcp.ts`, `tests/hcs-transport.test.ts`, `tests/mcp.test.ts` |  |
 | HCS-0006-R004 | MUST | implemented | `src/hcs/transport.ts`, `src/adapters/http-server.ts`, `tests/hcs-transport.test.ts`, `tests/auth.test.ts` |  |
 | HCS-0006-R005 | MUST | implemented | `src/hcs/transport.ts`, `src/adapters/http-server.ts`, `tests/hcs-transport.test.ts`, `tests/auth.test.ts` |  |
-| HCS-0006-R006 | MUST | planned |  | [#28](https://github.com/FullFran/re-write/issues/28) |
+| HCS-0006-R006 | MUST | not-applicable |  | re-write has no client that reads an HCS error from a response: it only produces them (HTTP problem documents and MCP tool errors), and its embedded engine and connected agents parse responses with their own code. |
 
 ## HCS-0007
 
