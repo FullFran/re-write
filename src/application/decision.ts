@@ -1,6 +1,8 @@
-import { evaluate } from '../hcs/authority.ts';
-import { HcsFailure, type HcsError } from '../hcs/errors.ts';
-import { readGrants } from '../hcs/grants.ts';
+import { randomUUID } from 'node:crypto';
+import { evaluate, matching } from '../hcs/authority.ts';
+import { writeDecisionRecord, type Decider } from '../hcs/decision-records.ts';
+import { HcsFailure, hcsError, type HcsError } from '../hcs/errors.ts';
+import { grantId, readGrants } from '../hcs/grants.ts';
 import { BOOK_CREATE, REVIEW_DECIDE, REWRITE_PERMISSIONS } from '../hcs/ids.ts';
 import type { Library } from './library.ts';
 
@@ -17,6 +19,11 @@ export interface DecisionRequest {
   permission: string;
   /** The package entry acting, or null for a host built-in called by the person's agent or browser. */
   entry: string | null;
+  /**
+   * The operation's identifier, never its content (for example the request id of the request log).
+   * It goes into the decision record; the host generates one when the caller has none.
+   */
+  operation?: string;
 }
 
 export type BookDecision =
@@ -38,7 +45,9 @@ const REVIEW_PERMISSIONS: readonly string[] = [
  * time, so revoking a person's book access or a package grant applies to the next call
  * (HCS-0005-R003). Allowed only when the person may use the book, the permission is reachable
  * through the door (review decisions only on the review door, and only by a person), and, when a
- * package acts, it holds a grant for that permission (HCS-0005-R001).
+ * package acts, it holds a grant for that permission (HCS-0005-R001). Every decision a grant takes
+ * part in is written to `<data-dir>/decisions.jsonl` before it is returned (HCS-0005-R010); when the
+ * record cannot be written the operation is denied (HCS-0005-R012).
  */
 export function decide(request: DecisionRequest): BookDecision {
   const { library, subject, book, door, permission, entry } = request;
@@ -47,7 +56,18 @@ export function decide(request: DecisionRequest): BookDecision {
   const reachable = door === 'review' ? entry === null && REVIEW_PERMISSIONS.includes(permission) : MCP_PERMISSIONS.includes(permission);
   if (!reachable) return { allow: false, reason: 'forbidden', detail: `forbidden: ${permission} is not available through the ${door} door` };
   if (entry !== null) {
-    const decision = evaluate({ entry, permission }, readGrants(library.dataDir));
+    const grants = readGrants(library.dataDir);
+    const check = { entry, permission };
+    const decision = evaluate(check, grants);
+    const grant = matching(check, grants);
+    const decider: Decider = decision.allow && grant ? { kind: 'grant', id: grantId(grant) } : { kind: 'policy', id: 'HCS-0005-R001' };
+    try {
+      writeDecisionRecord(library.dataDir, {
+        entry, permission, outcome: decision.allow ? 'allow' : 'deny', operation: request.operation ?? randomUUID(), decider, channel: 'grant-store',
+      });
+    } catch {
+      return { allow: false, reason: 'permission-denied', error: hcsError('permission_denied', `Permission denied: ${permission}`, { entry, requirement: 'HCS-0005-R012' }) };
+    }
     if (!decision.allow) return { allow: false, reason: 'permission-denied', error: decision.error };
   }
   return { allow: true };

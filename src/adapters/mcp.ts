@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import { observeMcpTransport } from './request-log.ts';
+import { currentRequestId, observeMcpTransport } from './request-log.ts';
 import { CallToolRequestSchema, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { HcsFailure } from '../hcs/errors.ts';
 import { builtinCapabilities, dispatch, type HostCapabilities } from '../hcs/capabilities.ts';
@@ -157,7 +157,7 @@ export function buildMcpServer(library: Library, subject: string, capabilities: 
     annotations: reading,
   }, () => reply(() => ({
     books: library.booksFor(subject)
-      .filter((id) => decide({ library, subject, book: id, door: 'mcp', permission: READ, entry }).allow)
+      .filter((id) => decide({ library, subject, book: id, door: 'mcp', permission: READ, entry, operation: currentRequestId() }).allow)
       .map((id) => ({ book_id: id, title: library.open(id, subject).title() })),
   })));
 
@@ -295,7 +295,8 @@ export function buildMcpServer(library: Library, subject: string, capabilities: 
       try {
         dispatch(snapshot, ref);
         // One decision per call, before any work: the book (none for list_books), the door and the grant.
-        enforce({ library, subject, book: typeof args?.book === 'string' ? args.book : null, door: 'mcp', permission, entry });
+        // Its decision record names the call by the request id of the request log, never by its arguments.
+        enforce({ library, subject, book: typeof args?.book === 'string' ? args.book : null, door: 'mcp', permission, entry, operation: currentRequestId() });
       } catch (error) {
         return reply(() => { throw error; });
       }

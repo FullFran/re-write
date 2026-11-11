@@ -4,7 +4,8 @@ import { HCS_VERSION } from './version.ts';
 
 // HCS-0005 objects. A request asks for authority; only a grant held by the host gives it.
 export interface PermissionRequest { permission: string; reason?: string; [member: `x-${string}`]: unknown }
-export interface Grant { entry: string; permission: string; session?: string }
+// `id` is the host's identifier for a stored grant or denial; decision records name it (section 3.3).
+export interface Grant { entry: string; permission: string; id?: string; session?: string }
 export type Denial = Grant;
 export interface Check { entry: string; permission: string; session?: string }
 export type Decision = { allow: true } | { allow: false; error: HcsError };
@@ -13,6 +14,9 @@ export type Decision = { allow: true } | { allow: false; error: HcsError };
 // matches every check (HCS-0005-R008).
 const matches = (check: Check) => (held: Grant) => held.entry === check.entry && held.permission === check.permission
   && (held.session === undefined || held.session === check.session);
+
+// The stored grant or denial that matches `check`, if any: what a decision record names as decider.
+export const matching = (check: Check, held: readonly Grant[]): Grant | undefined => held.find(matches(check));
 
 // Allows only with a grant for exactly this entry and permission (HCS-0005-R001), and only when no
 // stored denial matches too (R007). It takes grants and denials alone: requests, Agent Skills

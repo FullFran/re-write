@@ -22,7 +22,7 @@ Rules live in [`tests/fixtures/hcs/divergences.json`](../tests/fixtures/hcs/dive
 
 The test fails only on a **regression**: a case that passes in [`tests/fixtures/hcs/baseline.json`](../tests/fixtures/hcs/baseline.json) and does not pass now. A new case that fails does not block anything; it shows up as `fail` in the report. After fixing a `fail` or moving to a new release, regenerate the baseline with `HCS_BASELINE=write node --test tests/hcs-conformance.test.ts` and review its diff in the pull request. `node --test --test-reporter=tap tests/hcs-conformance.test.ts` prints the per-level table.
 
-Measured with HCS `0.1.0-draft.6`: 98 pass, 0 fail, 240 not applicable (94 host, 41 projection, 37 distribution, 17 recovery, 7 client, 44 document cases of schemas without a runner), 0 divergences.
+Measured with HCS `0.1.0-draft.6`: 105 pass, 0 fail, 233 not applicable (94 host, 41 projection, 37 distribution, 17 recovery, 7 client, 37 document cases of schemas without a runner), 0 divergences.
 
 ## Updating to a new HCS release
 
@@ -69,6 +69,16 @@ Single writer (#10): every apply takes `<state>/lock` with an exclusive create (
 Dispatch (`src/hcs/registry.ts`): only capabilities of `active` entries are callable; any other state reports `unsupported_capability` (HCS-0004-R005), and `draining` entries take no new calls (HCS-0004-R006). In-flight calls are not tracked yet. `generationCapabilities(stateDir)` exposes host built-ins plus the active generation to the MCP adapter.
 
 Authorization (HCS-0005): the default `authorize` hook of `applyDesiredSet` authorizes an entry only when every permission its package requests is granted in `grants.json` (`--grants <data-dir>` on `rewrite catalog apply`, default the state directory). The hook stays injectable. HCS 0.1 leaves open where requests live (OQ-0005-3) and the catalog has no standard member for them, so re-write reads them from an HCS-0005 request document named `requests.json` at the root of the package: `{"hcsVersion": "0.1", "entry": "<entry id>", "requests": [{"permission": "...", "reason": "..."}]}`. A package without that file requests nothing. The host reads the document from the verified archive in the `authorize` step, before `prepared`, without unpacking or running anything; a document that is malformed, too large or names another entry is denied with `permission_denied`, and a missing grant reports `permission_denied` with HCS-0005-R001. Requests, their `x-` members and Agent Skills `allowed-tools` never become grants (HCS-0005-R002, R004). At call time, `src/application/decision.ts` checks the same grants again for operations a package performs (HCS-0005-R003); see [Architecture, section 5](architecture.md#5-authority-and-the-review-boundary).
+
+Decision records (HCS-0005 section 3.3): every call-time decision on an operation a package performs, allow or deny, and every grant removed with `rewrite package-revoke`, appends one record to `decisions.jsonl` next to `grants.json` (`src/hcs/decision-records.ts`; JSON Lines, mode `0600`, synced to disk before the decision is returned, never rewritten). A record has the members of the HCS-0005 `decisionRecord` schema and nothing else: `id`, `time`, `entry`, `permission`, `outcome`, `operation`, `decider` and `channel`. The writer copies only those members, so no argument, result, book or person reaches the file (HCS-0005-R011).
+
+| Decision | `outcome` | `decider` | `channel` |
+| --- | --- | --- | --- |
+| A grant allows the operation | `allow` | `{"kind": "grant", "id": <grant id>}` | `grant-store` |
+| No grant matches | `deny` | `{"kind": "policy", "id": "HCS-0005-R001"}` | `grant-store` |
+| `rewrite package-revoke` removes a grant | `revoked` (no `operation`) | `{"kind": "subject", "id": "operator"}` | `cli:package-revoke` |
+
+`operation` is the request id of the request log (the `x-request-id` response header), so a record can be matched to its `http.request` and `mcp.call` log lines; a call with several checks, such as `list_books`, writes one record per check under the same id, and outside an HTTP request the host generates one. New grants carry an `id` in `grants.json`; a grant written before that has none and is named `<entry>:<permission>`. The shell has no authenticated person, so a revocation names the operator role. If a record cannot be written, the operation is denied with `permission_denied` and HCS-0005-R012, whatever the grants say; a revocation removes the grant first and then reports the failed record. Calls a person makes through a host built-in evaluate no grant and write no record. Not recorded yet: the lifecycle `authorize` step. Retention and rotation are the operator's (OQ-0005-6), and records are sent nowhere (HCS-0005-R013 does not apply). re-write never asks a person for a permission decision, so the rules on answers from a person (HCS-0005-R005, R006, R009, R014, R015) do not apply.
 
 ### Try it
 

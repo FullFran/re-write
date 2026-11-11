@@ -19,6 +19,11 @@ interface Context {
 }
 const requests = new AsyncLocalStorage<Context>();
 
+/** The id of the HTTP request being handled (the `x-request-id` header), or undefined outside one. */
+export function currentRequestId(): string | undefined {
+  return requests.getStore()?.request_id;
+}
+
 export function recordSubject(subject: string): void {
   const context = requests.getStore();
   if (context) context.subject = context.hash(subject);
