@@ -61,6 +61,11 @@ jobs:
     name: browser
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Chromium and its system libraries come preinstalled in Playwright's image for the pinned
+    # version, so the job does not depend on apt mirrors (an apt outage failed every run on
+    # 2026-11-11). Keep the tag equal to @playwright/test in browser-tests/package.json.
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -75,8 +80,6 @@ jobs:
       # The tests start the server from src/, which needs the root dependencies.
       - run: npm ci
       - run: npm ci
-        working-directory: browser-tests
-      - run: npx playwright install --with-deps --only-shell chromium
         working-directory: browser-tests
       - run: npx playwright test
         working-directory: browser-tests
