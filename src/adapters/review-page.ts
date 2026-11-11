@@ -165,6 +165,35 @@ summary { min-height: var(--tap); padding: var(--space-3) 0; color: var(--muted)
 .scene-reading hr::after { content: '⁂'; color: var(--muted); letter-spacing: .3em; }
 .scene-reading pre { white-space: pre-wrap; }
 
+/* Modes (docs/design.md, "Modes"): the switch, and the writing desk of Concentración and Ayuda. */
+.mode-switch { display: flex; flex: 1 1 100%; gap: var(--space-1); padding: var(--space-1); border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); font-family: var(--font-ui); }
+.mode-switch > button { flex: 1 1 0; min-width: 0; min-height: var(--tap); padding: 0 var(--space-2); border-color: transparent; font-size: var(--text-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.desk { display: none; }
+body[data-mode=focus] .desk, body[data-mode=help] .desk { display: block; }
+/* A writing mode shows the desk only: the review stays in the page, untouched, behind it. */
+body[data-mode=focus] #app > section:not(.desk), body[data-mode=help] #app > section:not(.desk),
+body[data-mode=focus] .section-nav, body[data-mode=help] .section-nav, body[data-mode=focus] .create-toggle, body[data-mode=help] .create-toggle { display: none; }
+body[data-mode=focus] .toolbar, body[data-mode=help] .toolbar { margin-bottom: var(--space-3); }
+.desk-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2) var(--space-4); }
+.desk-scenes { display: flex; flex: 1 1 100%; gap: var(--space-2); }
+.desk-scenes > select { flex: 1 1 auto; min-width: 0; }
+.desk-scenes > button { flex: none; padding: 0 var(--space-3); }
+.desk-title { flex: 1 1 auto; margin: var(--space-3) 0 0; font-size: var(--text-xl); }
+.desk-count { margin: 0; }
+.desk-banner { margin: var(--space-3) 0; padding: var(--space-3) var(--space-4); border: 1px solid var(--edge); border-left: 4px solid var(--accept); border-radius: var(--radius); font: var(--text-sm)/1.45 var(--font-ui); }
+.desk-banner[hidden], .desk-panes { display: none; }
+.desk-banner > p { margin: 0 0 var(--space-2); color: var(--ink); font-weight: 400; }
+/* In the desk the editor's save row sits above the text and stays in reach while writing. */
+.desk .scene-editor { display: flex; flex-direction: column; }
+.desk .scene-editor > .actions { position: sticky; top: 0; z-index: 2; order: -2; margin: 0; padding: var(--space-2) 0; background: var(--paper); }
+.desk .save-status { order: -1; margin: 0; }
+.desk-help h2 { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-lg); }
+.desk-help h3 { margin-top: var(--space-5); }
+.desk-help .ask-scene { width: 100%; }
+.help-status:empty { display: none; }
+/* Concentración keeps the assistant one tap away, quietly: outlined, never the loudest thing on screen. */
+body[data-mode=focus] .assistant-fab { border-color: var(--edge); background: var(--paper); color: var(--ink); box-shadow: none; }
+
 /* Section navigation: one row under the thumb's reach, scrolled sideways, stuck to the top. */
 .section-nav { position: sticky; top: 0; z-index: 2; margin: 0 calc(-1 * var(--gutter)); padding-top: env(safe-area-inset-top); border-bottom: 1px solid var(--line); background: var(--paper); }
 .section-nav ul { position: relative; display: flex; gap: var(--space-1); margin: 0; padding: var(--space-1) var(--gutter); overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; list-style: none; }
@@ -222,6 +251,34 @@ main:has(> [role=alert]) .notice:not([hidden]) { position: static; width: auto; 
   .decision > button { flex: 1 1 0; min-width: 0; padding-left: var(--space-2); padding-right: var(--space-2); }
   .decision > .accept { flex-grow: 1.4; }
   .card-box .decision { margin: calc(var(--peek) + var(--space-4)) 0 calc(-1 * var(--space-4)); padding-left: 0; padding-right: 0; border-radius: 0; }
+  /* The mode switch is a dock under the thumb; what sticks or floats at the bottom stops above it. */
+  body[data-mode] { --dock-h: calc(var(--tap) + 2 * var(--space-1) + env(safe-area-inset-bottom)); }
+  .mode-switch { position: fixed; z-index: 3; left: 0; right: 0; bottom: 0; padding: var(--space-1) var(--gutter) max(var(--space-1), env(safe-area-inset-bottom)); border-width: 1px 0 0; border-radius: 0; }
+  body[data-mode] .decision { bottom: var(--dock-h); }
+  body[data-mode] .assistant-fab { margin-bottom: var(--dock-h); }
+  body[data-mode]::after { content: ''; display: block; height: var(--dock-h); }
+  .desk-scenes > button { width: var(--tap); padding: 0; font-size: var(--text-lg); }
+  .desk-scenes > button > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+/* Phones and tablets in Ayuda: the text and the help are two panes, one tap apart. */
+@media (max-width: 63.99em) {
+  body[data-mode=help] .desk-panes { display: flex; gap: var(--space-1); margin: var(--space-3) 0; }
+  .desk-panes > button { flex: 1 1 0; }
+  .desk[data-pane=help] .desk-editor, .desk[data-pane=text] .desk-help { display: none; }
+}
+/* Wide screens in Ayuda: the editor in the centre, the help in a column on its right. */
+@media (min-width: 64em) {
+  .mode-switch { flex: none; margin-left: auto; }
+  .mode-switch > button { flex: none; padding: 0 var(--space-3); }
+  body[data-mode=help] main { max-width: 84rem; }
+  body[data-mode=help] header { padding-left: max(var(--gutter), calc((100% - 84rem) / 2 + var(--gutter))); padding-right: max(var(--gutter), calc((100% - 84rem) / 2 + var(--gutter))); }
+  body[data-mode=help] .desk-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(18rem, 24rem); gap: var(--space-6); align-items: start; }
+  body[data-mode=help] .desk-help { position: sticky; top: var(--space-3); max-height: calc(100vh - 2 * var(--space-3)); overflow-y: auto; padding-right: var(--space-1); }
+}
+/* With the assistant open beside the page there is room for one column only: the help goes under the text. */
+@media (max-width: 99.99em) and (min-width: 75em) {
+  body.assistant-open[data-mode=help] .desk-body { display: block; }
+  body.assistant-open[data-mode=help] .desk-help { position: static; max-height: none; }
 }
 /* Tablet and desktop: the same column, with more air. */
 @media (min-width: 48em) {
@@ -541,6 +598,18 @@ const shortText = (value) => {
   return text.length > 60 ? text.slice(0, 57) + '…' : text;
 };
 
+// A quote that does something when clicked, from the keyboard too (Enter or Space).
+function clickable(node, open) {
+  node.className = 'clickable-quote';
+  node.tabIndex = 0;
+  node.addEventListener('click', open);
+  node.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    open();
+  });
+}
+
 function quote(text, detail) {
   const box = el('div');
   box.append(el('blockquote', text), el('p', detail, 'meta'));
@@ -601,17 +670,7 @@ function narrativeFindingCard(book, finding, reload, openQuote) {
     const evBox = el('div');
     const quoteEl = el('blockquote', ev.quote, 'clickable-quote');
     quoteEl.title = 'Haz clic para ver y resaltar esta cita en la escena';
-    if (openQuote) {
-      const open = () => openQuote(ev.file, ev.quote, ev.anchor, ev.status);
-      quoteEl.addEventListener('click', open);
-      // The same action from the keyboard.
-      quoteEl.tabIndex = 0;
-      quoteEl.addEventListener('keydown', (event) => {
-        if (event.key !== 'Enter' && event.key !== ' ') return;
-        event.preventDefault();
-        open();
-      });
-    }
+    if (openQuote) clickable(quoteEl, () => openQuote(ev.file, ev.quote, ev.anchor, ev.status));
     const statusText = ev.status === 'valid' ? 'válida' : (ev.status === 'stale' ? 'desactualizada' : (ev.status === 'orphaned' ? 'la cita ya no está en el texto' : ev.status));
     let detail = ev.file + ' · evidencia: ' + statusText;
     if (ev.status === 'stale') {
@@ -1445,6 +1504,10 @@ function plainSurface({ text, label, onChange, onSave }) {
     setEditable(editable) { area.readOnly = !editable; },
     isEditable: () => !area.readOnly,
     focus: () => area.focus(),
+    select(from, to) {
+      area.focus();
+      area.setSelectionRange(from, to);
+    },
     destroy() {},
   };
 }
@@ -1493,7 +1556,8 @@ function lineEndings(text) {
   return crlf === cr && crlf === lf ? 'crlf' : 'mixed';
 }
 
-function sceneEditor(book, scene, close, editorLib) {
+// onText runs after every change of the text, by the person or by loading a saved version.
+function sceneEditor(book, scene, close, editorLib, onText) {
   const file = scene.file;
   // The text as the field shows it: every line break as \n.
   const shown = (text) => text.replace(/\r\n?/g, '\n');
@@ -1565,6 +1629,7 @@ function sceneEditor(book, scene, close, editorLib) {
   function remember() {
     writeDraft(book, file, dirty() ? { base_blob: base, text: stored(area.getValue()) } : null);
     status.textContent = dirty() ? 'Cambios sin guardar' : 'Guardado';
+    if (onText) onText();
   }
 
   const showConflict = (current) => {
@@ -1631,7 +1696,449 @@ function sceneEditor(book, scene, close, editorLib) {
   const row = el('div', undefined, 'form-row actions');
   row.append(saveButton, closeEditor);
   box.append(mixedNote, normalise, area.dom, row, status, conflict);
+  // What the writing desk needs from the editor; saving stays inside this function.
+  box.editor = {
+    file,
+    dom: area.dom,
+    getValue: () => area.getValue(),
+    select: (from, to) => area.select(from, to),
+    base: () => base,
+    dirty,
+    // Loads the saved version the person asked for, as "Usar la versión guardada" does.
+    load(text, blob) {
+      load(text, blob);
+      writeDraft(book, file, null);
+      remember();
+    },
+    destroy() {
+      if (unsavedEdit === dirty) unsavedEdit = null;
+      area.destroy();
+    },
+  };
   return box;
+}
+
+// Modes (issue #101, docs/design.md "Modes"). Concentración and Ayuda RE;write show the
+// writing desk: one scene in the editor and, in Ayuda, the work waiting on that scene.
+// Revisión is the full review page. The desk is built once and never re-rendered by a
+// refresh or a decision, so switching modes keeps the text, the cursor and the selection.
+const MODES = [['focus', 'Concentración'], ['help', 'Ayuda RE;write'], ['review', 'Revisión']];
+let mode = 'review';
+let lastWritingMode = 'focus';
+let modeSwitch = null;
+let desk = null;
+// Opens a scene in the review's scene list (set by every render), for "Cerrar editor".
+let showSceneInReview = null;
+
+// The mode is kept in this browser under the same hash of the person as the editor view.
+function modeKey() {
+  return 'rewrite:mode:' + (personKey || '');
+}
+function readMode() {
+  try {
+    const saved = window.localStorage.getItem(modeKey());
+    return MODES.some(([id]) => id === saved) ? saved : 'review';
+  } catch {
+    return 'review';
+  }
+}
+
+function modeSwitchNode() {
+  if (!modeSwitch) {
+    const node = el('div', undefined, 'mode-switch');
+    node.setAttribute('role', 'group');
+    node.setAttribute('aria-label', 'Modo');
+    const buttons = MODES.map(([id, label]) => {
+      const choice = el('button', label);
+      choice.type = 'button';
+      choice.mode = id;
+      // A tap on the switch leaves the focus, and so the caret, in the text; where the
+      // browser moves it anyway, the switch gives it back.
+      let caret = false;
+      choice.addEventListener('pointerdown', () => { caret = Boolean(desk && desk.owns(document.activeElement)); });
+      choice.addEventListener('mousedown', (event) => event.preventDefault());
+      choice.addEventListener('click', () => {
+        const options = { caret: caret || Boolean(desk && desk.owns(document.activeElement)) };
+        caret = false;
+        return setMode(id, options).catch((error) => showError(error.message));
+      });
+      return choice;
+    });
+    node.append(...buttons);
+    modeSwitch = { node, buttons };
+  }
+  return modeSwitch.node;
+}
+
+// Shows a mode. options.file opens that scene in the desk (Editar escena), options.focus puts
+// the caret in it, options.caret says the caret was in the text when the person switched.
+async function setMode(next, options = {}) {
+  mode = next;
+  if (next !== 'review') lastWritingMode = next;
+  try {
+    window.localStorage.setItem(modeKey(), next);
+  } catch {
+    // No storage: the mode lasts while the page is open.
+  }
+  showMode(next);
+  // Concentración never shows the assistant on its own; its button stays one tap away.
+  if (next === 'focus' && assistant && typeof setAssistantOpen === 'function') setAssistantOpen(false, true);
+  if (next === 'review') {
+    // Hidden, the editor loses the focus; coming back gives the caret back where it was.
+    if (desk) desk.resume = Boolean(options.caret);
+    return;
+  }
+  const shown = ensureDesk();
+  const resume = shown.resume || options.caret;
+  shown.resume = false;
+  await shown.show(options.file, options.focus);
+  if (resume && !options.file) shown.focusEditor();
+}
+
+function ensureDesk() {
+  if (!desk) {
+    desk = createDesk();
+    app.append(desk.node);
+  }
+  return desk;
+}
+
+// The mode the page shows, which is not always the one chosen: without a book there is no desk.
+function showMode(shown) {
+  if (document.body && document.body.setAttribute) document.body.setAttribute('data-mode', shown);
+  if (modeSwitch) for (const choice of modeSwitch.buttons) choice.setAttribute('aria-pressed', String(choice.mode === shown));
+  if (desk) desk.sync();
+}
+
+const deskSceneName = (file) => String(file).replace(/^scenes\//, '').replace(/\.md$/, '');
+// Words as a writer counts them: letters and digits, with inner apostrophes and hyphens.
+const wordCount = (text) => (text.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) || []).length;
+// The scene's title is its first heading; a scene without one is named by its file.
+function sceneTitle(text, file) {
+  const heading = /^#{1,6}[ \t]+(.+?)[ \t#]*$/m.exec(text);
+  return heading ? heading[1] : deskSceneName(file);
+}
+
+// Where a quote is in the editor's text, which shows every line break as \n. A quote can
+// appear more than once: the one nearest to where it was found wins.
+function quoteRange(text, quote, near) {
+  const wanted = String(quote || '').replace(/\r\n?/g, '\n');
+  if (!wanted) return null;
+  let best = -1;
+  for (let at = text.indexOf(wanted); at !== -1; at = text.indexOf(wanted, at + 1)) {
+    if (best === -1 || (typeof near === 'number' && Math.abs(at - near) < Math.abs(best - near))) best = at;
+  }
+  return best === -1 ? null : { from: best, to: best + wanted.length };
+}
+
+function createDesk() {
+  const node = el('section', undefined, 'desk');
+  node.id = 'desk';
+  node.setAttribute('aria-label', 'Escritura');
+  const head = el('div', undefined, 'desk-head');
+  const scenes = el('div', undefined, 'desk-scenes');
+  // On a phone only the arrows show; the words stay for wider screens and for the name.
+  const prev = el('button', '‹');
+  prev.type = 'button';
+  prev.append(el('span', ' Anterior'));
+  prev.setAttribute('aria-label', 'Escena anterior');
+  const next = el('button');
+  next.type = 'button';
+  next.append(el('span', 'Siguiente '), document.createTextNode('›'));
+  next.setAttribute('aria-label', 'Escena siguiente');
+  const picker = el('select');
+  picker.setAttribute('aria-label', 'Escena');
+  scenes.append(prev, picker, next);
+  const title = el('h2', '', 'desk-title');
+  const words = el('p', '', 'meta desk-count');
+  head.append(scenes, title, words);
+  // Said when the open scene was saved somewhere else; the editor itself is never touched.
+  const banner = el('div', undefined, 'desk-banner');
+  const bannerText = el('p');
+  bannerText.setAttribute('role', 'status');
+  const bannerLoad = el('button', 'Cargar la versión guardada');
+  bannerLoad.type = 'button';
+  banner.append(bannerText, bannerLoad);
+  banner.hidden = true;
+  // Phones: the text and the help are two panes, one tap apart.
+  const panes = el('div', undefined, 'desk-panes');
+  panes.setAttribute('role', 'group');
+  panes.setAttribute('aria-label', 'Panel');
+  const textPane = el('button', 'Texto');
+  textPane.type = 'button';
+  const helpPane = el('button', 'Ayuda');
+  helpPane.type = 'button';
+  panes.append(textPane, helpPane);
+  const bodyBox = el('div', undefined, 'desk-body');
+  const slot = el('div', undefined, 'desk-editor');
+  const help = el('aside', undefined, 'desk-help');
+  help.setAttribute('aria-label', 'Ayuda para esta escena');
+  bodyBox.append(slot, help);
+  node.append(head, banner, panes, bodyBox);
+
+  const state = { book: null, file: null, scenes: [], editor: null, saved: null, pane: 'text', opening: 0, statsQueued: false };
+
+  const sceneKey = (book) => 'rewrite:desk-scene:' + (personKey || '') + ':' + book;
+  function rememberScene(book, file) {
+    try {
+      window.localStorage.setItem(sceneKey(book), file);
+    } catch {}
+  }
+  function rememberedScene(book) {
+    try {
+      return window.localStorage.getItem(sceneKey(book));
+    } catch {
+      return null;
+    }
+  }
+
+  function setPane(pane) {
+    state.pane = mode === 'help' ? pane : 'text';
+    node.setAttribute('data-pane', state.pane);
+    textPane.setAttribute('aria-pressed', String(state.pane === 'text'));
+    helpPane.setAttribute('aria-pressed', String(state.pane === 'help'));
+  }
+  textPane.addEventListener('click', () => setPane('text'));
+  helpPane.addEventListener('click', () => setPane('help'));
+
+  function fillPicker() {
+    picker.replaceChildren(...state.scenes.map((file) => {
+      const option = el('option', deskSceneName(file));
+      option.value = file;
+      option.selected = file === state.file;
+      return option;
+    }));
+    const at = state.scenes.indexOf(state.file);
+    prev.disabled = at <= 0;
+    next.disabled = at === -1 || at >= state.scenes.length - 1;
+  }
+  const step = (by) => () => {
+    const at = state.scenes.indexOf(state.file) + by;
+    if (at < 0 || at >= state.scenes.length) return undefined;
+    return open(state.scenes[at], false).catch((error) => showError(error.message));
+  };
+  prev.addEventListener('click', step(-1));
+  next.addEventListener('click', step(1));
+  picker.addEventListener('change', () => open(picker.value, false).catch((error) => showError(error.message)));
+
+  function updateStats() {
+    state.statsQueued = false;
+    if (!state.editor) return;
+    const text = state.editor.getValue();
+    title.textContent = sceneTitle(text, state.file);
+    const count = wordCount(text);
+    words.textContent = count.toLocaleString('es') + (count === 1 ? ' palabra' : ' palabras');
+    showBanner();
+  }
+  // Counting reads the whole text: at most once per pause in the typing.
+  function queueStats() {
+    if (state.statsQueued) return;
+    state.statsQueued = true;
+    setTimeout(updateStats, 150);
+  }
+
+  function showBanner() {
+    const editor = state.editor;
+    const changed = Boolean(editor && state.saved && state.saved.blob !== editor.base());
+    banner.hidden = !changed;
+    if (!changed) return;
+    const dirty = editor.dirty();
+    bannerText.textContent = 'Esta escena ha cambiado fuera de este editor. ' + (dirty
+      ? 'Tu texto sigue aquí sin guardar: al guardar podrás comparar las dos versiones.'
+      : 'Puedes cargar la versión guardada; no tienes cambios sin guardar.');
+    bannerLoad.hidden = dirty;
+  }
+  bannerLoad.addEventListener('click', () => {
+    if (!state.editor || !state.saved || state.editor.dirty()) return;
+    state.editor.load(state.saved.text, state.saved.blob);
+    showBanner();
+  });
+
+  function dropEditor() {
+    if (state.editor) state.editor.destroy();
+    state.editor = null;
+    state.saved = null;
+    banner.hidden = true;
+  }
+
+  // Opens a scene in the editor. Unsaved text of the scene left behind stays as its draft.
+  async function open(file, focus) {
+    const seq = ++state.opening;
+    const book = state.book;
+    dropEditor();
+    state.file = file;
+    rememberScene(book, file);
+    fillPicker();
+    title.textContent = deskSceneName(file);
+    words.textContent = '';
+    slot.replaceChildren(el('p', 'Cargando escena…', 'meta'));
+    let data;
+    try {
+      data = await api('/books/' + book + '/scenes/' + encodeURIComponent(file));
+    } catch (error) {
+      if (seq === state.opening) slot.replaceChildren(el('p', error.message, 'meta'));
+      return;
+    }
+    const lib = await loadEditorModule();
+    if (seq !== state.opening || book !== state.book) return;
+    const box = sceneEditor(book, data, () => closed(book, file), lib, queueStats);
+    state.box = box;
+    state.editor = box.editor;
+    state.saved = { blob: data.blob, text: data.text };
+    slot.replaceChildren(box);
+    updateStats();
+    renderHelp();
+    if (focus) box.focusEditor();
+  }
+
+  // "Cerrar editor": back to the review, at the scene that was open.
+  async function closed(book, file) {
+    state.editor = null;
+    state.file = null;
+    slot.replaceChildren();
+    await setMode('review');
+    if (showSceneInReview && book === selectedBook) await showSceneInReview(file);
+  }
+
+  // A quote of the help column: its text is selected in the editor and scrolled to.
+  async function reveal(file, quoteText, anchor) {
+    if (file !== state.file) await open(file, false);
+    if (!state.editor) return;
+    setPane('text');
+    const range = quoteRange(state.editor.getValue(), quoteText, anchor && typeof anchor.start === 'number' ? anchor.start : undefined);
+    if (!range) {
+      setPane('help');
+      helpStatus.textContent = 'No se encuentra la cita en el texto del editor: puede que la hayas cambiado.';
+      return;
+    }
+    helpStatus.textContent = '';
+    state.editor.select(range.from, range.to);
+  }
+
+  const helpStatus = el('p', '', 'meta help-status');
+  helpStatus.setAttribute('role', 'status');
+
+  // The work waiting on the open scene, from the book data the page already holds. Only
+  // Ayuda shows it: Concentración builds no card, so nothing to decide appears there.
+  function renderHelp() {
+    if (mode !== 'help' || !state.file || !latestQueue) {
+      help.replaceChildren();
+      helpPane.textContent = 'Ayuda';
+      return;
+    }
+    const data = latestQueue;
+    const book = state.book;
+    const file = state.file;
+    const reload = async () => {
+      if (book === selectedBook) await renderApp(book);
+    };
+    const proposals = data.proposals.filter((p) => p.proposal.file === file && (p.proposal.status === 'proposed' || decidedProposals.has(book + '/' + p.proposal.proposal_id)));
+    const findings = (data.finding_views || []).filter((f) => f.evidence.some((ev) => ev.file === file));
+    const problems = data.findings.filter((f) => f.citations.some((c) => c.source_file === file));
+    const claims = data.claims.filter((c) => c.source_file === file && (c.editorial_status === 'proposed' || decidedClaims.has(book + '/' + c.claim_id)));
+    const go = (target, quoteText, anchor) => reveal(target, quoteText, anchor).catch((error) => showError(error.message));
+    const groups = [
+      ['Cambios propuestos', proposals.map((p) => proposalCard(book, p, reload, 'session')), proposals.filter((p) => p.proposal.status === 'proposed').length],
+      ['Hallazgos de la trama', findings.map((f) => narrativeFindingCard(book, f, reload, (target, quoteText, anchor) => go(target, quoteText, anchor))), findings.filter((f) => !f.verdict).length],
+      ['Posibles problemas', problems.map((f) => {
+        const card = findingCard(book, f, reload);
+        const quotes = card.getElementsByTagName('blockquote');
+        f.citations.forEach((c, i) => { if (quotes[i]) clickable(quotes[i], () => go(c.source_file, c.quote, c.anchor)); });
+        return card;
+      }), problems.filter((f) => !f.verdict).length],
+      ['Afirmaciones por revisar', claims.map((c) => {
+        const card = claimCard(book, c, reload, true);
+        const quoteEl = card.getElementsByTagName('blockquote')[0];
+        if (quoteEl) clickable(quoteEl, () => go(c.source_file, c.anchor.quote, c.anchor));
+        return card;
+      }), claims.filter((c) => c.editorial_status === 'proposed').length],
+    ];
+    const heading = el('h2', 'Ayuda para esta escena');
+    const children = [heading];
+    if (assistant) {
+      const ask = el('button', 'Preguntar al asistente por esta escena', 'ask-scene');
+      ask.type = 'button';
+      ask.addEventListener('click', () => assistant.ask({ kind: 'scene', id: file, label: 'Escena: ' + deskSceneName(file) },
+        '¿Qué funciona en esta escena y qué no? Señálame dudas de motivación, consecuencias o conocimiento.', ask));
+      children.push(ask);
+    }
+    children.push(helpStatus);
+    let pending = 0;
+    for (const [name, cards, waiting] of groups) {
+      pending += waiting;
+      const group = el('section', undefined, 'help-group');
+      group.append(el('h3', name));
+      if (!cards.length) group.append(el('p', 'Nada en esta escena.', 'meta'));
+      // Its own ids: the same item can also be in the review, hidden behind the desk.
+      for (const card of cards) if (card.id) card.id = 'ayuda-' + card.id;
+      group.append(...cards);
+      children.push(group);
+    }
+    help.replaceChildren(...children);
+    helpPane.textContent = pending ? 'Ayuda (' + pending + ')' : 'Ayuda';
+  }
+
+  function emptyBook() {
+    dropEditor();
+    state.file = null;
+    fillPicker();
+    title.textContent = '';
+    words.textContent = '';
+    const toImport = el('button', 'Importar escenas en Revisión');
+    toImport.type = 'button';
+    toImport.addEventListener('click', async () => {
+      await setMode('review');
+      goToSection('importar');
+    });
+    slot.replaceChildren(el('p', 'Este libro aún no tiene escenas.', 'meta'), toImport);
+    renderHelp();
+  }
+
+  return {
+    node,
+    resume: false,
+    // The focused element is the editor's text (a CodeMirror content or the plain field).
+    owns: (element) => Boolean(element && state.editor && (element === state.editor.dom || (slot.contains && slot.contains(element)))),
+    focusEditor() {
+      if (state.editor && state.box) state.box.focusEditor();
+    },
+    sync() {
+      setPane(state.pane);
+      renderHelp();
+    },
+    // Called by every render and refresh with the book's data: only the help column and
+    // the scene list follow it. Another book closes the desk (its drafts stay in the tab).
+    update(book, data) {
+      if (book !== state.book) {
+        dropEditor();
+        state.book = book;
+        state.file = null;
+        slot.replaceChildren();
+      }
+      state.scenes = data.scenes || [];
+      fillPicker();
+      renderHelp();
+    },
+    async show(file, focus) {
+      if (state.book !== selectedBook) this.update(selectedBook, latestQueue || {});
+      const remembered = rememberedScene(state.book);
+      const wanted = file || state.file || remembered;
+      const target = state.scenes.includes(wanted) ? wanted : state.scenes[0];
+      if (!target) return emptyBook();
+      if (file || target !== state.file || !state.editor) return open(target, focus);
+      renderHelp();
+      return undefined;
+    },
+    // A poll: the saved version of the open scene, compared with the one the editor started from.
+    async checkScene() {
+      const editor = state.editor;
+      if (mode === 'review' || !editor) return;
+      const data = await api('/books/' + state.book + '/scenes/' + encodeURIComponent(state.file));
+      if (editor !== state.editor) return;
+      state.saved = { blob: data.blob, text: data.text };
+      showBanner();
+    },
+  };
 }
 
 function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
@@ -1704,12 +2211,8 @@ function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
       const textBox = el('div');
       textBox.append(pre);
       if (typeof data.blob === 'string') {
-        const edit = button('Editar escena', '', async () => {
-          edit.hidden = true;
-          const editor = sceneEditor(book, data, () => loadScene(canonical, highlight, true), await loadEditorModule());
-          textBox.replaceChildren(editor);
-          editor.focusEditor();
-        });
+        // The editor lives in the writing desk, so it survives every mode and every refresh.
+        const edit = button('Editar escena', '', () => setMode(lastWritingMode, { file: canonical, focus: true }));
         viewer.append(edit);
       }
       viewer.append(textBox);
@@ -1836,6 +2339,8 @@ async function renderApp(selectedBookId, selectedScene, highlight) {
   app.replaceChildren();
 
   if (!books.length) {
+    // No book, no scene to write: the page is the review whatever mode was chosen.
+    showMode('review');
     app.append(el('p', 'Tu cuenta todavía no tiene acceso a ningún libro. Crea uno para empezar:'));
     app.append(createBookSection(async (newId) => renderApp(newId)));
     return;
@@ -1860,18 +2365,20 @@ async function renderApp(selectedBookId, selectedScene, highlight) {
 
   const createBox = createBookSection(async (newId) => renderApp(newId));
   createBox.style.display = 'none';
-  const toggleBtn = button('Crear otro libro', '', () => {
+  const toggleBtn = button('Crear otro libro', 'create-toggle', () => {
     const open = createBox.style.display === 'none';
     createBox.style.display = open ? 'block' : 'none';
     toggleBtn.setAttribute('aria-expanded', String(open));
   });
   toggleBtn.setAttribute('aria-expanded', 'false');
-  toolbar.append(toggleBtn);
+  toolbar.append(toggleBtn, modeSwitchNode());
   const nav = sectionNav();
   const notice = el('p', undefined, 'notice');
   notice.setAttribute('role', 'status');
   notice.hidden = true;
   app.append(toolbar, createBox, nav.node, notice);
+  // The same desk, editor included, goes back into the page: a render never rebuilds it.
+  if (desk) app.append(desk.node);
   // A book that is gone or no longer shared is said in one line, never a silent switch.
   if (wanted && !found) {
     const gone = el('p', GONE_NOTICE + '«' + currentBookTitle + '».', 'notice');
@@ -1887,7 +2394,15 @@ async function renderApp(selectedBookId, selectedScene, highlight) {
   if (seq === renderSeq) {
     view = { book: currentBook, tag: state.tag, pending: null, sections: built.nodes, notice, nav };
     latestQueue = state.data;
+    showSceneInReview = (file) => built.openQuote(file);
     if (assistant) assistant.pageChanged();
+    showMode(mode);
+    if (mode !== 'review') {
+      ensureDesk().update(currentBook, state.data);
+      await desk.show();
+    } else if (desk) {
+      desk.update(currentBook, state.data);
+    }
     syncNav();
   }
   if (selectedScene) {
@@ -1899,11 +2414,11 @@ async function renderApp(selectedBookId, selectedScene, highlight) {
 // yet sent, or an open dialog (the account menu included). The assistant panel is
 // never re-rendered by a refresh, so its field does not count.
 function hasWorkInProgress() {
-  // An open scene editor is work in progress even when nothing is typed yet.
-  for (const box of app.getElementsByTagName('div')) if (box.className === 'scene-editor') return true;
   const active = document.activeElement;
   const inPanel = active && active.closest && active.closest('#assistant');
-  if (active && !inPanel && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return true;
+  // The scene editor lives in the writing desk, which a refresh never re-renders either.
+  const inEditor = desk && desk.owns(active);
+  if (active && !inPanel && !inEditor && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return true;
   if (document.querySelector('dialog[open], [role="dialog"], [aria-modal="true"]')) return true;
   for (const input of app.getElementsByTagName('input')) {
     if (input.type === 'file' ? input.files && input.files.length > 0 : input.value !== input.defaultValue) return true;
@@ -1939,6 +2454,7 @@ async function showRefreshed(current, data) {
   app.append(...built.nodes);
   current.sections = built.nodes;
   current.nav.setCounts(built.counts);
+  showSceneInReview = (file) => built.openQuote(file);
   const anchored = anchor && document.getElementById(anchor.id);
   if (anchored) window.scrollBy(0, anchored.getBoundingClientRect().top - anchor.top);
   else window.scrollTo(0, scrollY);
@@ -1947,6 +2463,7 @@ async function showRefreshed(current, data) {
   const refold = focusedFold && document.getElementById(focusedFold.id);
   if (refold && refold.fold) refold.fold.toggle.focus({ preventScroll: true });
   latestQueue = data;
+  if (desk) desk.update(current.book, data);
   if (assistant) assistant.pageChanged();
   syncNav();
   return true;
@@ -1967,7 +2484,9 @@ async function refreshOnce() {
       current.pending = state.data;
     }
     refreshDelay = REFRESH_MS;
-    if (!current.pending || actionsRunning > 0) return;
+    // The open scene of the desk: its editor is never touched, a banner says it changed.
+    if (desk) await desk.checkScene().catch(() => {});
+    if (current !== view || !current.pending || actionsRunning > 0) return;
     if (hasWorkInProgress()) {
       setNotice(current.notice, true);
       return;
@@ -2035,6 +2554,9 @@ window.addEventListener('load', async () => {
     }
     window.Clerk.mountUserButton(document.getElementById('user'));
     await rememberPerson();
+    mode = readMode();
+    if (mode !== 'review') lastWritingMode = mode;
+    showMode(mode);
     // Signing out (or another account) while the page is open.
     if (window.Clerk.addListener) {
       window.Clerk.addListener((resources) => {

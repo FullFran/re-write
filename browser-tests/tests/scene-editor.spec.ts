@@ -18,6 +18,8 @@ function commitScene(book: Book, file: string, text: string): void {
 
 async function openEditor(page: Page, book: Book, file = SCENE): Promise<void> {
   await page.goto(`${book.base}/review`);
+  // The page opens in the mode chosen last; the scene list is in Revisión (docs/design.md, "Modes").
+  await page.getByRole('group', { name: 'Modo' }).getByRole('button', { name: 'Revisión', exact: true }).click();
   await page.getByRole('navigation', { name: 'Secciones' }).getByRole('link', { name: 'Navegar escenas', exact: true }).click();
   await page.getByRole('button', { name: file, exact: true }).click();
   await page.getByRole('button', { name: 'Editar escena' }).click();
