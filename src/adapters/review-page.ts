@@ -2485,8 +2485,9 @@ function watchKeyboard() {
     const open = typing && vv.height < tallest.height * 0.75;
     document.body.classList.toggle('keyboard-open', open);
     document.documentElement.style.setProperty('--vv-top', open ? Math.max(0, vv.offsetTop) + 'px' : '0px');
-    // Only a change of size moves the page: following its own scroll would fight the person.
-    if (typing && (!event || event.type !== 'scroll')) desk.keepCaretVisible();
+    // Only the keyboard resizing the screen moves the page: following its own scroll, or any
+    // other resize (a scrollbar appearing on a desktop), would fight the person.
+    if (open && event && event.type === 'resize') desk.keepCaretVisible();
   };
   vv.addEventListener('resize', update);
   vv.addEventListener('scroll', update);

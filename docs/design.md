@@ -205,7 +205,8 @@ in the same page and over the same text:
 - **The phone keyboard.** While the text has the focus and the visual viewport is under 75% of
   the tallest seen at that width, the body gets `.keyboard-open`: the dock and the floating
   assistant button give way, `--vv-top` keeps the editor's head at the top of what is visible,
-  and each resize scrolls the caret back between the head and the keyboard (`visualViewport`).
+  and each resize while the keyboard is open scrolls the caret back between the head and the
+  keyboard (`visualViewport`); no other resize or scroll moves the page.
   What emulation cannot show is listed in `docs/review-checklist.md`, section 14.
 - **The writing desk** (`#desk`, a `section` labelled **Escritura**) is built once and moved
   back into the page by every render: a decision, a refresh or a mode change never rebuilds

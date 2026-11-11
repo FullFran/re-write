@@ -180,3 +180,16 @@ for (const size of [{ width: 360, height: 740 }, { width: 390, height: 844 }]) {
     expect(errors).toEqual([]);
   });
 }
+
+test('desktop: a resize that is no keyboard (a scrollbar, a narrower window) never scrolls the page back to the caret', async ({ page, book }) => {
+  await page.setViewportSize({ width: 1280, height: 500 });
+  await openDesk(page, book);
+  await caretAtLine(page, 0);
+  await page.evaluate(() => window.scrollTo(0, 300));
+  const before = await page.evaluate(() => window.scrollY);
+  expect(before).toBeGreaterThan(0);
+  await page.setViewportSize({ width: 1260, height: 500 });
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  expect(await page.evaluate(() => window.scrollY)).toBe(before);
+  await expect(page.locator('body')).not.toHaveClass(/keyboard-open/);
+});
