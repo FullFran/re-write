@@ -1,0 +1,112 @@
+{
+  "id": "retried-proposal",
+  "title": "Retry a proposal",
+  "guarantee": "A retried proposal is not duplicated.",
+  "book": { "id": "sal", "title": "La puerta de Sal", "scenes": ["fixtures/demo-book/escena-01.md", "fixtures/demo-book/escena-02.md"] },
+  "steps": [
+    {
+      "id": "claim",
+      "do": "call",
+      "tool": "propose_claims",
+      "args": {
+        "book": "sal",
+        "extractor": "scripted-agent",
+        "candidates": [{
+          "statement": "Elena has guarded the Salt bridge for eleven years.",
+          "subject": "Elena",
+          "source_file": "scenes/escena-01.md",
+          "quote": "Elena llevaba once años custodiando el puente de Sal",
+          "scope": "book",
+          "epistemic_kind": "narrated_fact"
+        }]
+      }
+    },
+    {
+      "id": "finding",
+      "do": "call",
+      "tool": "propose_findings",
+      "args": {
+        "book": "sal",
+        "findings": [{
+          "question": "knowledge",
+          "kind": "fact",
+          "statement": "Elena says where the key is.",
+          "evidence": [{ "file": "scenes/escena-01.md", "quote": "La llave está bajo la losa del altar" }]
+        }]
+      }
+    },
+    {
+      "id": "revision",
+      "do": "call",
+      "tool": "propose_revision",
+      "args": { "book": "sal", "file": "scenes/escena-01.md", "find": "once años", "replace": "doce años", "rationale": "Match the chronology." }
+    },
+    {
+      "id": "first",
+      "do": "book_state",
+      "checks": [
+        { "name": "the first round stores one claim", "path": "first.claims.length", "equals": 1 },
+        { "name": "the first round stores one finding", "path": "first.findings", "equals": 1 },
+        { "name": "the first round stores one revision", "path": "first.proposals", "equals": 1 }
+      ]
+    },
+    {
+      "id": "claim_again",
+      "do": "call",
+      "tool": "propose_claims",
+      "args": {
+        "book": "sal",
+        "extractor": "scripted-agent",
+        "candidates": [{
+          "statement": "Elena has guarded the Salt bridge for eleven years.",
+          "subject": "Elena",
+          "source_file": "scenes/escena-01.md",
+          "quote": "Elena llevaba once años custodiando el puente de Sal",
+          "scope": "book",
+          "epistemic_kind": "narrated_fact"
+        }]
+      },
+      "checks": [
+        { "name": "the retried claim creates nothing", "path": "claim_again.data.created", "equals": [] },
+        { "name": "the retried claim is reported as existing", "path": "claim_again.data.existing", "equals": { "ref": "claim.data.created" } }
+      ]
+    },
+    {
+      "id": "finding_again",
+      "do": "call",
+      "tool": "propose_findings",
+      "args": {
+        "book": "sal",
+        "findings": [{
+          "question": "knowledge",
+          "kind": "fact",
+          "statement": "Elena says where the key is.",
+          "evidence": [{ "file": "scenes/escena-01.md", "quote": "La llave está bajo la losa del altar" }]
+        }]
+      },
+      "checks": [
+        { "name": "the retried finding creates nothing", "path": "finding_again.data.created", "equals": [] },
+        { "name": "the retried finding is reported as existing", "path": "finding_again.data.existing", "equals": { "ref": "finding.data.created" } }
+      ]
+    },
+    {
+      "id": "revision_again",
+      "do": "call",
+      "tool": "propose_revision",
+      "args": { "book": "sal", "file": "scenes/escena-01.md", "find": "once años", "replace": "doce años", "rationale": "Match the chronology." },
+      "checks": [
+        { "name": "the retried revision is not an error", "path": "revision_again.is_error", "equals": false }
+      ]
+    },
+    {
+      "id": "second",
+      "do": "book_state",
+      "checks": [
+        { "name": "there is still one claim", "path": "second.claims.length", "equals": 1 },
+        { "name": "there is still one finding", "path": "second.findings", "equals": 1 },
+        { "name": "there is still one revision", "path": "second.proposals", "equals": 1 },
+        { "name": "the retries add no commit", "path": "second.commits", "equals": { "ref": "first.commits" } }
+      ]
+    }
+  ]
+}

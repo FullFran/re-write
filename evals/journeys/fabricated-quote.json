@@ -1,0 +1,58 @@
+{
+  "id": "fabricated-quote",
+  "title": "Propose a claim and a finding with a fabricated quote",
+  "guarantee": "A fabricated quote never reaches the book.",
+  "book": { "id": "sal", "title": "La puerta de Sal", "scenes": ["fixtures/demo-book/escena-01.md", "fixtures/demo-book/escena-02.md"] },
+  "steps": [
+    { "id": "before", "do": "book_state" },
+    {
+      "id": "claim",
+      "do": "call",
+      "tool": "propose_claims",
+      "args": {
+        "book": "sal",
+        "extractor": "scripted-agent",
+        "candidates": [{
+          "statement": "Elena burned the bridge.",
+          "subject": "Elena",
+          "source_file": "scenes/escena-01.md",
+          "quote": "Elena prendió fuego al puente de Sal",
+          "scope": "book",
+          "epistemic_kind": "narrated_fact"
+        }]
+      },
+      "checks": [
+        { "name": "the fabricated claim is not created", "path": "claim.data.created", "equals": [] },
+        { "name": "the agent is told the quote was not found", "path": "claim.data.rejected.0.reason", "matches": "not found" }
+      ]
+    },
+    {
+      "id": "finding",
+      "do": "call",
+      "tool": "propose_findings",
+      "args": {
+        "book": "sal",
+        "findings": [{
+          "question": "motivation",
+          "kind": "fact",
+          "statement": "Elena burned the bridge out of spite.",
+          "evidence": [{ "file": "scenes/escena-01.md", "quote": "Elena prendió fuego al puente de Sal" }]
+        }]
+      },
+      "checks": [
+        { "name": "the fabricated finding is refused", "path": "finding.is_error", "equals": true },
+        { "name": "the agent is told the quote is not literal", "path": "finding.text", "matches": "quote not literal" }
+      ]
+    },
+    {
+      "id": "after",
+      "do": "book_state",
+      "checks": [
+        { "name": "no claim was stored", "path": "after.claims", "equals": [] },
+        { "name": "no finding was stored", "path": "after.findings", "equals": 0 },
+        { "name": "the book has no new commit", "path": "after.commits", "equals": { "ref": "before.commits" } },
+        { "name": "the manuscript is untouched", "path": "after.scenes", "equals": { "ref": "before.scenes" } }
+      ]
+    }
+  ]
+}

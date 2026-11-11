@@ -1,0 +1,50 @@
+{
+  "id": "onboarding",
+  "title": "Follow /llms.txt and connect",
+  "guarantee": "The onboarding text leads to tool calls the harness really offers.",
+  "book": { "id": "sal", "title": "La puerta de Sal", "scenes": ["fixtures/demo-book/escena-01.md", "fixtures/demo-book/escena-02.md"] },
+  "steps": [
+    {
+      "id": "guide",
+      "do": "read_onboarding",
+      "checks": [
+        { "name": "the guide says only a person accepts", "path": "guide.text", "contains": "The agent can propose, but cannot accept or reject anything." },
+        { "name": "the guide starts with list_books, list_scenes and read_scene", "path": "guide.first_calls", "equals": ["list_books", "list_scenes", "read_scene"] }
+      ]
+    },
+    {
+      "id": "tools",
+      "do": "list_tools",
+      "checks": [
+        { "name": "every advertised tool is offered, and nothing else", "path": "tools.names", "equals": { "ref": "guide.advertised_tools" } }
+      ]
+    },
+    {
+      "id": "books",
+      "do": "call",
+      "tool": "list_books",
+      "checks": [
+        { "name": "list_books shows the book the person can open", "path": "books.data.books", "equals": [{ "book_id": "sal", "title": "La puerta de Sal" }] }
+      ]
+    },
+    {
+      "id": "scenes",
+      "do": "call",
+      "tool": "list_scenes",
+      "args": { "book": "sal" },
+      "checks": [
+        { "name": "list_scenes lists the imported scenes", "path": "scenes.data.scenes", "equals": ["scenes/escena-01.md", "scenes/escena-02.md"] }
+      ]
+    },
+    {
+      "id": "scene",
+      "do": "call",
+      "tool": "read_scene",
+      "args": { "book": "sal", "file": "scenes/escena-01.md" },
+      "checks": [
+        { "name": "read_scene returns the manuscript text", "path": "scene.data.text", "contains": "Elena llevaba once años custodiando el puente de Sal" },
+        { "name": "read_scene is not an error", "path": "scene.is_error", "equals": false }
+      ]
+    }
+  ]
+}

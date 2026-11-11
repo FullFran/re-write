@@ -1,0 +1,90 @@
+{
+  "id": "stale-evidence",
+  "title": "Edit a scene and re-read",
+  "guarantee": "Stale evidence never looks current.",
+  "book": { "id": "sal", "title": "La puerta de Sal", "scenes": ["fixtures/demo-book/escena-01.md", "fixtures/demo-book/escena-02.md"] },
+  "steps": [
+    {
+      "id": "propose",
+      "do": "call",
+      "tool": "propose_claims",
+      "args": {
+        "book": "sal",
+        "extractor": "scripted-agent",
+        "candidates": [{
+          "statement": "The key lies under the altar slab.",
+          "subject": "the key",
+          "source_file": "scenes/escena-01.md",
+          "quote": "La llave está bajo la losa del altar",
+          "scope": "book",
+          "epistemic_kind": "narrated_fact"
+        }]
+      }
+    },
+    {
+      "id": "finding",
+      "do": "call",
+      "tool": "propose_findings",
+      "args": {
+        "book": "sal",
+        "findings": [{
+          "question": "knowledge",
+          "kind": "fact",
+          "statement": "Elena says where the key is.",
+          "evidence": [{ "file": "scenes/escena-01.md", "quote": "La llave está bajo la losa del altar" }]
+        }]
+      }
+    },
+    {
+      "id": "fresh",
+      "do": "call",
+      "tool": "list_claims",
+      "args": { "book": "sal" },
+      "checks": [
+        { "name": "the evidence starts valid", "path": "fresh.data.claims.*.evidence_status", "equals": ["valid"] }
+      ]
+    },
+    {
+      "id": "accepted",
+      "do": "person_reviews_claim",
+      "claim_id": { "ref": "propose.data.created.0" },
+      "decision": "accept",
+      "checks": [
+        { "name": "the person accepts the claim while its evidence holds", "path": "accepted.editorial_status", "equals": "accepted" }
+      ]
+    },
+    {
+      "id": "edit",
+      "do": "person_edits_scene",
+      "file": "scenes/escena-01.md",
+      "find": "—No fue Bruno —dijo Elena—. La llave",
+      "replace": "Elena mintió: La llave"
+    },
+    {
+      "id": "claims",
+      "do": "call",
+      "tool": "list_claims",
+      "args": { "book": "sal" },
+      "checks": [
+        { "name": "the claim is reported stale after the edit", "path": "claims.data.claims.*.evidence_status", "equals": ["stale"] },
+        { "name": "the reason is the changed context", "path": "claims.data.claims.*.evidence_reason", "equals": ["context_changed"] }
+      ]
+    },
+    {
+      "id": "findings",
+      "do": "call",
+      "tool": "list_findings",
+      "args": { "book": "sal" },
+      "checks": [
+        { "name": "the finding is reported stale after the edit", "path": "findings.data.findings.*.evidence_status", "equals": ["stale"] }
+      ]
+    },
+    {
+      "id": "book",
+      "do": "book_state",
+      "checks": [
+        { "name": "an accepted claim with stale evidence leaves canon", "path": "book.canon", "equals": [] }
+      ]
+    }
+  ]
+}
