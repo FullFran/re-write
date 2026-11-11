@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { evaluate as evaluateAuthority, type Check, type Denial, type Grant } from '../../../src/hcs/authority.ts';
 import { readCatalog, type CatalogManifest } from '../../../src/hcs/catalog.ts';
+import { validateDecisionRecord } from '../../../src/hcs/decision-records.ts';
 import { HcsFailure } from '../../../src/hcs/errors.ts';
 import type { HostProfile } from '../../../src/hcs/host.ts';
 import { validateEntryStatus } from '../../../src/hcs/lifecycle.ts';
@@ -40,6 +41,9 @@ const runners: Record<string, (value: HcsCase) => void> = {
   },
   'document urn:hcs:schema:hcs-0004:lifecycle:0.1': value => {
     assert.equal(validateEntryStatus(value.input).length === 0 ? 'valid' : 'invalid', value.expect.outcome);
+  },
+  'document urn:hcs:schema:hcs-0005:authority:0.1#/$defs/decisionRecord': value => {
+    assert.equal(validateDecisionRecord(value.input).length === 0 ? 'valid' : 'invalid', value.expect.outcome);
   },
   integrity: value => {
     const { entry, contentBase64, maxUncompressedBytes } = value.input as { entry: PackageExpected; contentBase64: string; maxUncompressedBytes?: number };
