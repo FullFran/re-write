@@ -216,6 +216,43 @@ test('each rejected claim carries the next step of its own error, as a tool erro
   }
 });
 
+test('propose_findings returns only the findings of its own call, however many the book already has', async (t) => {
+  const finding = (statement: string) => ({ question: 'knowledge', kind: 'fact', statement, evidence: [{ file: SCENE, quote: UNIQUE }] });
+  const submit = async (client: Client, findings: object[]) => {
+    const result = await call(client, 'propose_findings', { book: 'sal', findings });
+    assert.deepEqual(result.structuredContent, JSON.parse(result.content[0].text));
+    return result.structuredContent;
+  };
+  const empty = await connect(REVIEW_URL);
+  const seeded = await connect(REVIEW_URL);
+  try {
+    const alone = await submit(empty, [finding('El guardia repite un rumor.')]);
+    const unrelated = await submit(seeded, Array.from({ length: 40 }, (_, i) => finding(`Hallazgo ajeno ${i}.`)));
+    assert.equal(unrelated.created.length, 40);
+
+    const fresh = await submit(seeded, [finding('El guardia repite un rumor.')]);
+    assert.equal(fresh.created.length, 1);
+    // The response does not grow with the book: same size as the same call on a book with no findings.
+    const bytes = (data: object) => Buffer.byteLength(JSON.stringify(data));
+    t.diagnostic(`propose_findings response: ${bytes(fresh)} bytes with 40 findings in the book, ${bytes(alone)} with none`);
+    assert.ok(bytes(fresh) <= bytes(alone) + 64, `${bytes(fresh)} bytes against ${bytes(alone)}`);
+    assert.deepEqual(fresh.findings.map((f: any) => f.finding_id), fresh.created);
+    assert.equal(fresh.review_url, REVIEW_URL);
+
+    const retried = await submit(seeded, [finding('El guardia repite un rumor.'), finding('Hallazgo ajeno 7.')]);
+    assert.deepEqual(retried.created, []);
+    assert.deepEqual(retried.existing, [fresh.created[0], unrelated.created[7]]);
+    assert.deepEqual(retried.findings.map((f: any) => f.finding_id), retried.existing);
+    assert.equal(retried.findings[0].evidence[0].quote, UNIQUE);
+
+    // list_findings still reads the whole book.
+    assert.equal((await call(seeded, 'list_findings', { book: 'sal', limit: 200 })).structuredContent.total, 41);
+  } finally {
+    await empty.close();
+    await seeded.close();
+  }
+});
+
 let h: Harness;
 test('the served MCP gives the absolute review URL built from the configured origin', async (t) => {
   h = await startHarness();

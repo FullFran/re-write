@@ -346,7 +346,12 @@ export function buildMcpServer(library: Library, subject: string, capabilities: 
       book,
       findings: z.array(findingCandidateSchema).min(1).max(50).describe('Up to 50 findings, each with at least one literal quote'),
     },
-    outputSchema: resultSchema({ created: z.array(z.string()), existing: z.array(z.string()), findings: z.array(item), ...toReview }),
+    outputSchema: resultSchema({
+      created: z.array(z.string()),
+      existing: z.array(z.string()),
+      findings: z.array(item).describe('The findings of this call only, created or existing; list_findings gives the rest of the book'),
+      ...toReview,
+    }),
     annotations: proposing,
   }, (args) => data(() => ({
     ...library.open(args.book, subject).proposeFindings(args.findings as FindingCandidate[], subject),

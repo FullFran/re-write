@@ -336,19 +336,24 @@ export class Project {
     }
 
     if (created.length) this.git.commit(`rewrite: propose ${created.length} findings`, [STATE_DIR]);
-    return { created, existing, findings: this.findingViews() };
+    // Only this call's findings, in the order submitted, so the response does not grow with the book;
+    // list_findings reads the rest.
+    const own = [...new Set(candidates.map(findingId))].map((id) => this.findings.get(id)!);
+    return { created, existing, findings: own.map((f) => this.findingView(f)) };
   }
 
   findingViews(): FindingView[] {
-    return this.findings.all().map((f) => {
-      const view = viewFinding(
-        f,
-        (file) => this.readScene(file),
-        (rev, file) => this.git.showAt(rev, file),
-      );
-      const verdict = this.verdicts.get(f.finding_id);
-      return verdict ? { ...view, verdict } : view;
-    });
+    return this.findings.all().map((f) => this.findingView(f));
+  }
+
+  private findingView(f: FindingRecord): FindingView {
+    const view = viewFinding(
+      f,
+      (file) => this.readScene(file),
+      (rev, file) => this.git.showAt(rev, file),
+    );
+    const verdict = this.verdicts.get(f.finding_id);
+    return verdict ? { ...view, verdict } : view;
   }
 
   /** Stores a change for review. It never writes to the scene. */
