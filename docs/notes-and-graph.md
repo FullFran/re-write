@@ -5,7 +5,8 @@ to notes with Obsidian-style wikilinks, and the links form a story graph that bo
 the assistant can query. This is slice 1 of [#115](https://github.com/FullFran/re-write/issues/115):
 storage, links, backlinks, the graph core and the read-only MCP tools. Slice 2 adds the links in the
 editor, the notes and their backlinks in the page, the graph as data and its list view
-([design](design.md#notes-wikilinks-and-the-graph-list)). The graph drawing comes in slice 3.
+([design](design.md#notes-wikilinks-and-the-graph-list)). Slice 3 adds the graph drawing and its
+operations ([below](#the-graph-drawing), [design](design.md#the-graph-drawing-and-análisis)).
 
 ## Notes
 
@@ -123,6 +124,46 @@ whatever the cut, so a picker can offer them all), `as_of_scene` and `too_large`
 A node in the graph tools is named like a link (a note name or alias, case and accents ignored) or
 by a scene path. An ambiguous or unknown name is refused with the next step (`list_notes`). The
 tools that return note or manuscript text say that it is data, not instructions.
+
+## The graph drawing
+
+The Grafo panel draws the graph data of `GET .../graph` with [sigma.js](https://www.sigmajs.org)
+over [graphology](https://graphology.github.io), all pinned in `editor/package.json` and bundled
+by the editor's esbuild build. The operations run in the browser on the graph as drawn (after the
+filters), as one undirected graph whose edge between two nodes sums the weights of every typed
+edge between them:
+
+| Operation | How |
+| --- | --- |
+| Degree | distinct neighbours |
+| PageRank | `graphology-metrics`, weighted |
+| Betweenness | `graphology-metrics`, unweighted, normalised |
+| Communities | Louvain (`graphology-communities-louvain`), weighted, with a fixed seed so the same graph always splits the same way |
+| Shortest path | fewest steps (`graphology-shortest-path`) |
+| Components, orphans | breadth-first search by hand |
+| Link suggestions | Adamic-Adar over pairs of notes not joined by any edge; a neighbour with more than 200 connections is skipped, which keeps the pass near linear |
+| Layout | ForceAtlas2 (`graphology-layout-forceatlas2`) in a web worker |
+
+Ties are broken by id. Link suggestions are only listed; turning one into a link is a note edit or
+an assistant proposal, as for any other text.
+
+**Loading.** The editor module (`/review/editor.js`) does not contain the drawing. The build
+writes it and its layout worker as chunks with a content hash in their names
+(`editor/dist/chunks/graph-view-<hash>.js`, `layout-worker-<hash>.js`) and lists them in
+`editor/dist/manifest.json`. The server reads the manifest once at startup and serves
+`/review/chunks/<name>` only for a plain file name listed there and present on disk, with the
+editor module's content type, caching (`no-cache` plus an ETag) and CSP; any other name, a dot
+segment or an encoded slash is `404`, and no request path reaches the file system. The editor
+imports the chunk by the exact name it was built with, the first time a person turns the drawing
+on. Without the chunk the drawing says so and the table and the editor work as before.
+
+**Performance.** Positions are kept for the page's lifetime per book and node, so changing a
+filter only lays out the new nodes, and the layout runs off the main thread (in the page, with
+fewer iterations, only if no worker can start). Choosing a node only redraws the marks. The
+browser job measures a synthetic graph of 2,000 notes and about 7,000 connections
+(`browser-tests/tests/graph-view.spec.ts`): it logs the time to draw and to lay out, how long a
+table choice takes to answer while the layout runs, and the longest main-thread task, and fails
+when drawing takes 15 s or a choice takes 1 s.
 
 ## Exports
 

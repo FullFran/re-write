@@ -196,7 +196,8 @@ test('desktop: Notas lists the notes by type in both writing modes, and Grafo is
   // Scenes on request, and the graph as of the first scene leaves the second out.
   await page.getByRole('checkbox', { name: 'Mostrar escenas' }).check();
   await expect.poll(async () => (await names()).length).toBe(5);
-  await page.getByRole('combobox', { name: 'Hasta' }).selectOption(SCENE);
+  await page.getByRole('slider', { name: 'Hasta la escena' }).focus();
+  await page.keyboard.press('Home');
   await expect.poll(names).toEqual(['Brújula', 'Elena', 'escena-01', 'Puerto de Sal']);
   await expect(table.getByRole('row', { name: /^Elena/ })).toContainText('Personaje21');
 
