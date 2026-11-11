@@ -6,7 +6,8 @@ import { connect as connectSocket } from 'node:net';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { CredentialVault } from '../src/adapters/engine-auth.ts';
-import { ENGINE_CSS, ENGINE_JS } from '../src/adapters/engine-page.ts';
+import { ASSISTANT_CSS, ASSISTANT_JS } from '../src/adapters/engine-page.ts';
+import { REVIEW_CSS, REVIEW_JS } from '../src/adapters/review-page.ts';
 import { readConfig } from '../src/adapters/http-server.ts';
 import { parseSse, startEngineHarness, until, type EngineHarness, type SseEvent } from './fixtures/engine/harness.ts';
 import { tempDir } from './helpers.ts';
@@ -137,7 +138,7 @@ test('a prompt streams the answer as server-sent events', async (t) => {
   const token = await connect(eh);
   assert.deepEqual(await turn(eh, token, 'echo hola'), [
     { event: 'delta', data: { text: 'hola' } },
-    { event: 'tool', data: { name: 'list_books', ok: true } },
+    { event: 'tool', data: { name: 'list_books', phase: 'end', ok: true } },
     { event: 'done', data: { aborted: false } },
   ]);
   assert.equal((await eh.api('POST', '/prompt', token, { text: '' })).status, 400);
@@ -387,19 +388,25 @@ test('server shutdown stops every process and revokes every token', async (t) =>
   assert.equal((await eh.api('POST', '/prompt', token, { text: 'echo hi' })).status, 503);
 });
 
-test('the server serves the page and its assets with the review page policy when the engine is on', async (t) => {
+test('the old assistant page opens the panel in the review page, and the review assets carry the panel only with the engine on', async (t) => {
   const eh = await startEngineHarness();
   t.after(eh.close);
-  const html = await fetch(`${eh.base}/review/engine`);
-  assert.equal(html.status, 200);
-  assert.match(html.headers.get('content-type') ?? '', /^text\/html/);
-  assert.match(html.headers.get('content-security-policy') ?? '', /default-src 'none'/);
-  assert.equal(html.headers.get('x-content-type-options'), 'nosniff');
-  assert.match(await html.text(), /\/review\/engine\/app\.js/);
-  assert.equal(await (await fetch(`${eh.base}/review/engine/app.js`)).text(), ENGINE_JS);
-  assert.equal(await (await fetch(`${eh.base}/review/engine/app.css`)).text(), ENGINE_CSS);
-  assert.equal((await fetch(`${eh.base}/review/engine/other`)).status, 404);
+  const old = await fetch(`${eh.base}/review/engine`, { redirect: 'manual' });
+  assert.equal(old.status, 302);
+  assert.equal(old.headers.get('location'), '/review?asistente=1');
+  for (const path of ['/review/engine/app.js', '/review/engine/app.css', '/review/engine/other']) {
+    assert.equal((await fetch(`${eh.base}${path}`)).status, 404, path);
+  }
+  const js = await fetch(`${eh.base}/review/app.js`);
+  assert.match(js.headers.get('content-security-policy') ?? '', /default-src 'none'/);
+  assert.equal(await js.text(), REVIEW_JS + ASSISTANT_JS);
+  assert.equal(await (await fetch(`${eh.base}/review/app.css`)).text(), REVIEW_CSS + ASSISTANT_CSS);
   assert.deepEqual(eh.received(), [], 'serving the page starts no process');
+
+  const off = await startHarness();
+  t.after(off.close);
+  assert.equal(await (await fetch(`${off.base}/review/app.js`)).text(), REVIEW_JS);
+  assert.equal(await (await fetch(`${off.base}/review/app.css`)).text(), REVIEW_CSS);
 });
 
 // --- Correction batch: slots, turn bounds, refresh against stop, the Host rule, shutdown ---
@@ -642,16 +649,16 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   });
 }
 
-test('the review page links to the assistant page only when the engine is enabled', async (t) => {
-  const link = 'href="/review/engine"';
+test('the review page carries the assistant panel only when the engine is enabled', async (t) => {
+  const marker = '<body data-assistant>';
   const off = await startHarness();
   t.after(off.close);
   const plain = await fetch(`${off.base}/review`);
   assert.equal(plain.status, 200);
-  assert.ok(!(await plain.text()).includes(link));
+  assert.ok(!(await plain.text()).includes(marker));
   const eh = await startEngineHarness();
   t.after(eh.close);
   const page = await fetch(`${eh.base}/review`);
   assert.equal(page.status, 200);
-  assert.ok((await page.text()).includes(link));
+  assert.ok((await page.text()).includes(marker));
 });

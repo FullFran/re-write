@@ -252,8 +252,9 @@ export class EngineManager {
   /**
    * Runs one turn. Refusals are thrown before anything is streamed; after that every
    * outcome, failures included, arrives through the sink. Resolves when the turn ends.
+   * `context` is the host line the engine program puts before the writer's text.
    */
-  prompt(subject: string, text: string, systemPrompt: string, sink: TurnSink): Promise<void> {
+  prompt(subject: string, text: string, systemPrompt: string, sink: TurnSink, context?: string): Promise<void> {
     if (this.closed) throw new EngineError('engine_unavailable');
     if (this.people.get(subject)?.proc?.turn) throw new EngineError('turn_in_progress');
     if (!this.hasCredential(subject)) throw new EngineError('not_connected');
@@ -270,7 +271,7 @@ export class EngineManager {
       const timeout = setTimeout(() => this.limitTurn(person, proc), this.settings.turnTimeoutMs);
       timeout.unref();
       proc.turn = { sink, end: resolve, bytes: 0, limited: false, timeout };
-      this.send(proc, { type: 'prompt', text });
+      this.send(proc, { type: 'prompt', text, ...(context === undefined ? {} : { context }) });
       this.touch(person, proc);
     });
   }
@@ -439,7 +440,12 @@ export class EngineManager {
       }
       case 'tool':
         if (proc.toolsChecked && proc.turn && !proc.turn.limited) {
-          proc.turn.sink.event('tool', { name: message.name.replace(MCP_TOOL_PREFIX, ''), ok: message.ok });
+          // Only fields the protocol parser validated; the page labels the step from them.
+          const { name, phase, ok, call, scene, count } = message;
+          proc.turn.sink.event('tool', {
+            name: name.replace(MCP_TOOL_PREFIX, ''), phase, ...(phase === 'end' ? { ok } : {}),
+            ...(call === undefined ? {} : { call }), ...(scene === undefined ? {} : { scene }), ...(count === undefined ? {} : { count }),
+          });
         }
         return;
       case 'done':
