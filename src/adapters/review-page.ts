@@ -312,8 +312,9 @@ function button(label, className, run) {
       await run();
     } catch (error) {
       showError(error.message);
-      node.disabled = false;
     } finally {
+      // Not every action re-renders the page: a button that stays must work again.
+      node.disabled = false;
       actionsRunning--;
     }
   });
@@ -1038,8 +1039,11 @@ async function renderApp(selectedBookId, selectedScene, highlight) {
   const createBox = createBookSection(async (newId) => renderApp(newId));
   createBox.style.display = 'none';
   const toggleBtn = button('Crear otro libro', '', () => {
-    createBox.style.display = createBox.style.display === 'none' ? 'block' : 'none';
+    const open = createBox.style.display === 'none';
+    createBox.style.display = open ? 'block' : 'none';
+    toggleBtn.setAttribute('aria-expanded', String(open));
   });
+  toggleBtn.setAttribute('aria-expanded', 'false');
   toolbar.append(toggleBtn);
   const notice = el('p', undefined, 'notice');
   notice.setAttribute('role', 'status');
