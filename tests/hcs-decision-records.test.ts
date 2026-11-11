@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, statSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { DECISIONS_FILE, readDecisionRecords, validateDecisionRecord, writeDecisionRecord } from '../src/hcs/decision-records.ts';
+import { DECISIONS_FILE, readDecisionLog, readDecisionRecords, validateDecisionRecord, writeDecisionRecord } from '../src/hcs/decision-records.ts';
 import { tempDir } from './helpers.ts';
 
 const record = {
@@ -71,4 +71,21 @@ test('the writer refuses a record that does not validate and reports a store it 
   assert.deepEqual(readDecisionRecords(dir), []);
   mkdirSync(join(dir, DECISIONS_FILE));
   assert.throws(() => writeDecisionRecord(dir, fields), /EISDIR/);
+});
+
+test('a torn last line costs only itself: the next record is a whole line and earlier records are still returned', () => {
+  const dir = tempDir();
+  const first = writeDecisionRecord(dir, fields);
+  // A crash in the middle of a write leaves a partial line without its newline.
+  appendFileSync(join(dir, DECISIONS_FILE), '{"id":"torn","time":"2026-11-0');
+  const next = writeDecisionRecord(dir, { ...fields, operation: 'call-2' });
+  assert.deepEqual(readDecisionLog(dir), { records: [first, next], invalid: [2] });
+  assert.equal(readFileSync(join(dir, DECISIONS_FILE), 'utf8').split('\n').length, 4);
+  // A line that parses but is not a decision record is reported the same way, by line number only.
+  appendFileSync(join(dir, DECISIONS_FILE), '{"entry":"dev.example.a","arguments":"manuscript"}\n');
+  const last = writeDecisionRecord(dir, { ...fields, operation: 'call-3' });
+  assert.deepEqual(readDecisionLog(dir), { records: [first, next, last], invalid: [2, 4] });
+  // The strict reader refuses to return a partial view without saying so.
+  assert.throws(() => readDecisionRecords(dir), /2 invalid lines in decisions\.jsonl \(2, 4\)/);
+  assert.deepEqual(readDecisionLog(tempDir()), { records: [], invalid: [] });
 });

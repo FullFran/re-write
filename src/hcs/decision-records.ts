@@ -1,4 +1,4 @@
-import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs';
+import { closeSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isDottedId, isExtensionName } from './ids.ts';
@@ -72,7 +72,7 @@ export function validateDecisionRecord(value: unknown): string[] {
  * Appends one decision record to `<dir>/decisions.jsonl` and returns it (HCS-0005-R010). The host
  * sets `id` and `time`. Only the members named here are copied from `fields`, so nothing else a
  * caller holds (arguments, results, content) can reach the file (R011). Throws when the record does
- * not validate or the file cannot be written and synced; the caller then denies the operation (R012).
+ * not validate or the file cannot be read, written and synced; the caller then denies the operation (R012).
  */
 export function writeDecisionRecord(dir: string, fields: Omit<DecisionRecord, 'id' | 'time'>): DecisionRecord {
   const record: DecisionRecord = {
@@ -91,14 +91,43 @@ export function writeDecisionRecord(dir: string, fields: Omit<DecisionRecord, 'i
   if (violations.length > 0) throw new Error(`Invalid decision record: ${violations.join(', ')}`);
   mkdirSync(dir, { recursive: true });
   // One write of one line in append mode: records of concurrent writers do not interleave.
-  const fd = openSync(join(dir, DECISIONS_FILE), 'a', 0o600);
-  try { writeSync(fd, `${JSON.stringify(record)}\n`); fsyncSync(fd); } finally { closeSync(fd); }
+  const fd = openSync(join(dir, DECISIONS_FILE), 'a+', 0o600);
+  try {
+    // A crash in the middle of an earlier write leaves a last line without its newline. End that
+    // line first, so this record is a whole line of its own and only the torn one is lost.
+    const { size } = fstatSync(fd);
+    const last = Buffer.alloc(1);
+    const torn = size > 0 && readSync(fd, last, 0, 1, size - 1) === 1 && last[0] !== 0x0a;
+    writeSync(fd, `${torn ? '\n' : ''}${JSON.stringify(record)}\n`);
+    fsyncSync(fd);
+  } finally { closeSync(fd); }
   return record;
 }
 
-/** The records in `<dir>/decisions.jsonl`, oldest first; none when the file does not exist. */
-export function readDecisionRecords(dir: string): DecisionRecord[] {
+/**
+ * Reads `<dir>/decisions.jsonl`: the valid records, oldest first, and the 1-based numbers of the
+ * lines that are not one (a line torn by a crash, or anything that does not validate). An invalid
+ * line never hides the records around it, and its content is not returned. Both are empty when the
+ * file does not exist.
+ */
+export function readDecisionLog(dir: string): { records: DecisionRecord[]; invalid: number[] } {
   let text: string;
-  try { text = readFileSync(join(dir, DECISIONS_FILE), 'utf8'); } catch (error: any) { if (error.code === 'ENOENT') return []; throw error; }
-  return text.split('\n').filter(line => line !== '').map(line => JSON.parse(line) as DecisionRecord);
+  try { text = readFileSync(join(dir, DECISIONS_FILE), 'utf8'); } catch (error: any) { if (error.code === 'ENOENT') return { records: [], invalid: [] }; throw error; }
+  const records: DecisionRecord[] = [];
+  const invalid: number[] = [];
+  text.split('\n').forEach((line, index) => {
+    if (line === '') return;
+    let value: unknown;
+    try { value = JSON.parse(line); } catch { invalid.push(index + 1); return; }
+    if (validateDecisionRecord(value).length > 0) invalid.push(index + 1);
+    else records.push(value as DecisionRecord);
+  });
+  return { records, invalid };
+}
+
+/** Every record of `<dir>/decisions.jsonl`, oldest first. Throws when a line is invalid: use `readDecisionLog` to read around it. */
+export function readDecisionRecords(dir: string): DecisionRecord[] {
+  const { records, invalid } = readDecisionLog(dir);
+  if (invalid.length > 0) throw new Error(`${invalid.length} invalid line${invalid.length === 1 ? '' : 's'} in ${DECISIONS_FILE} (${invalid.join(', ')})`);
+  return records;
 }
