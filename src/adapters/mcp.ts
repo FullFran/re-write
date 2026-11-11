@@ -48,7 +48,10 @@ function failed(message: string, problem: ReturnType<typeof productProblem>) {
 function nextStepFor(message: string): string {
   if (/unknown book/i.test(message)) return 'Call list_books and use one of its book_id values.';
   if (/scene not found|inside scenes\/|source_file|unknown scene/i.test(message)) return 'Call list_scenes and use one of its paths exactly, for example "scenes/003-title.md".';
-  if (/not literal|quote not found|appears more than once|not unique/i.test(message)) return 'Read the scene again with read_scene and copy the passage character by character, including punctuation and accents, long enough to appear only once.';
+  // The exact refusals of buildAnchor (src/domain/anchor.ts) and applyChange (src/domain/proposal.ts), pinned by
+  // tests/mcp-usability.test.ts. Rejected claims reach this adapter as plain reason strings, so the messages are the class.
+  if (/\b(quote|text to change) appears \d+ times\b/.test(message)) return 'Read the scene again with read_scene and copy a longer literal passage around it, character by character, so that it appears only once in the scene; then call the tool again with that passage.';
+  if (/quote not found in the scene|text to change was not found in the scene|not literal/i.test(message)) return 'Read the scene again with read_scene and copy, character by character (punctuation and accents included), a passage that is in it now. If the scene changed since you read it, reformulate the proposal from the current text instead of retrying the same one.';
   if (/proposal/i.test(message) && /not found|unknown/i.test(message)) return 'Call list_proposals and use one of its proposal_id values.';
   if (/input validation|invalid arguments/i.test(message)) return 'Fix the arguments named in this message and call the tool again; the allowed values are in the tool input schema.';
   if (/forbidden|not allowed|permission/i.test(message)) return 'This person cannot do this on this book. Tell them to ask the person who runs RE;write for access; do not try another way.';
@@ -265,8 +268,13 @@ export function buildMcpServer(library: Library, subject: string, capabilities: 
       { extractor: `mcp:${args.extractor}`, candidates: args.candidates as ClaimCandidate[] },
       subject,
     );
-    const rejected = result.rejected.map((r) => rejectedCandidate({ ...r, reason: library.publicMessage(new Error(r.reason)) }));
-    const retry = rejected.length ? ` For each rejected claim: ${nextStepFor(rejected[0].reason)}` : '';
+    // A rejected candidate gets the next step a tool error with the same message would get.
+    const rejected = result.rejected.map((r) => {
+      const reason = library.publicMessage(new Error(r.reason));
+      return { ...rejectedCandidate({ ...r, reason }), next_step: nextStepFor(reason) };
+    });
+    const hints = [...new Set(rejected.map((r) => r.next_step))];
+    const retry = hints.length ? ` For each rejected claim, follow its next_step: ${hints.join(' ')}` : '';
     return { ...result, rejected, ...review, next_step: review.next_step + retry };
   }));
 
@@ -338,7 +346,12 @@ export function buildMcpServer(library: Library, subject: string, capabilities: 
       book,
       findings: z.array(findingCandidateSchema).min(1).max(50).describe('Up to 50 findings, each with at least one literal quote'),
     },
-    outputSchema: resultSchema({ created: z.array(z.string()), existing: z.array(z.string()), findings: z.array(item), ...toReview }),
+    outputSchema: resultSchema({
+      created: z.array(z.string()),
+      existing: z.array(z.string()),
+      findings: z.array(item).describe('The findings of this call only, created or existing; list_findings gives the rest of the book'),
+      ...toReview,
+    }),
     annotations: proposing,
   }, (args) => data(() => ({
     ...library.open(args.book, subject).proposeFindings(args.findings as FindingCandidate[], subject),

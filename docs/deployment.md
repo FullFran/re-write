@@ -2,7 +2,7 @@
 
 The server runs as one container behind HTTPS, with Clerk issuing tokens. Run **one replica**, because all writes rely on one process handling them in turn.
 
-Use **synthetic text only** for now: everyone with access to a book can read all of it, and no restore into a running service has been rehearsed.
+Production data is copied every day, encrypted, and a restore from those copies has been tested (see [Updating and backups](#updating-and-backups)). Two facts stay true and every writer should know them before loading real text: **everyone with access to a book can read all of it**, and **a connected assistant sends the text it reads to its own model provider**. The writer decides what to share.
 
 ## 1. Clerk
 
@@ -88,12 +88,12 @@ The agent does not wait for the new container to become healthy before recording
 1. Usual way: revert the bad commit on `main` (`git revert <sha>`, through a pull request with green CI). The agent deploys the revert like any other commit.
 2. Without touching `main`: the agent always deploys the head of the branch it is configured to follow, and forcing a deploy redeploys that head. To run an older commit, push a branch that points at it, point the app at that branch in the infra repository and force a deploy there. Point it back at `main` once `main` is fixed.
 
-`scripts/backup-r2.sh` encrypts the data volume with `gpg`, uploads it to an R2 bucket, then downloads that copy and compares it. It reads its settings from `~/.config/rewrite-backup/r2.env`. **Schedule it yourself, and keep the passphrase outside the server as well**: without it the copies cannot be read.
+`scripts/backup-r2.sh` encrypts the data volume with `gpg`, uploads it to an R2 bucket, then downloads that copy and compares it. It reads its settings from `~/.config/rewrite-backup/r2.env`. On the production server it runs from cron every day at 03:30 server time (02:30 UTC) and appends one line per run to `~/.local/state/rewrite-backup.log`. **Keep a copy of the passphrase outside the server**: without it the copies cannot be read, and a copy that lives only on the server is lost with the server.
 
 | Question | Answer |
 | --- | --- |
 | What is copied | The whole data volume: every book repository with its `.rewrite/` state, `access.json` and `grants.json`. Host HCS state is not used in production yet; when it is, it must live in the same volume |
-| When | Once a day at a quiet hour (a cron entry on the server) |
+| When | Once a day at 03:30 server time (02:30 UTC), a cron entry on the server |
 | How long | Set by the bucket's expiry rule (30 days) |
 | Consistency | The archive is taken while the service runs, without stopping it. Writes are rare and each one is a single JSON rename plus a git commit, so a copy taken mid-write can at worst miss that last operation; the restore drill runs `git fsck` on every book to catch a damaged repository |
 | Key recovery | The passphrase lives in the server's env file and in a second copy off the server. Check that both still match before you rely on them |
@@ -104,7 +104,9 @@ The agent does not wait for the new container to become healthy before recording
 - every restored file is byte-identical to the archive;
 - every book opens, its git history passes `git fsck`, and each person can reach exactly the books `access.json` lists for them, while an unknown person reaches none.
 
-It prints counts and verdicts only, never manuscript text, and removes the volume and container when it ends, whether it passed or failed. Run it before loading a private manuscript and after changing how data is stored.
+It prints counts and verdicts only, never manuscript text, and removes the volume and container when it ends, whether it passed or failed. Run it before loading a private manuscript and after changing how data is stored. When the script is not on the server, stream it from a checkout of this repository so nothing new is written there: `ssh <server> 'bash -s' < scripts/restore-drill.sh`.
+
+**Last verified on 2026-11-11** on the production server: the schedule above was in place, the log showed a successful copy every day from 2026-11-02 to 2026-11-11 (the 7 runs of the last week all succeeded), and the drill restored that morning's copy, the service became healthy on it, all 136 files were identical to the archive, both books opened and passed `git fsck`, access checks (2 books x 3 subjects) had 0 failures, and no drill volume or container was left behind.
 
 **Restoring for real:** stop the container, run the same steps as the drill into the production volume (`gpg --decrypt` the object, extract the archive into the data volume, give it to the image's `node` user), then start the container again.
 

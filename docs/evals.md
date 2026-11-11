@@ -62,7 +62,7 @@ browser import names them (`evals/journeys/books/capitulos/003-la-carta.md`). Se
 | Journey | Guarantee it pins |
 | --- | --- |
 | `chatgpt-chapter-analysis` | "Analiza el capítulo 3" takes the documented calls, reads a long scene page by page, stores only a proposal, and hands the person the review URL. |
-| `chatgpt-error-recovery` | Every refusal names the tool to call next, a refused proposal stores nothing, and following the hint works. |
+| `chatgpt-error-recovery` | Every refusal names the tool to call next, an ambiguous or absent passage asks for a longer or present one from read_scene, a refused proposal stores nothing, and following the hint works. |
 | `chatgpt-tool-metadata` | Every tool has a title and says when to use it, only proposals are write tools, the tool list stays under 20 KB, and the first 512 characters of the instructions give the order of calls and the review URL. |
 
 The in-memory build gives the server the review URL `https://rewrite.invalid/review`, built from the

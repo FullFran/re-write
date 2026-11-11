@@ -42,7 +42,10 @@ test('llms.txt is public plain text with the setup steps, the public URL and no 
   assert.ok(text.includes(h.resource));
   assert.ok(text.includes(`${h.base}/review`));
   for (const client of ['ChatGPT', 'OpenCode', 'Claude Code', 'Pi']) assert.ok(text.includes(client), client);
-  assert.match(text, /synthetic/i);
+  assert.match(text, /encrypted copy of the data every day, and a restore from it has been tested/);
+  assert.match(text, /Everyone with access to a book can read all of it/);
+  assert.match(text, /sends the text it reads to its own model provider/);
+  assert.doesNotMatch(text, /synthetic|sintético/i);
   assert.match(text, /only a person/i);
   assert.doesNotMatch(text, /sk_(live|test)_|user_[A-Za-z0-9]{10,}|@gmail/);
   assert.ok(!text.includes(h.data));
