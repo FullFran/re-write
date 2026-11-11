@@ -104,6 +104,7 @@ class Element {
   setAttribute(key: string, value: string) { this.attrs[key] = value; }
   addEventListener(event: string, fn: Function) { this.events[event] = fn; }
   scrollIntoView(options?: unknown) { this.scrolls.push(options); }
+  getElementsByTagName(tag: string): Element[] { return nodes(this, (n) => n !== this && n.tag === tag); }
   focus() {}
 }
 
@@ -118,11 +119,11 @@ const CLAIM = { claim_id: 'C-1', statement: 'Statement', anchor: { quote: 'Quote
 const FINDING = { finding_id: 'F-1', question: 'motivation', kind: 'fact', statement: 's', author: 'a', evidence: [{ file: 'scenes/a.md', quote: 'scene', status: 'valid' }], verdict: { verdict: 'useful', by: 'r', at: '2026-01-01T00:00:00Z' } };
 const QUEUE = { scenes: ['scenes/a.md'], proposals: [PROPOSAL], claims: [CLAIM], canon: [], findings: [], finding_views: [FINDING] };
 
-function page(windowExtras: Record<string, unknown> = {}) {
+function page(windowExtras: Record<string, unknown> = {}, queue: unknown = QUEUE) {
   const app = new Element('main');
-  const context = runInNewContext(REVIEW_JS + '\n({ proposalCard, claimCard, narrativeFindingCard, renderApp })', {
+  const context = runInNewContext(REVIEW_JS + '\n({ proposalCard, claimCard, narrativeFindingCard, renderApp, viewportAnchor })', {
     document: {
-      getElementById: (id: string) => (id === 'app' ? app : nodes(app, (n) => n.tag === 'article' && n.id === id)[0]),
+      getElementById: (id: string) => (id === 'app' ? app : nodes(app, (n) => n.id === id)[0]),
       createElement: (t: string) => new Element(t),
       createTextNode: (t: string) => Object.assign(new Element('#text'), { textContent: t }),
     },
@@ -131,7 +132,7 @@ function page(windowExtras: Record<string, unknown> = {}) {
     fetch: async (url: string) => ({
       ok: true,
       headers: { get: () => null },
-      json: async () => (url.endsWith('/books') ? { books: [{ book_id: 'sal', title: 'Sal' }] } : url.includes('/scenes/') ? { file: 'scenes/a.md', text: 'scene', proposals: [PROPOSAL], findings: [FINDING] } : QUEUE),
+      json: async () => (url.endsWith('/books') ? { books: [{ book_id: 'sal', title: 'Sal' }] } : url.includes('/scenes/') ? { file: 'scenes/a.md', text: 'scene', proposals: [PROPOSAL], findings: [FINDING] } : queue),
     }),
   });
   return { ...context, app };
@@ -275,4 +276,135 @@ test('the chosen rating is exposed as pressed, not only drawn', () => {
   const card = page().narrativeFindingCard('sal', FINDING, async () => {});
   const pressed = Object.fromEntries(byTag(card, 'button').map((b) => [b.textContent, b.attrs['aria-pressed']]));
   assert.deepEqual(pressed, { 'Me ayuda': 'true', Ruido: 'false' });
+});
+
+// --- Navigating a long page with one thumb -----------------------------------
+
+const PHONE = { matchMedia: (query: string) => ({ matches: query === '(max-width: 40em)' }) };
+const DECIDED = { proposal: { proposal_id: 'P-2', rationale: 'Earlier', status: 'accepted', result_commit: 'abcdef123456' }, diff: DIFF, applicable: false };
+const CANONICAL = { ...CLAIM, claim_id: 'C-2', editorial_status: 'accepted' };
+const FULL = { ...QUEUE, proposals: [PROPOSAL, DECIDED], claims: [CLAIM, CANONICAL], canon: [CANONICAL] };
+const PENDING_TITLES = ['Cambios propuestos', 'Hallazgos de la trama', 'Posibles problemas', 'Afirmaciones por revisar'];
+const REFERENCE_TITLES = ['Importar escenas Markdown', 'Importar desde Notion', 'Navegar escenas', 'Canon', 'Afirmaciones fuera del Canon', 'Afirmaciones rechazadas', 'Historial de cambios del manuscrito'];
+
+const sectionOf = (app: Element, title: string) => nodes(app, (n) => n.tag === 'section' && byTag(n, 'h2')[0]?.textContent === title)[0];
+const foldOf = (section: Element) => nodes(section, (n) => n.className === 'fold')[0];
+const bodyOf = (section: Element) => nodes(section, (n) => n.className === 'fold-body')[0];
+const unfolded = (app: Element) => [...PENDING_TITLES, ...REFERENCE_TITLES].filter((title) => foldOf(sectionOf(app, title)).attrs['aria-expanded'] === 'true');
+
+test('what waits for a decision comes before tools and reference', async () => {
+  const ui = page();
+  await ui.renderApp('sal');
+  assert.deepEqual(byTag(ui.app, 'h2').map((h) => h.textContent), ['Crear un nuevo libro', ...PENDING_TITLES, ...REFERENCE_TITLES]);
+});
+
+test('the section navigation is a landmark with pending counts and one current link', async () => {
+  const ui = page();
+  await ui.renderApp('sal');
+  const [nav, ...others] = byTag(ui.app, 'nav');
+  assert.equal(others.length, 0);
+  assert.equal(nav.attrs['aria-label'], 'Secciones');
+  const links = byTag(nav, 'a');
+  assert.deepEqual(links.map((a) => a.children[0].textContent), ['Cambios', 'Hallazgos', 'Problemas', 'Afirmaciones', 'Importar', 'Escenas', 'Canon', 'Historial']);
+  // One pending proposal and one pending claim; the only finding is already rated.
+  assert.deepEqual(links.map((a) => a.attrs['aria-label']), [
+    'Cambios propuestos: 1 pendiente', 'Hallazgos de la trama', 'Posibles problemas', 'Afirmaciones por revisar: 1 pendiente',
+    'Importar escenas Markdown', 'Navegar escenas', 'Canon', 'Historial de cambios del manuscrito',
+  ]);
+  assert.deepEqual(links.map((a) => nodes(a, (n) => n.className === 'count')[0]).map((c) => (c.hidden ? '' : c.textContent)), ['1', '', '', '1', '', '', '', '']);
+  for (const link of links) {
+    const target = nodes(ui.app, (n) => '#' + n.id === (link as any).href)[0];
+    assert.equal(target?.tag, 'section', `${(link as any).href} is a section of the page`);
+  }
+  assert.deepEqual(links.map((a) => a.attrs['aria-current']), ['location', 'false', 'false', 'false', 'false', 'false', 'false', 'false']);
+});
+
+test('on a phone tools and reference start folded, and a choice survives a re-render', async () => {
+  const desktop = page({}, FULL);
+  await desktop.renderApp('sal');
+  assert.deepEqual(unfolded(desktop.app), [...PENDING_TITLES, ...REFERENCE_TITLES]);
+
+  const ui = page(PHONE, FULL);
+  await ui.renderApp('sal');
+  // Empty reference sections stay open: they are one line.
+  assert.deepEqual(unfolded(ui.app), [...PENDING_TITLES, 'Afirmaciones fuera del Canon', 'Afirmaciones rechazadas']);
+  for (const title of [...PENDING_TITLES, ...REFERENCE_TITLES]) {
+    const section = sectionOf(ui.app, title);
+    assert.equal(bodyOf(section).hidden, foldOf(section).attrs['aria-expanded'] !== 'true', title);
+    assert.ok(bodyOf(section).id);
+    assert.equal(foldOf(section).attrs['aria-controls'], bodyOf(section).id);
+    // Folded, not removed: the form is still in the page.
+    assert.equal(section.children.length, 2);
+  }
+  assert.equal(byTag(bodyOf(sectionOf(ui.app, 'Importar desde Notion')), 'input').length, 1);
+
+  foldOf(sectionOf(ui.app, 'Historial de cambios del manuscrito')).events.click();
+  foldOf(sectionOf(ui.app, 'Cambios propuestos')).events.click();
+  const chosen = [...PENDING_TITLES.slice(1), 'Afirmaciones fuera del Canon', 'Afirmaciones rechazadas', 'Historial de cambios del manuscrito'];
+  assert.deepEqual(unfolded(ui.app), chosen);
+  assert.equal(bodyOf(sectionOf(ui.app, 'Cambios propuestos')).hidden, true);
+  await ui.renderApp('sal');
+  assert.deepEqual(unfolded(ui.app), chosen);
+});
+
+test('a section with nothing in it says so in one line, and an empty book opens its import form', async () => {
+  const ui = page(PHONE, { ...QUEUE, scenes: [], proposals: [] });
+  await ui.renderApp('sal');
+  assert.equal(sectionOf(ui.app, 'Cambios propuestos').textContent, 'Cambios propuestos' + 'Ningún cambio pendiente.');
+  assert.equal(sectionOf(ui.app, 'Canon').textContent, 'Canon' + 'El canon está vacío.');
+  assert.deepEqual(unfolded(ui.app).filter((title) => title.startsWith('Importar') || title === 'Navegar escenas'), ['Importar escenas Markdown', 'Navegar escenas']);
+});
+
+test('a navigation link unfolds its section and goes there without touching the address', async () => {
+  const ui = page(PHONE, FULL);
+  await ui.renderApp('sal');
+  const link = byTag(byTag(ui.app, 'nav')[0], 'a').find((a) => a.children[0].textContent === 'Historial')!;
+  const section = sectionOf(ui.app, 'Historial de cambios del manuscrito');
+  let prevented = false;
+  link.events.click({ preventDefault() { prevented = true; } });
+  // Clerk's components route through the hash.
+  assert.equal(prevented, true);
+  assert.equal(foldOf(section).attrs['aria-expanded'], 'true');
+  assert.equal(bodyOf(section).hidden, false);
+  assert.equal(section.scrolls.length, 1);
+  assert.deepEqual(byTag(ui.app, 'a').filter((a) => a.attrs['aria-current'] === 'location'), [link]);
+});
+
+test('a quote opens its scene even when the scene list is folded', async () => {
+  const ui = page(PHONE, { ...FULL, finding_views: [{ ...FINDING, verdict: undefined }] });
+  await ui.renderApp('sal');
+  const scenes = sectionOf(ui.app, 'Navegar escenas');
+  assert.equal(bodyOf(scenes).hidden, true);
+  byTag(sectionOf(ui.app, 'Hallazgos de la trama'), 'blockquote')[0].events.click();
+  assert.equal(bodyOf(scenes).hidden, false);
+  assert.equal(foldOf(scenes).attrs['aria-expanded'], 'true');
+});
+
+test('the navigation bar sticks to the top, scrolls sideways and leaves room for what it would cover', () => {
+  const rule = (css: string, selector: string) => rules(css).find(([s]) => s === selector)?.[1] ?? '';
+  const bar = rule(CSS, '.section-nav');
+  assert.equal(declaration(bar, 'position'), 'sticky');
+  assert.equal(declaration(bar, 'top'), '0');
+  assert.equal(declaration(bar, 'background'), 'var(--paper)');
+  assert.match(bar, /env\(safe-area-inset-top\)/);
+  assert.equal(declaration(rule(CSS, '.section-nav ul'), 'overflow-x'), 'auto');
+  assert.equal(declaration(rule(CSS, '.section-nav a'), 'min-height'), 'var(--tap)');
+  assert.equal(declaration(rule(CSS, '.fold'), 'min-height'), 'var(--tap)');
+  assert.ok(px(LIGHT['--nav-h']) >= 44);
+  // A jump lands below the bar; the error and the notice float below it too.
+  assert.match(declaration(rule(CSS, 'section, article, .scene-viewer'), 'scroll-margin-top') ?? '', /var\(--nav-h\)/);
+  assert.match(declaration(rule(CSS, 'main:has(> .section-nav) > [role=alert]:first-child'), 'top') ?? '', /var\(--nav-h\)/);
+  assert.match(declaration(rule(CSS, '.notice'), 'top') ?? '', /var\(--nav-h\)/);
+  // Wide screens: a side column, so nothing is covered at the top.
+  const wide = block(CSS, '@media (min-width: 75em)');
+  assert.equal(declaration(rule(wide, '.section-nav'), 'position'), 'fixed');
+  assert.equal(tokens(block(wide, ':root'))['--nav-h'], '0px');
+});
+
+test('the refresh anchor is a card on screen, never one inside a folded section', () => {
+  const ui = page();
+  const card = (id: string, top: number, shown: boolean) => Object.assign(new Element('article'), { id, offsetParent: shown ? ui.app : null, getBoundingClientRect: () => ({ top }) });
+  // A card without a box reports top 0, like the first card on screen would.
+  ui.app.append(card('above', -300, true), card('folded', 0, false), card('reading', 120, true));
+  assert.deepEqual({ ...ui.viewportAnchor() }, { id: 'reading', top: 120 });
 });
