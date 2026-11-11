@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import { evaluate, readRequestDocument, type Grant, type PermissionRequest } from './authority.ts';
 import type { CatalogEntry } from './catalog.ts';
+import { writeDecisionRecord } from './decision-records.ts';
 import { HcsFailure, hcsError } from './errors.ts';
 import { isDottedId, REWRITE_PERMISSIONS } from './ids.ts';
 import { fetchPackageBytes, verifyPackage } from './package.ts';
@@ -11,7 +12,8 @@ import { readTar } from './tar.ts';
 
 // Grants held by the host, one record per entry and permission (HCS-0005). They live in
 // `<data-dir>/grants.json` and are read again on every check, so a revocation applies to the next
-// dispatched operation without a restart (HCS-0005-R003).
+// dispatched operation without a restart (HCS-0005-R003). A grant carries the host's `id` for it;
+// files written before grants had one still read, and those grants are named by `grantId`.
 const GRANTS_FILE = 'grants.json';
 // The request document at the root of a package (HCS-0005 request document; see docs/hcs.md).
 export const REQUEST_DOCUMENT = 'requests.json';
@@ -28,12 +30,16 @@ export function readGrants(dataDir: string): Grant[] {
   return value.grants.map((grant: unknown) => {
     if (!grant || typeof grant !== 'object' || !('entry' in grant) || !('permission' in grant)
       || typeof grant.entry !== 'string' || !isDottedId(grant.entry)
-      || typeof grant.permission !== 'string' || !grantable(grant.permission)) {
+      || typeof grant.permission !== 'string' || !grantable(grant.permission)
+      || ('id' in grant && (typeof grant.id !== 'string' || grant.id.length < 1 || [...grant.id].length > 256))) {
       throw new Error('Invalid grants file');
     }
-    return { entry: grant.entry, permission: grant.permission };
+    return { entry: grant.entry, permission: grant.permission, ...('id' in grant ? { id: grant.id as string } : {}) };
   });
 }
+
+// What a decision record names when this grant decides (HCS-0005 section 3.3).
+export const grantId = (grant: Grant): string => grant.id ?? `${grant.entry}:${grant.permission}`;
 
 // Replace the file in one step: write a sibling temp file, fsync, rename.
 function writeGrants(dataDir: string, grants: Grant[]): void {
@@ -50,13 +56,25 @@ export function grantPermission(dataDir: string, entry: string, permission: stri
   if (!isDottedId(entry)) throw new Error(`invalid entry id: ${entry}`);
   if (!grantable(permission)) throw new Error(`permission cannot be granted: ${permission}`);
   const grants = readGrants(dataDir);
-  if (!grants.some(grant => grant.entry === entry && grant.permission === permission)) grants.push({ entry, permission });
+  if (!grants.some(grant => grant.entry === entry && grant.permission === permission)) grants.push({ entry, permission, id: randomUUID() });
   writeGrants(dataDir, grants);
 }
 
+// Administrative, like granting. Each grant removed writes one `revoked` decision record
+// (HCS-0005-R010). The shell has no authenticated person, so the decider is the operator role. The
+// grant is removed first: if the record cannot be written the revocation still holds, and the error
+// is reported.
 export function revokePermission(dataDir: string, entry: string, permission: string): void {
   const grants = readGrants(dataDir);
-  writeGrants(dataDir, grants.filter(grant => grant.entry !== entry || grant.permission !== permission));
+  const kept = grants.filter(grant => grant.entry !== entry || grant.permission !== permission);
+  writeGrants(dataDir, kept);
+  for (let removed = grants.length - kept.length; removed > 0; removed--) {
+    try {
+      writeDecisionRecord(dataDir, { entry, permission, outcome: 'revoked', decider: { kind: 'subject', id: 'operator' }, channel: 'cli:package-revoke' });
+    } catch (error) {
+      throw new Error(`grant removed, but its decision record could not be written: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 }
 
 // The permissions a verified package requests. No package code runs: the archive is only read.

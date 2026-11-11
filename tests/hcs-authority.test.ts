@@ -48,7 +48,8 @@ test('persistent grants are read fresh and revocation affects the next check (R0
   assert.equal(evaluate(check, readGrants(dir)).allow, false);
   grantPermission(dir, entry, permission);
   grantPermission(dir, entry, permission);
-  assert.deepEqual(JSON.parse(readFileSync(join(dir, 'grants.json'), 'utf8')), { grants: [check] });
+  const [{ id }] = readGrants(dir);
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, 'grants.json'), 'utf8')), { grants: [{ ...check, id }] });
   assert.equal(evaluate(check, readGrants(dir)).allow, true);
   revokePermission(dir, entry, permission);
   assert.deepEqual(readGrants(dir), []);
@@ -60,9 +61,11 @@ test('review and unknown permissions cannot be granted', t => {
   const dir = mkdtempSync(join(tmpdir(), 'rewrite-authority-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   grantPermission(dir, entry, permission);
+  const held = readGrants(dir);
+  assert.deepEqual(held.map(grant => ({ entry: grant.entry, permission: grant.permission })), [check]);
   for (const forbidden of [REVIEW_DECIDE, 'example.unknown']) {
     assert.throws(() => grantPermission(dir, entry, forbidden));
-    assert.deepEqual(readGrants(dir), [check]);
-    assert.deepEqual(JSON.parse(readFileSync(join(dir, 'grants.json'), 'utf8')), { grants: [check] });
+    assert.deepEqual(readGrants(dir), held);
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, 'grants.json'), 'utf8')), { grants: held });
   }
 });

@@ -2,10 +2,14 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Library } from '../src/application/library.ts';
 import { buildMcpServer } from '../src/adapters/mcp.ts';
+import { withRequestLog } from '../src/adapters/request-log.ts';
+import { readDecisionRecords } from '../src/hcs/decision-records.ts';
 import { HcsFailure, hcsError } from '../src/hcs/errors.ts';
 import { REWRITE_CAPABILITIES, REWRITE_PERMISSIONS, REVIEW_DECIDE } from '../src/hcs/ids.ts';
 import { grantPermission, revokePermission } from '../src/hcs/grants.ts';
@@ -448,6 +452,36 @@ test('MCP checks the package grant of every tool at dispatch, and a revocation d
   assert.equal((await call(client, 'list_claims', { book: 'sal' })).data.total, 0, 'a denied proposal stores nothing');
   revokePermission(data, PACKAGE, READ);
   await assert.rejects(client.callTool({ name: 'list_scenes', arguments: { book: 'sal' } }), deniedBy('permission_denied', READ));
+});
+
+test('a package call records its decisions under the request id of the request log (HCS-0005-R010)', async (t) => {
+  const { lib, data } = library();
+  grantPermission(data, PACKAGE, READ);
+  t.mock.method(console, 'log', () => {});
+  const server = createServer(withRequestLog('http://localhost/mcp', (_req, res) => {
+    void (async () => {
+      const client = await connectAs(lib, 'user_fran', PACKAGE);
+      await call(client, 'list_books', {});
+      await client.callTool({ name: 'propose_findings', arguments: { book: 'sal', ...BOOK_TOOLS[9][1] } }).catch(() => {});
+      res.end('done');
+    })().catch(() => { res.statusCode = 500; res.end(); });
+  }, 'salt'));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`);
+  assert.equal(response.status, 200);
+  const requestId = response.headers.get('x-request-id');
+  assert.match(requestId ?? '', /^[0-9a-f-]{36}$/);
+  // list_books: the call itself and one check per book; propose_findings: denied without its grant.
+  assert.deepEqual(readDecisionRecords(data).map(record => [record.outcome, record.permission, record.operation]), [
+    ['allow', READ, requestId], ['allow', READ, requestId], ['deny', 'com.fullfran.rewrite.findings.propose', requestId],
+  ]);
+
+  // Outside an HTTP request there is no request id: the host generates the operation id.
+  const client = await connectAs(lib, 'user_fran', PACKAGE);
+  assert.equal((await call(client, 'list_scenes', { book: 'sal' })).isError, false);
+  const last = readDecisionRecords(data).at(-1)!;
+  assert.ok(last.operation && last.operation !== requestId);
 });
 
 test('removing a person\'s book access takes effect on the next MCP call', async () => {

@@ -532,6 +532,90 @@
         "tests/hcs-host-state.test.ts"
       ]
     },
+    "HCS-0005-R005": {
+      "status": "not-applicable",
+      "reason": "re-write never asks a person for a permission decision: grants are created and removed only from the server's shell (`rewrite package-grant`, `package-revoke`) and no ACP `session/request_permission` channel exists."
+    },
+    "HCS-0005-R006": {
+      "status": "not-applicable",
+      "reason": "re-write never asks a person for a permission decision: grants are created and removed only from the server's shell (`rewrite package-grant`, `package-revoke`) and no ACP `session/request_permission` channel exists."
+    },
+    "HCS-0005-R007": {
+      "status": "partial",
+      "reason": "The evaluator applies stored denials and the `authority` cases pass; the host stores none, because a denial comes from a person's `reject_always` answer and re-write never asks a person.",
+      "code": [
+        "src/hcs/authority.ts"
+      ],
+      "tests": [
+        "tests/hcs-authority.test.ts",
+        "tests/hcs-conformance.test.ts"
+      ]
+    },
+    "HCS-0005-R008": {
+      "status": "partial",
+      "reason": "The evaluator matches session-limited grants and denials only in their session and the `authority` cases pass; the host stores no sessions and its checks carry none.",
+      "code": [
+        "src/hcs/authority.ts"
+      ],
+      "tests": [
+        "tests/hcs-authority.test.ts",
+        "tests/hcs-conformance.test.ts"
+      ]
+    },
+    "HCS-0005-R009": {
+      "status": "not-applicable",
+      "reason": "re-write never asks a person for a permission decision: grants are created and removed only from the server's shell (`rewrite package-grant`, `package-revoke`) and no ACP `session/request_permission` channel exists. No `always` answer exists for an engine or client to keep."
+    },
+    "HCS-0005-R010": {
+      "status": "partial",
+      "reason": "Call-time decisions on package operations and grant removals are recorded in `decisions.jsonl`; the lifecycle `authorize` step (`grantAuthorizer`) writes no record yet.",
+      "code": [
+        "src/hcs/decision-records.ts",
+        "src/application/decision.ts",
+        "src/hcs/grants.ts",
+        "src/adapters/mcp.ts",
+        "src/adapters/request-log.ts"
+      ],
+      "tests": [
+        "tests/hcs-decision-records.test.ts",
+        "tests/decision.test.ts",
+        "tests/hcs-grants.test.ts",
+        "tests/mcp.test.ts"
+      ]
+    },
+    "HCS-0005-R011": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/decision-records.ts"
+      ],
+      "tests": [
+        "tests/hcs-decision-records.test.ts",
+        "tests/hcs-conformance.test.ts",
+        "tests/decision.test.ts"
+      ]
+    },
+    "HCS-0005-R012": {
+      "status": "implemented",
+      "code": [
+        "src/application/decision.ts",
+        "src/hcs/decision-records.ts"
+      ],
+      "tests": [
+        "tests/decision.test.ts"
+      ]
+    },
+    "HCS-0005-R013": {
+      "status": "not-applicable",
+      "reason": "Decision records stay on the host in `decisions.jsonl`; re-write sends them to no distribution (OQ-0005-7)."
+    },
+    "HCS-0005-R014": {
+      "status": "not-applicable",
+      "reason": "re-write never asks a person for a permission decision: grants are created and removed only from the server's shell (`rewrite package-grant`, `package-revoke`) and no ACP `session/request_permission` channel exists. No operation waits for an answer."
+    },
+    "HCS-0005-R015": {
+      "status": "not-applicable",
+      "reason": "re-write never asks a person for a permission decision: grants are created and removed only from the server's shell (`rewrite package-grant`, `package-revoke`) and no ACP `session/request_permission` channel exists."
+    },
     "HCS-0006-R001": {
       "status": "implemented",
       "code": [

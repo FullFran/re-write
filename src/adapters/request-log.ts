@@ -19,6 +19,14 @@ interface Context {
 }
 const requests = new AsyncLocalStorage<Context>();
 
+/**
+ * The id of the HTTP request being handled, or undefined outside one. The server generates it (a
+ * UUID per request) and echoes it in the `x-request-id` response header; a client cannot set it.
+ */
+export function currentRequestId(): string | undefined {
+  return requests.getStore()?.request_id;
+}
+
 export function recordSubject(subject: string): void {
   const context = requests.getStore();
   if (context) context.subject = context.hash(subject);
