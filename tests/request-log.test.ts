@@ -253,7 +253,7 @@ test('review actions on one item are logged under their own route, not as unmatc
   const h = await startHarness();
   t.after(() => h.close());
   const session = await h.session();
-  const actions = [['claims', 'reopen'], ['proposals', 'reopen'], ['findings', 'reopen']];
+  const actions = [['claims', 'reopen'], ['proposals', 'reopen'], ['findings', 'reopen'], ['proposals', 'revert'], ['proposals', 'repropose']];
   for (const [kind, action] of actions) await reviewApi(h, `/books/sal/${kind}/X-0000000000/${action}`, session, { expected: 0 });
   await reviewApi(h, '/books/sal/claims/X-0000000000/other', session, { expected: 0 });
   const routes = lines.map(line => JSON.parse(line)).filter(r => r.event === 'http.request').map(r => r.route);

@@ -446,7 +446,7 @@ export class Project {
     }
     const baseBlob = this.git.blobOf(file);
     return {
-      proposal_id: proposalId(file, baseBlob, input.find, input.replace, input.reproposes),
+      proposal_id: proposalId(file, baseBlob, input.find, input.replace, input.reverts ? `revert:${input.reverts}` : input.reproposes ? `again:${input.reproposes}` : undefined),
       file,
       base_revision: this.git.head(),
       base_blob: baseBlob,
@@ -540,11 +540,11 @@ export class Project {
     const proposal = this.proposals.get(id);
     if (!proposal) throw new Error(`unknown proposal: ${id}`);
     if (proposal.status !== 'accepted') throw new Error(`only an accepted proposal can be reverted; ${id} is ${proposal.status}`);
-    const last = proposal.history.at(-1);
-    if (proposal.history.length === expected + 1 && last?.action === 'revert' && last.ref) {
-      const linked = this.proposals.get(last.ref);
-      if (linked?.status === 'proposed') return { proposal: linked, created: false };
-    }
+    const inverses = proposal.history.filter((entry) => entry.action === 'revert' && entry.ref).map((entry) => this.proposals.get(entry.ref!));
+    // A live inverse proposal is the answer to any further revert: no new history entry, no commit.
+    const live = inverses.find((inverse) => inverse?.status === 'proposed');
+    if (live) return { proposal: live, created: false };
+    if (inverses.some((inverse) => inverse?.status === 'accepted')) throw new Error(ALREADY_REVERTED);
     if (proposal.history.length !== expected) throw new StaleStateError();
 
     const current = this.readScene(proposal.file);
@@ -558,6 +558,7 @@ export class Project {
     const built = this.buildProposal({ file: proposal.file, ...change, rationale: `Revert ${id}`, proposed_by: by, reverts: id });
     const existing = this.proposals.get(built.proposal_id);
     const at = new Date().toISOString();
+    if (existing?.status === 'accepted') throw new Error(ALREADY_REVERTED);
     const inverse = existing ?? built;
     if (inverse.status === 'rejected') {
       inverse.history.push({ at, by, from: 'rejected', to: 'proposed', action: 'reopen', ref: id });
@@ -616,6 +617,8 @@ function checkExpected(status: string, history: { length: number }, decision: De
   if (history.length === expected + 1 && status === target) return;
   throw new StaleStateError();
 }
+
+const ALREADY_REVERTED = 'Este cambio ya está revertido. Para aplicarlo otra vez, vuelve a proponerlo.';
 
 /** Where a stored record lives, relative to the book repository. */
 function recordPath(collection: string, id: string): string {

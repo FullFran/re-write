@@ -19,12 +19,13 @@ export interface Proposal {
 }
 
 /**
- * Same base text and same change give the same id, so retries cannot duplicate a proposal. A change
- * proposed again from an earlier proposal also hashes that origin: after a revert the text is back
- * to the earlier base, and without it the new proposal would get the accepted one's id.
+ * Same base text and same change give the same id, so retries cannot duplicate a proposal. A
+ * proposal made from an earlier one (an inverse that reverts it, or the change proposed again) also
+ * hashes that origin: after a revert the text is back to an earlier base, and without the origin the
+ * new proposal would get the id of a proposal that is already decided.
  */
-export function proposalId(file: string, baseBlob: string, find: string, replace: string, reproposes?: string): string {
-  return reproposes ? shortHash('P-', file, baseBlob, find, replace, `again:${reproposes}`) : shortHash('P-', file, baseBlob, find, replace);
+export function proposalId(file: string, baseBlob: string, find: string, replace: string, origin?: string): string {
+  return origin ? shortHash('P-', file, baseBlob, find, replace, origin) : shortHash('P-', file, baseBlob, find, replace);
 }
 
 /** Replaces the single occurrence of `find`, refusing any change that is not exact. */

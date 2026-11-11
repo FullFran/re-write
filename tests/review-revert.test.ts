@@ -103,7 +103,7 @@ test('a deletion is reverted by anchoring on the text around it', async () => {
   assert.deepEqual(bytes(), original);
 });
 
-test('repeating a revert returns the same inverse proposal, a stale tab is refused, and a rejected inverse is reopened', async () => {
+test('repeating a revert returns the same inverse proposal, a stale tab is refused once it is not live, and a rejected inverse is reopened', async () => {
   const session = await h.session();
   const id = proposeRevision(h.bookDir, SCENE, 'Fuera empezaba a llover', 'Fuera seguía lloviendo');
   await accept(session, id);
@@ -117,11 +117,11 @@ test('repeating a revert returns the same inverse proposal, a stale tab is refus
   assert.equal(again.proposal.proposal_id, first.proposal_id);
   assert.equal(head(), headAfter);
 
-  const stale = await revert(session, id, 0);
+  await reviewApi(h, `/books/sal/proposals/${first.proposal_id}`, session, { decision: 'reject' });
+  const stale = await revert(session, id, 1);
   assert.equal(stale.status, 409);
   assert.match((await stale.json()).error, /otra pestaña/);
 
-  await reviewApi(h, `/books/sal/proposals/${first.proposal_id}`, session, { decision: 'reject' });
   const reopened = await revert(session, id, 2);
   assert.equal(reopened.status, 200);
   const third = (await reopened.json()).proposal;
@@ -218,4 +218,56 @@ test('a revert or repropose whose commit fails writes nothing, and a retry works
   rmSync(lock);
   assert.equal(git(h.bookDir, 'status', '--porcelain', '--untracked-files=all'), afterRevert);
   assert.equal((await reviewApi(h, `/books/sal/proposals/${id}/repropose`, session, {})).status, 200);
+});
+
+test('a change that was reverted, proposed again and accepted again can be reverted again with a new inverse proposal', async () => {
+  const session = await h.session();
+  const original = bytes();
+  const id = proposeRevision(h.bookDir, SCENE, 'Fuera empezaba a llover', 'Fuera seguía lloviendo');
+  await accept(session, id);
+  const first = (await (await revert(session, id, 1)).json()).proposal;
+  await accept(session, first.proposal_id);
+  const again = (await (await reviewApi(h, `/books/sal/proposals/${id}/repropose`, session, {})).json()).proposal;
+  await accept(session, again.proposal_id);
+
+  const res = await revert(session, again.proposal_id, 1);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.created, true);
+  assert.notEqual(body.proposal.proposal_id, first.proposal_id);
+  assert.equal(body.proposal.status, 'proposed');
+  assert.equal(body.proposal.reverts, again.proposal_id);
+  assert.equal(cli('show', h.bookDir, again.proposal_id).json.proposal.history.at(-1).ref, body.proposal.proposal_id);
+  await accept(session, body.proposal.proposal_id);
+  assert.deepEqual(bytes(), original);
+});
+
+test('a refreshed tab reverting again gets the live inverse proposal, with no new history entry or commit', async () => {
+  const session = await h.session();
+  const id = proposeRevision(h.bookDir, SCENE, 'Fuera empezaba a llover', 'Fuera seguía lloviendo');
+  await accept(session, id);
+  const first = (await (await revert(session, id, 1)).json()).proposal;
+  const headAfter = head();
+  const res = await revert(session, id, 2);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.created, false);
+  assert.equal(body.proposal.proposal_id, first.proposal_id);
+  assert.equal(head(), headAfter);
+  assert.equal(cli('show', h.bookDir, id).json.proposal.history.length, 2);
+});
+
+test('reverting a change whose inverse proposal was already accepted says it is already reverted', async () => {
+  const session = await h.session();
+  const id = proposeRevision(h.bookDir, SCENE, 'Fuera empezaba a llover', 'Fuera seguía lloviendo');
+  await accept(session, id);
+  const inverse = (await (await revert(session, id, 1)).json()).proposal;
+  await accept(session, inverse.proposal_id);
+  const headBefore = head();
+  const res = await revert(session, id, 2);
+  assert.equal(res.status, 409);
+  const { error } = await res.json();
+  assert.match(error, /ya está revertido/);
+  assert.doesNotMatch(error, /ediciones posteriores/);
+  assert.equal(head(), headBefore);
 });
