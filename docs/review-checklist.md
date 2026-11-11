@@ -93,3 +93,21 @@ Automated tests pin the stylesheet's tokens and rules (`tests/review-mobile.test
 - [ ] With the keyboard only, every control shows a focus outline, and Enter or Space on a finding's quote opens its scene.
 - [ ] With "reduce motion" enabled in the system, opening a scene jumps instead of scrolling smoothly.
 - [ ] At 1280 px wide the page is one centred column of readable width, not full-width lines.
+
+## 10. Section Navigation and Folding
+
+Tests pin the order, the landmark, the counts and the fold state (`tests/review-mobile.test.ts`, `tests/review-refresh.test.ts`); what the bar covers and how it scrolls is checked here.
+
+- [ ] On a phone, the first pending proposal under **Cambios propuestos** is on the first screen, above both import forms.
+- [ ] The row of section links stays at the top of the screen while scrolling and scrolls sideways with one thumb; the page itself never scrolls sideways. A number beside a link is the count of items waiting there.
+- [ ] While reading a long proposal, the navigation row is at the top and **Aceptar cambio** / **Rechazar** are at the bottom: neither covers the other, in portrait or landscape.
+- [ ] Tap **Historial**: the section opens and its heading lands just below the row, not under it. The link is shown as current, and it changes as you scroll through the sections.
+- [ ] On a phone, **Importar escenas Markdown**, **Importar desde Notion**, **Navegar escenas**, **Canon** and **Historial de cambios del manuscrito** start folded when they have content; each heading opens and closes its section. A book without scenes shows the Markdown import form open.
+- [ ] A section with nothing in it shows its heading and one line (for example **Ningún cambio pendiente.**).
+- [ ] Tap a finding's quote while **Navegar escenas** is folded: the scene list opens and the scene is shown with the quote highlighted.
+- [ ] Fold a section, then change the queue from a second tab: after the refresh the section is still folded, the counts in the row are updated and the page has not moved.
+- [ ] Choose a file in a folded import form's section, fold it and change the queue from a second tab: the page waits and shows **Hay novedades en este libro…** below the row.
+- [ ] With the keyboard only: Tab reaches the row, Enter on a link moves focus to that section's heading, and Enter or Space on a heading folds it. A screen reader announces the row as the navigation **Secciones** and the current link as current.
+- [ ] Trigger an error while scrolled down: the message appears below the navigation row, not over it.
+- [ ] At 1280 px wide the links are a list to the left of the column that stays in place while scrolling and covers no text; at 768 px they are the row at the top.
+- [ ] **Crear otro libro** opens and closes its form every time it is clicked.
