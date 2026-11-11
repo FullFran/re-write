@@ -69,7 +69,9 @@ const editability = (editable) => [EditorView.editable.of(editable), EditorState
 /**
  * Builds an editor. `onChange` runs after each edit by the person, `onSave` on Ctrl/Cmd+S,
  * `onViewChange` when the person picks another view. Returns the same small surface as the
- * page's plain text field: dom, getValue, setValue, setEditable, focus, destroy.
+ * page's plain text field: dom, getValue, setValue, setEditable, isEditable, select, focus,
+ * destroy. New behaviour (wikilinks, for example) belongs in its own extension module added
+ * to the list below, as live-preview.js is.
  */
 export function createSceneEditor({ text, label, view = 'live', onChange = () => {}, onSave = () => {}, onViewChange = () => {} }) {
   const doc = document;
@@ -155,6 +157,15 @@ export function createSceneEditor({ text, label, view = 'live', onChange = () =>
       cm.dispatch({ effects: editSlot.reconfigure(editability(value)) });
     },
     isEditable: () => editable,
+    // Selects [from, to) of the text and scrolls it to the middle of the editor. The reading
+    // view cannot show a selection, so it gives way to the live preview (not remembered).
+    select(from, to) {
+      if (current === 'reading') show('live');
+      const end = Math.max(0, Math.min(to, cm.state.doc.length));
+      const start = Math.max(0, Math.min(from, end));
+      cm.dispatch({ selection: { anchor: start, head: end }, effects: EditorView.scrollIntoView(start, { y: 'center' }) });
+      cm.focus();
+    },
     focus() {
       if (current === 'reading') buttons.find((btn) => btn.dataset.view === 'reading').focus();
       else cm.focus();
