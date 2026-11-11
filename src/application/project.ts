@@ -1,14 +1,14 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, normalize, resolve } from 'node:path';
 import { Git } from '../adapters/git.ts';
 import { JsonStore, STATE_DIR } from '../adapters/json-store.ts';
 import type { Extraction } from '../adapters/annotation-extractor.ts';
 import { assessAnchor, buildAnchor, matchesRevision } from '../domain/anchor.ts';
 import {
-  claimId, EPISTEMIC_KINDS, isCanon, nextEditorialStatus,
+  claimId, EPISTEMIC_KINDS, isCanon, nextEditorialStatus, reopenTransition, StaleStateError,
   type Claim, type ClaimCandidate, type ClaimView, type Decision,
 } from '../domain/claim.ts';
-import { CONTINUITY_VERDICTS, InvalidFindingVerdictError, inspectContinuity, type Finding, type Verdict, type VerdictHistoryEntry, type VerdictKind } from '../domain/continuity.ts';
+import { verdictFields, CONTINUITY_VERDICTS, InvalidFindingVerdictError, inspectContinuity, type Finding, type Verdict, type VerdictHistoryEntry, type VerdictKind } from '../domain/continuity.ts';
 import { applyChange, proposalId, type Proposal } from '../domain/proposal.ts';
 import {
   NARRATIVE_VERDICTS, findingId, viewFinding,
@@ -47,8 +47,7 @@ export class Project {
     if (manifest.get('project')) return { project, created: false };
     mkdirSync(project.dir, { recursive: true });
     project.git.init();
-    manifest.put('project', { title });
-    project.git.commit(`rewrite: create project ${title}`, [STATE_DIR]);
+    project.commitWrites(`rewrite: create project ${title}`, [join(STATE_DIR, 'project.json')], () => manifest.put('project', { title }));
     return { project, created: true };
   }
 
@@ -99,20 +98,20 @@ export class Project {
         }
       }
     }
-    const imported: string[] = [];
+    const copies: [from: string, to: string][] = [];
     const unchanged: string[] = [];
     for (const file of files) {
       const relative = `${SCENES_DIR}/${basename(file)}`;
-      const target = join(this.dir, relative);
-      if (existsSync(target)) {
-        unchanged.push(relative);
-        continue;
-      }
-      mkdirSync(join(this.dir, SCENES_DIR), { recursive: true });
-      copyFileSync(file, target);
-      imported.push(relative);
+      if (existsSync(join(this.dir, relative))) unchanged.push(relative);
+      else copies.push([file, relative]);
     }
-    if (imported.length) this.git.commit(`rewrite: import ${imported.join(', ')}`, imported);
+    const imported = copies.map(([, relative]) => relative);
+    if (imported.length) {
+      this.commitWrites(`rewrite: import ${imported.join(', ')}`, imported, () => {
+        mkdirSync(join(this.dir, SCENES_DIR), { recursive: true });
+        for (const [from, relative] of copies) copyFileSync(from, join(this.dir, relative));
+      });
+    }
     return { imported, unchanged };
   }
 
@@ -139,21 +138,26 @@ export class Project {
     const created: string[] = [];
     const existing: string[] = [];
     const rejected: { statement: string; reason: string }[] = [];
+    const built = new Map<string, Claim>();
     for (const candidate of extraction.candidates) {
       try {
         const id = claimId(candidate);
-        if (this.claims.get(id)) {
+        if (this.claims.get(id) || built.has(id)) {
           existing.push(id);
           continue;
         }
         const claim = this.buildClaim(id, candidate, revision, extraction.extractor);
-        this.claims.put(id, proposedBy ? { ...claim, proposed_by: proposedBy } : claim);
+        built.set(id, proposedBy ? { ...claim, proposed_by: proposedBy } : claim);
         created.push(id);
       } catch (error) {
         rejected.push({ statement: candidate.statement, reason: (error as Error).message });
       }
     }
-    if (created.length) this.git.commit(`rewrite: extract ${created.length} claims`, [STATE_DIR]);
+    if (created.length) {
+      this.saveRecords(`rewrite: extract ${created.length} claims`, created.map((id) => ['claims', id]), () => {
+        for (const [id, claim] of built) this.claims.put(id, claim);
+      });
+    }
     return { created, existing, rejected };
   }
 
@@ -205,9 +209,10 @@ export class Project {
     return this.claimViews().filter(isCanon);
   }
 
-  reviewClaim(id: string, decision: Decision, by: string, note?: string): { claim: ClaimView; changed: boolean } {
+  reviewClaim(id: string, decision: Decision, by: string, note?: string, expected?: number): { claim: ClaimView; changed: boolean } {
     const claim = this.claims.get(id);
     if (!claim) throw new Error(`unknown claim: ${id}`);
+    checkExpected(claim.editorial_status, claim.history, decision, expected);
     const next = nextEditorialStatus(claim.editorial_status, decision);
     if (next === null) return { claim: this.view(claim), changed: false };
     const current = this.view(claim);
@@ -216,9 +221,49 @@ export class Project {
     }
     claim.history.push({ at: new Date().toISOString(), by, from: claim.editorial_status, to: next, ...(note ? { note } : {}) });
     claim.editorial_status = next;
-    this.claims.put(id, claim);
-    this.git.commit(`rewrite: ${decision} claim ${id}`, [STATE_DIR]);
+    this.saveRecords(`rewrite: ${decision} claim ${id}`, [['claims', id]], () => this.claims.put(id, claim));
     return { claim: this.view(claim), changed: true };
+  }
+
+  /**
+   * A person takes back an accept or reject: the claim is proposed again, so it leaves Canon until
+   * it is accepted again with valid evidence. The text never changes and the history only grows.
+   */
+  reopenClaim(id: string, by: string, expected: number, note?: string): { claim: ClaimView; changed: boolean } {
+    const claim = this.claims.get(id);
+    if (!claim) throw new Error(`unknown claim: ${id}`);
+    if (reopenTransition(claim.editorial_status, claim.history, expected) === 'unchanged') return { claim: this.view(claim), changed: false };
+    claim.history.push({ at: new Date().toISOString(), by, from: claim.editorial_status, to: 'proposed', ...(note ? { note } : {}), action: 'reopen' });
+    claim.editorial_status = 'proposed';
+    this.saveRecords(`rewrite: reopen claim ${id}`, [['claims', id]], () => this.claims.put(id, claim));
+    return { claim: this.view(claim), changed: true };
+  }
+
+  /** Writes records and commits exactly those records (see commitWrites). */
+  private saveRecords(message: string, records: [collection: string, id: string][], write: () => void): void {
+    this.commitWrites(message, records.map(([collection, id]) => recordPath(collection, id)), write);
+  }
+
+  /**
+   * Runs `write`, which may only touch these repository paths, and commits exactly those paths, so
+   * nothing else in the book is swept into the commit. When the write or the commit fails, every path
+   * is put back byte for byte (or removed when it did not exist) and unstaged, so the book is exactly
+   * as it was and a retry starts from a clean state. Every write that commits goes through here.
+   */
+  private commitWrites(message: string, paths: string[], write: () => void): void {
+    const before = paths.map((path) => (existsSync(join(this.dir, path)) ? readFileSync(join(this.dir, path)) : null));
+    try {
+      write();
+      this.git.commit(message, paths);
+    } catch (error) {
+      paths.forEach((path, i) => {
+        const bytes = before[i];
+        if (bytes === null) rmSync(join(this.dir, path), { force: true });
+        else writeFileSync(join(this.dir, path), bytes);
+      });
+      this.git.tryRun('reset', '-q', '--', ...paths);
+      throw error;
+    }
   }
 
   /** Everything a reviewer needs for one book, recomputed from the text on each read. */
@@ -241,8 +286,7 @@ export class Project {
   /** Read-only: it computes findings and attaches any verdict a human already gave. */
   check(): Finding[] {
     return inspectContinuity(this.claimViews()).map((finding) => {
-      const verdict = this.verdicts.get(finding.finding_id);
-      return verdict ? { ...finding, verdict } : finding;
+      return { ...finding, ...verdictFields(this.verdicts.get(finding.finding_id)) };
     });
   }
 
@@ -262,6 +306,7 @@ export class Project {
         by: existing.by,
         at: existing.at,
         ...(existing.note ? { note: existing.note } : {}),
+        ...(existing.reopened ? { reopened: existing.reopened } : {}),
       });
     }
     const record: Verdict = {
@@ -272,9 +317,26 @@ export class Project {
       ...(note ? { note } : {}),
       ...(history.length ? { history } : {}),
     };
-    this.verdicts.put(id, record);
-    this.git.commit(`rewrite: ${verdict} finding ${id}`, [STATE_DIR]);
+    this.saveRecords(`rewrite: ${verdict} finding ${id}`, [['verdicts', id]], () => this.verdicts.put(id, record));
     return record;
+  }
+
+  /**
+   * A person takes back a verdict, so the finding reads as pending again. The verdict stays in the
+   * record with who reopened it and when, and moves into the history when the next verdict is given.
+   * `expected` is the time of the verdict the person saw.
+   */
+  reopenFinding(id: string, by: string, expected: string, note?: string): { verdict: Verdict; changed: boolean } {
+    const record = this.verdicts.get(id);
+    if (!record) {
+      const known = this.findings.get(id) !== null || this.check().some((finding) => finding.finding_id === id);
+      throw new Error(known ? 'this was not decided yet; there is nothing to reopen' : `unknown finding: ${id}`);
+    }
+    if (record.at !== expected) throw new StaleStateError();
+    if (record.reopened) return { verdict: record, changed: false };
+    record.reopened = { by, at: new Date().toISOString(), ...(note ? { note } : {}) };
+    this.saveRecords(`rewrite: reopen finding ${id}`, [['verdicts', id]], () => this.verdicts.put(id, record));
+    return { verdict: record, changed: true };
   }
 
   /**
@@ -305,9 +367,10 @@ export class Project {
     const created: string[] = [];
     const existing: string[] = [];
 
+    const records = new Map<string, FindingRecord>();
     for (const candidate of candidates) {
       const id = findingId(candidate);
-      if (this.findings.get(id)) {
+      if (this.findings.get(id) || records.has(id)) {
         existing.push(id);
         continue;
       }
@@ -331,11 +394,15 @@ export class Project {
         author,
         created_at: new Date().toISOString(),
       };
-      this.findings.put(id, record);
+      records.set(id, record);
       created.push(id);
     }
 
-    if (created.length) this.git.commit(`rewrite: propose ${created.length} findings`, [STATE_DIR]);
+    if (created.length) {
+      this.saveRecords(`rewrite: propose ${created.length} findings`, created.map((id) => ['findings', id]), () => {
+        for (const [id, record] of records) this.findings.put(id, record);
+      });
+    }
     // Only this call's findings, in the order submitted, so the response does not grow with the book;
     // list_findings reads the rest.
     const own = [...new Set(candidates.map(findingId))].map((id) => this.findings.get(id)!);
@@ -352,8 +419,7 @@ export class Project {
       (file) => this.readScene(file),
       (rev, file) => this.git.showAt(rev, file),
     );
-    const verdict = this.verdicts.get(f.finding_id);
-    return verdict ? { ...view, verdict } : view;
+    return { ...view, ...verdictFields(this.verdicts.get(f.finding_id)) };
   }
 
   /** Stores a change for review. It never writes to the scene. */
@@ -387,8 +453,7 @@ export class Project {
       status: 'proposed',
       history: [],
     };
-    this.proposals.put(id, proposal);
-    this.git.commit(`rewrite: propose ${id}`, [STATE_DIR]);
+    this.saveRecords(`rewrite: propose ${id}`, [['proposals', id]], () => this.proposals.put(id, proposal));
     return { proposal, created: true };
   }
 
@@ -416,18 +481,17 @@ export class Project {
    * The only path that changes a scene, and only after an explicit human accept.
    * Text and decision go in one commit, so neither can exist without the other.
    */
-  reviewProposal(id: string, decision: Decision, by: string, note?: string): { proposal: Proposal; changed: boolean } {
+  reviewProposal(id: string, decision: Decision, by: string, note?: string, expected?: number): { proposal: Proposal; changed: boolean } {
     const proposal = this.proposals.get(id);
     if (!proposal) throw new Error(`unknown proposal: ${id}`);
+    checkExpected(proposal.status, proposal.history, decision, expected);
     const next = nextEditorialStatus(proposal.status, decision);
     if (next === null) return { proposal, changed: false };
-    const previous = structuredClone(proposal);
     proposal.history.push({ at: new Date().toISOString(), by, from: proposal.status, to: next, ...(note ? { note } : {}) });
     proposal.status = next;
 
     if (decision === 'reject') {
-      this.proposals.put(id, proposal);
-      this.git.commit(`rewrite: reject ${id}`, [STATE_DIR]);
+      this.saveRecords(`rewrite: reject ${id}`, [['proposals', id]], () => this.proposals.put(id, proposal));
       return { proposal, changed: true };
     }
 
@@ -436,17 +500,45 @@ export class Project {
     if (current === null || this.git.blobOf(proposal.file) !== proposal.base_blob) {
       throw new Error(`${proposal.file} changed since proposal ${id} was made; nothing was written`);
     }
-    try {
+    this.commitWrites(acceptSubject(id), [proposal.file, recordPath('proposals', id)], () => {
       writeFileSync(path, applyChange(current, proposal.find, proposal.replace));
       this.proposals.put(id, proposal);
-      this.git.commit(acceptSubject(id), [proposal.file, STATE_DIR]);
-    } catch (error) {
-      writeFileSync(path, current);
-      this.proposals.put(id, previous);
-      throw error;
-    }
+    });
     return { proposal, changed: true };
   }
+
+  /**
+   * A person takes back a rejection: the proposal is proposed again and the text does not move. If
+   * the scene changed meanwhile the proposal stays not applicable, as any stale proposal. An accepted
+   * proposal already changed the text, so it is never reopened: it is reverted through a new proposal.
+   */
+  reopenProposal(id: string, by: string, expected: number, note?: string): { proposal: Proposal; changed: boolean } {
+    const proposal = this.proposals.get(id);
+    if (!proposal) throw new Error(`unknown proposal: ${id}`);
+    const transition = reopenTransition(proposal.status, proposal.history, expected);
+    if (transition === 'unchanged') return { proposal, changed: false };
+    if (proposal.status === 'accepted') throw new Error(`${id} already changed the text; revert it instead of reopening it`);
+    proposal.history.push({ at: new Date().toISOString(), by, from: proposal.status, to: 'proposed', ...(note ? { note } : {}), action: 'reopen' });
+    proposal.status = 'proposed';
+    this.saveRecords(`rewrite: reopen ${id}`, [['proposals', id]], () => this.proposals.put(id, proposal));
+    return { proposal, changed: true };
+  }
+}
+
+/**
+ * An accept or reject may carry the history length the person saw. A different length means another
+ * tab or person changed the item since, unless it is this same decision already recorded (a repeat).
+ */
+function checkExpected(status: string, history: { length: number }, decision: Decision, expected: number | undefined): void {
+  if (expected === undefined || history.length === expected) return;
+  const target = decision === 'accept' ? 'accepted' : 'rejected';
+  if (history.length === expected + 1 && status === target) return;
+  throw new StaleStateError();
+}
+
+/** Where a stored record lives, relative to the book repository. */
+function recordPath(collection: string, id: string): string {
+  return join(STATE_DIR, collection, `${id}.json`);
 }
 
 function acceptSubject(id: string): string {

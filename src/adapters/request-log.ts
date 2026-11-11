@@ -77,6 +77,8 @@ function routeOf(path: string, resourcePath: string): { route: string; book?: st
   if (/^\/scenes\/.+/.test(suffix)) return { route: '/review/api/books/:book/scenes/:file', book };
   const review = /^\/(claims|proposals|findings)\/[^/]+$/.exec(suffix);
   if (review) return { route: `/review/api/books/:book/${review[1]}/:id`, book };
+  const action = /^\/(claims|proposals|findings)\/[^/]+\/(reopen)$/.exec(suffix);
+  if (action) return { route: `/review/api/books/:book/${action[1]}/:id/${action[2]}`, book };
   return { route: 'unmatched', book };
 }
 

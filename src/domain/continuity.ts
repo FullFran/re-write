@@ -13,11 +13,20 @@ export class InvalidFindingVerdictError extends Error {
   }
 }
 
+/** A person took a verdict back, so the finding is pending again. */
+export interface Reopening {
+  by: string;
+  at: string;
+  note?: string;
+}
+
 export interface VerdictHistoryEntry {
   verdict: VerdictKind;
   by: string;
   at: string;
   note?: string;
+  /** Set when this verdict was reopened before the next one was given. */
+  reopened?: Reopening;
 }
 
 export interface Verdict {
@@ -27,6 +36,17 @@ export interface Verdict {
   at: string;
   note?: string;
   history?: VerdictHistoryEntry[];
+  /** Present while the verdict is reopened: the finding reads as pending, and the verdict is kept. */
+  reopened?: Reopening;
+}
+
+/**
+ * How a stored verdict shows on a finding: as its verdict, or, while reopened, as the kept verdict
+ * next to a pending finding. Nothing when there is no verdict.
+ */
+export function verdictFields(record: Verdict | null): { verdict: Verdict } | { reopened_verdict: Verdict } | Record<string, never> {
+  if (!record) return {};
+  return record.reopened ? { reopened_verdict: record } : { verdict: record };
 }
 
 export interface Citation {
@@ -50,6 +70,8 @@ export interface Finding {
   citations: Citation[];
   alternatives: string[];
   verdict?: Verdict;
+  /** While the verdict is reopened: the kept verdict, with its history and who reopened it. */
+  reopened_verdict?: Verdict;
 }
 
 const ALTERNATIVES = [

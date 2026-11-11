@@ -13,6 +13,8 @@ export interface HistoryEntry {
   from: string;
   to: string;
   note?: string;
+  /** Set when a person reopened a decision; absent on ordinary decisions and on all older records. */
+  action?: 'reopen';
 }
 
 /** How a claim bears on what a character knows. */
@@ -71,6 +73,29 @@ export function nextEditorialStatus(current: EditorialStatus, decision: Decision
   if (current === target) return null;
   if (current !== 'proposed') throw new Error(`this was already ${current}`);
   return target;
+}
+
+/** A tab acted on a state that another tab or person has changed since. */
+export class StaleStateError extends Error {
+  constructor() {
+    super('Esta decisión cambió en otra pestaña. Recarga para ver el estado actual.');
+    this.name = 'StaleStateError';
+  }
+}
+
+/**
+ * Decides whether a reopen applies. `expected` is the history length the person saw, which only
+ * grows (history is append-only), so it identifies the state they acted on. Returns 'reopen' when
+ * the decision can be reopened, 'unchanged' when this exact reopen was already recorded (a repeated
+ * click), and throws when nothing was decided or the state changed since.
+ */
+export function reopenTransition(status: EditorialStatus, history: HistoryEntry[], expected: number): 'reopen' | 'unchanged' {
+  if (history.length === expected) {
+    if (status === 'proposed') throw new Error('this was not decided yet; there is nothing to reopen');
+    return 'reopen';
+  }
+  if (history.length === expected + 1 && status === 'proposed' && history.at(-1)?.action === 'reopen') return 'unchanged';
+  throw new StaleStateError();
 }
 
 /**
