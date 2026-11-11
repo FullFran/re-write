@@ -615,15 +615,18 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     writeFileSync(join(dir, 'scenario.json'), JSON.stringify({ login: 'wait' }));
     const server = spawn(process.execPath, [join(import.meta.dirname, 'fixtures/engine/server-main.ts'), join(dir, 'main.ts'), tempDir()], { stdio: ['ignore', 'pipe', 'ignore'] });
     t.after(() => { server.kill('SIGKILL'); });
-    const port = await new Promise<number>((resolve) => server.stdout.on('data', (chunk) => {
-      const match = /ready (\d+)/.exec(String(chunk));
-      if (match) resolve(Number(match[1]));
-    }));
+    let output = '';
+    server.stdout.on('data', (chunk) => { output += String(chunk); });
+    await until(() => /ready \d+/.test(output));
+    const port = Number(/ready (\d+)/.exec(output)![1]);
     // A request that is never answered keeps `server.close` from completing.
     const socket = connectSocket(port, '127.0.0.1');
+    socket.on('error', () => { /* the server is killed at the end of the test */ });
     t.after(() => socket.destroy());
     await new Promise((resolve) => socket.once('connect', resolve));
     socket.write('GET /held HTTP/1.1\r\nHost: x\r\n\r\n');
+    // Only once the server has the request is the connection busy rather than idle.
+    await until(() => output.includes('held'));
     const child = Number(readFileSync(join(dir, 'pid.txt'), 'utf8'));
     const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
     assert.ok(alive(child));
