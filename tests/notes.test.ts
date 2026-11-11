@@ -151,3 +151,27 @@ test('a scene edit keeps the refusal wording it had, and a note edit names the n
   writeFileSync(join(project.dir, 'notas', 'Elena.md'), 'cambio local');
   assert.throws(() => project.editNote({ name: 'Elena', base_blob: noteBlob, text: 'x', by: 'u' }), { message: 'notas/Elena.md has uncommitted edits; commit them before editing the note' });
 });
+
+test('a failed accept removes only the note file it created itself', () => {
+  // A file that appears after the accept checked the name, just before the note is written.
+  const raced = bookWith({});
+  const { proposal } = raced.proposeNote({ name: 'Elena', text: 'propuesta', rationale: 'r' });
+  const head = raced.git.head();
+  const prepare = (raced as any).prepareNotesDir.bind(raced);
+  (raced as any).prepareNotesDir = () => {
+    prepare();
+    writeFileSync(join(raced.dir, 'notas', 'Elena.md'), 'escrito por otro');
+  };
+  assert.throws(() => raced.reviewProposal(proposal.proposal_id, 'accept', 'user_fran'), /EEXIST/);
+  assert.equal(readFileSync(join(raced.dir, 'notas', 'Elena.md'), 'utf8'), 'escrito por otro', 'the other file survives the rollback');
+  assert.equal(raced.git.head(), head);
+  assert.equal(raced.proposals.get(proposal.proposal_id)!.status, 'proposed');
+
+  // The note was written but the commit failed: the note this accept created is removed.
+  const failed = bookWith({});
+  const second = failed.proposeNote({ name: 'Faro', text: 'x', rationale: 'r' }).proposal;
+  failed.git.commit = () => { throw new Error('commit failed'); };
+  assert.throws(() => failed.reviewProposal(second.proposal_id, 'accept', 'user_fran'), /commit failed/);
+  assert.equal(existsSync(join(failed.dir, 'notas', 'Faro.md')), false);
+  assert.equal(failed.proposals.get(second.proposal_id)!.status, 'proposed');
+});

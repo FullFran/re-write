@@ -396,7 +396,7 @@ export class Project {
    * is put back byte for byte (or removed when it did not exist) and unstaged, so the book is exactly
    * as it was and a retry starts from a clean state. Every write that commits goes through here.
    */
-  private commitWrites(message: string, paths: string[], write: () => void): void {
+  private commitWrites(message: string, paths: string[], write: () => void, created?: Map<string, number>): void {
     const before = paths.map((path) => (existsSync(join(this.dir, path)) ? readFileSync(join(this.dir, path)) : null));
     try {
       write();
@@ -404,12 +404,27 @@ export class Project {
     } catch (error) {
       paths.forEach((path, i) => {
         const bytes = before[i];
-        if (bytes === null) rmSync(join(this.dir, path), { force: true });
-        else writeFileSync(join(this.dir, path), bytes);
+        if (bytes !== null) writeFileSync(join(this.dir, path), bytes);
+        // With `created`, a path that did not exist is removed only when it is still the very file
+        // this operation created (same inode): a file someone else put there meanwhile stays.
+        else if (!created || this.createdHere(path, created)) rmSync(join(this.dir, path), { force: true });
       });
       this.git.tryRun('reset', '-q', '--', ...paths);
       throw error;
     }
+  }
+
+  private createdHere(path: string, created: Map<string, number>): boolean {
+    try {
+      return created.get(path) === lstatSync(join(this.dir, path)).ino;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Creates notas/ when it is missing (a separate step, so a test can act between it and the write). */
+  private prepareNotesDir(): void {
+    mkdirSync(join(this.dir, NOTES_DIR), { recursive: true });
   }
 
   /** Everything a reviewer needs for one book, recomputed from the text on each read. */
@@ -717,11 +732,13 @@ export class Project {
       checkSceneText(proposal.replace);
       const dir = join(this.dir, NOTES_DIR);
       if (existsSync(dir) && !this.isRegular(dir, 'directory')) throw new Error(`${NOTES_DIR} is not a directory; nothing was written`);
+      const created = new Map<string, number>();
       this.commitWrites(acceptSubject(id), [proposal.file, recordPath('proposals', id)], () => {
-        mkdirSync(dir, { recursive: true });
+        this.prepareNotesDir();
         writeFileSync(join(this.dir, proposal.file), proposal.replace, { flag: 'wx' });
+        created.set(proposal.file, lstatSync(join(this.dir, proposal.file)).ino);
         this.proposals.put(id, proposal);
-      });
+      }, created);
       return { proposal, changed: true };
     }
 
