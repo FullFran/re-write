@@ -101,6 +101,17 @@ const decidedProposals = new Set();
 const decidedClaims = new Set();
 const MAX_NOTE = 2000;
 let nextNoteCounter = 0;
+// Background refresh: the page asks for the queue again every few seconds while it
+// is visible, and the server answers 304 when nothing changed.
+const REFRESH_MS = 5000;
+const REFRESH_MAX_MS = 60000;
+let view = null;
+let openScene = null;
+let renderSeq = 0;
+let actionsRunning = 0;
+let refreshTimer = null;
+let refreshDelay = REFRESH_MS;
+let refreshing = false;
 const STATE_LABELS = { proposed: 'Pendiente', accepted: 'Aceptada', rejected: 'Rechazada' };
 
 function stateBadge(state, stale) {
@@ -146,6 +157,19 @@ async function api(path, body) {
   return data;
 }
 
+// Reads state together with its validator; a known validator turns an unchanged
+// answer into a 304 without a body.
+async function apiState(path, known) {
+  const token = await window.Clerk.session.getToken();
+  const headers = { authorization: 'Bearer ' + token };
+  if (known) headers['if-none-match'] = known;
+  const res = await fetch('/review/api' + path, { method: 'GET', headers });
+  if (res.status === 304) return { changed: false };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo completar la operación');
+  return { changed: true, data, tag: res.headers ? res.headers.get('etag') : null };
+}
+
 async function apiUpload(path, file, mapping, dryRun) {
   const token = await window.Clerk.session.getToken();
   const headers = {
@@ -173,11 +197,14 @@ function button(label, className, run) {
   node.type = 'button';
   node.addEventListener('click', async () => {
     node.disabled = true;
+    actionsRunning++;
     try {
       await run();
     } catch (error) {
       showError(error.message);
       node.disabled = false;
+    } finally {
+      actionsRunning--;
     }
   });
   return node;
@@ -266,6 +293,8 @@ function narrativeFindingCard(book, finding, reload, openQuote) {
   noteInput.placeholder = 'Nota opcional sobre la valoración…';
   noteInput.setAttribute('aria-label', 'Nota opcional sobre la valoración');
   if (finding.verdict && finding.verdict.note) {
+    // The saved note is the field's baseline: only text typed after it is unsaved.
+    noteInput.defaultValue = finding.verdict.note;
     noteInput.value = finding.verdict.note;
   }
   const counter = el('span', undefined, 'meta note-counter');
@@ -730,8 +759,10 @@ function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
   viewer.style.display = 'none';
 
   let activeBtn = null;
-  const loadScene = async (sceneFile, highlight) => {
+  // quiet: a background refresh reopens the scene without moving the reader.
+  const loadScene = async (sceneFile, highlight, quiet) => {
     const canonical = sceneFile.startsWith('scenes/') ? sceneFile : 'scenes/' + sceneFile;
+    openScene = { file: canonical, highlight };
     if (activeBtn) activeBtn.classList.remove('active');
     for (const child of grid.children) {
       if (child.textContent === canonical || child.textContent === sceneFile) {
@@ -772,7 +803,7 @@ function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
           const after = data.text.slice(start + q.length);
           const mark = el('mark', matched);
           pre.append(document.createTextNode(before), mark, document.createTextNode(after));
-          setTimeout(() => mark.scrollIntoView({ block: 'center', behavior: 'smooth' }), 50);
+          if (!quiet) setTimeout(() => mark.scrollIntoView({ block: 'center', behavior: 'smooth' }), 50);
         } else {
           pre.textContent = data.text;
         }
@@ -808,15 +839,15 @@ function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
         propBox.append(el('p', 'Sin cambios pendientes para esta escena.', 'meta'));
       }
       viewer.append(propBox);
-      viewer.scrollIntoView({ behavior: 'smooth' });
+      if (!quiet) viewer.scrollIntoView({ behavior: 'smooth' });
     } catch (error) {
       viewer.replaceChildren(el('p', error.message, 'meta'));
     }
   };
 
   if (registerOpenQuote) {
-    registerOpenQuote((file, quote, anchor, status) => {
-      return loadScene(file, { quote, anchor, status });
+    registerOpenQuote((file, quote, anchor, status, quiet) => {
+      return loadScene(file, { quote, anchor, status }, quiet);
     });
   }
 
@@ -828,7 +859,38 @@ function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
   return box;
 }
 
+// Everything below the toolbar for one book, built without touching the page.
+function bookSections(currentBook, data) {
+  const reload = (scene, highlight) => renderApp(currentBook, scene, highlight);
+  const pending = (c) => c.editorial_status === 'proposed';
+
+  let openQuoteHandler = null;
+  const scenesBox = scenesSection(currentBook, data.scenes || [], reload, (fn) => { openQuoteHandler = fn; });
+  const findingsBox = findingsSection(currentBook, data.finding_views || [], reload, (file, quote, anchor, status) => {
+    if (openQuoteHandler) openQuoteHandler(file, quote, anchor, status);
+  });
+
+  const nodes = [
+    importSection(currentBook, reload),
+    notionImportSection(currentBook, reload),
+    scenesBox,
+    findingsBox,
+    section('Cambios propuestos', data.proposals.filter((p) => p.proposal.status === 'proposed' || decidedProposals.has(currentBook + '/' + p.proposal.proposal_id)).map((p) => proposalCard(currentBook, p, reload)), 'Ningún cambio pendiente.', 'Las decisiones de esta sesión permanecen aquí para confirmar su estado.'),
+    section('Posibles problemas', data.findings.map((f) => findingCard(currentBook, f, reload)), 'Sin hallazgos, lo que no demuestra que no haya problemas.'),
+    section('Afirmaciones por revisar', data.claims.filter((c) => pending(c) || decidedClaims.has(currentBook + '/' + c.claim_id)).map((c) => claimCard(currentBook, c, reload)), 'Ninguna pendiente.', 'Las decisiones de esta sesión permanecen aquí para confirmar su estado.'),
+    section('Canon', data.canon.map((c) => claimCard(currentBook, c, reload)), 'El canon está vacío.', 'Solo hechos narrados aceptados por una persona y con evidencia válida. Aceptar un cambio de texto no aprueba sus afirmaciones.'),
+    section('Afirmaciones fuera del Canon', data.claims.filter((c) => c.editorial_status === 'accepted' && !data.canon.some((canonical) => canonical.claim_id === c.claim_id)).map((c) => claimCard(currentBook, c, reload)), 'Ninguna afirmación aceptada fuera del Canon.', 'Una afirmación aceptada puede seguir fuera del Canon por su tipo o por su evidencia.'),
+    section('Afirmaciones rechazadas', data.claims.filter((c) => c.editorial_status === 'rejected').map((c) => claimCard(currentBook, c, reload)), 'Ninguna afirmación rechazada.', 'Las afirmaciones rechazadas no forman parte del Canon.'),
+    section('Historial de cambios del manuscrito', data.proposals.filter((p) => p.proposal.status !== 'proposed').map((p) => proposalCard(currentBook, p, reload)), 'Sin decisiones todavía.', 'Aceptar una propuesta cambia el manuscrito, pero no convierte sus afirmaciones en Canon. Las propuestas rechazadas no cambian el texto.'),
+  ];
+  return { nodes, openQuote: (...args) => openQuoteHandler ? openQuoteHandler(...args) : undefined };
+}
+
 async function renderApp(selectedBookId, selectedScene, highlight) {
+  const seq = ++renderSeq;
+  // Nothing refreshes in the background until this render has settled.
+  view = null;
+  openScene = null;
   const { books } = await api('/books');
   app.replaceChildren();
 
@@ -857,34 +919,118 @@ async function renderApp(selectedBookId, selectedScene, highlight) {
     createBox.style.display = createBox.style.display === 'none' ? 'block' : 'none';
   });
   toolbar.append(toggleBtn);
-  app.append(toolbar, createBox);
+  const notice = el('p', 'Hay novedades en este libro. Se mostrarán cuando termines lo que tienes a medias: una nota, un formulario o un diálogo abierto.');
+  notice.setAttribute('role', 'status');
+  notice.hidden = true;
+  app.append(toolbar, createBox, notice);
 
-  const reload = (scene, highlight) => renderApp(currentBook, scene, highlight);
-  const data = await api('/books/' + currentBook);
-  const pending = (c) => c.editorial_status === 'proposed';
-
-  let openQuoteHandler = null;
-  const scenesBox = scenesSection(currentBook, data.scenes || [], reload, (fn) => { openQuoteHandler = fn; });
-  const findingsBox = findingsSection(currentBook, data.finding_views || [], reload, (file, quote, anchor, status) => {
-    if (openQuoteHandler) openQuoteHandler(file, quote, anchor, status);
-  });
-
-  app.append(
-    importSection(currentBook, reload),
-    notionImportSection(currentBook, reload),
-    scenesBox,
-    findingsBox,
-    section('Cambios propuestos', data.proposals.filter((p) => p.proposal.status === 'proposed' || decidedProposals.has(currentBook + '/' + p.proposal.proposal_id)).map((p) => proposalCard(currentBook, p, reload)), 'Ningún cambio pendiente.', 'Las decisiones de esta sesión permanecen aquí para confirmar su estado.'),
-    section('Posibles problemas', data.findings.map((f) => findingCard(currentBook, f, reload)), 'Sin hallazgos, lo que no demuestra que no haya problemas.'),
-    section('Afirmaciones por revisar', data.claims.filter((c) => pending(c) || decidedClaims.has(currentBook + '/' + c.claim_id)).map((c) => claimCard(currentBook, c, reload)), 'Ninguna pendiente.', 'Las decisiones de esta sesión permanecen aquí para confirmar su estado.'),
-    section('Canon', data.canon.map((c) => claimCard(currentBook, c, reload)), 'El canon está vacío.', 'Solo hechos narrados aceptados por una persona y con evidencia válida. Aceptar un cambio de texto no aprueba sus afirmaciones.'),
-    section('Afirmaciones fuera del Canon', data.claims.filter((c) => c.editorial_status === 'accepted' && !data.canon.some((canonical) => canonical.claim_id === c.claim_id)).map((c) => claimCard(currentBook, c, reload)), 'Ninguna afirmación aceptada fuera del Canon.', 'Una afirmación aceptada puede seguir fuera del Canon por su tipo o por su evidencia.'),
-    section('Afirmaciones rechazadas', data.claims.filter((c) => c.editorial_status === 'rejected').map((c) => claimCard(currentBook, c, reload)), 'Ninguna afirmación rechazada.', 'Las afirmaciones rechazadas no forman parte del Canon.'),
-    section('Historial de cambios del manuscrito', data.proposals.filter((p) => p.proposal.status !== 'proposed').map((p) => proposalCard(currentBook, p, reload)), 'Sin decisiones todavía.', 'Aceptar una propuesta cambia el manuscrito, pero no convierte sus afirmaciones en Canon. Las propuestas rechazadas no cambian el texto.'),
-  );
-  if (selectedScene && openQuoteHandler) {
-    await openQuoteHandler(selectedScene, highlight?.quote, highlight?.anchor, highlight?.status);
+  const state = await apiState('/books/' + currentBook);
+  const built = bookSections(currentBook, state.data);
+  app.append(...built.nodes);
+  if (seq === renderSeq) view = { book: currentBook, tag: state.tag, pending: null, sections: built.nodes, notice };
+  if (selectedScene) {
+    await built.openQuote(selectedScene, highlight?.quote, highlight?.anchor, highlight?.status);
   }
+}
+
+// Unfinished work a re-render would destroy: a focused field, text or files not
+// yet sent, or an open dialog (the account menu included).
+function hasWorkInProgress() {
+  const active = document.activeElement;
+  if (active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return true;
+  if (document.querySelector('dialog[open], [role="dialog"], [aria-modal="true"]')) return true;
+  for (const input of app.getElementsByTagName('input')) {
+    if (input.type === 'file' ? input.files && input.files.length > 0 : input.value !== input.defaultValue) return true;
+  }
+  return false;
+}
+
+// The first card at or below the top of the viewport, so the swap can keep it
+// where it was and a button never moves under the pointer.
+function viewportAnchor() {
+  for (const card of app.getElementsByTagName('article')) {
+    if (!card.id) continue;
+    const top = card.getBoundingClientRect().top;
+    if (top >= 0) return { id: card.id, top };
+  }
+  return null;
+}
+
+async function showRefreshed(current, data) {
+  const seq = renderSeq;
+  const scene = openScene;
+  const built = bookSections(current.book, data);
+  if (scene) await built.openQuote(scene.file, scene.highlight?.quote, scene.highlight?.anchor, scene.highlight?.status, true);
+  // Reopening the scene took a request: the person may have started something meanwhile.
+  if (seq !== renderSeq || actionsRunning > 0 || hasWorkInProgress()) return false;
+  const anchor = viewportAnchor();
+  const scrollY = window.scrollY;
+  const focused = document.activeElement && document.activeElement.closest ? document.activeElement.closest('article') : null;
+  for (const node of current.sections) node.remove();
+  app.append(...built.nodes);
+  current.sections = built.nodes;
+  const anchored = anchor && document.getElementById(anchor.id);
+  if (anchored) window.scrollBy(0, anchored.getBoundingClientRect().top - anchor.top);
+  else window.scrollTo(0, scrollY);
+  const refocus = focused && focused.id && document.getElementById(focused.id);
+  if (refocus) refocus.focus({ preventScroll: true });
+  return true;
+}
+
+// One poll. It only ever reads; it never renders over unfinished work, over a
+// newer render, or while one of the person's own actions is running.
+async function refreshOnce() {
+  const current = view;
+  if (!current || refreshing || document.hidden || actionsRunning > 0) return;
+  refreshing = true;
+  try {
+    const state = await apiState('/books/' + current.book, current.tag);
+    if (current !== view) return;
+    if (state.changed) {
+      current.tag = state.tag;
+      current.pending = state.data;
+    }
+    refreshDelay = REFRESH_MS;
+    if (!current.pending || actionsRunning > 0) return;
+    if (hasWorkInProgress()) {
+      current.notice.hidden = false;
+      return;
+    }
+    const data = current.pending;
+    if (await showRefreshed(current, data)) {
+      if (current.pending === data) current.pending = null;
+      current.notice.hidden = true;
+    } else if (current === view) {
+      current.notice.hidden = false;
+    }
+  } catch {
+    // A failed poll is not the person's problem: retry later, and less often.
+    refreshDelay = Math.min(refreshDelay * 2, REFRESH_MAX_MS);
+  } finally {
+    refreshing = false;
+  }
+}
+
+function scheduleRefresh() {
+  clearTimeout(refreshTimer);
+  refreshTimer = null;
+  if (document.hidden) return;
+  refreshTimer = setTimeout(async () => {
+    await refreshOnce();
+    scheduleRefresh();
+  }, refreshDelay);
+}
+
+function startRefresh() {
+  // A hidden tab asks for nothing; coming back asks at once instead of waiting a turn.
+  document.addEventListener('visibilitychange', async () => {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+    if (document.hidden) return;
+    await refreshOnce();
+    scheduleRefresh();
+  });
+  scheduleRefresh();
 }
 
 window.addEventListener('load', async () => {
@@ -897,6 +1043,7 @@ window.addEventListener('load', async () => {
       return;
     }
     window.Clerk.mountUserButton(document.getElementById('user'));
+    startRefresh();
     await renderApp();
   } catch (error) {
     app.replaceChildren();
