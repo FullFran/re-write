@@ -154,3 +154,17 @@ test('scene decisions reopen the scene with the new state and no accept action',
   assert.ok(!nodes(viewer(), 'button').some(n => n.textContent === 'Aceptar cambio'));
   assert.ok(!nodes(ui.app, 'p').some(n => n.attrs.role === 'alert'));
 });
+
+test('"Crear otro libro" opens and closes its form as many times as it is clicked', async () => {
+  const ui = page({ scenes: [], proposals: [], claims: [], canon: [], findings: [] });
+  await ui.renderApp('sal');
+  const toggle = nodes(ui.app, 'button').find(n => n.textContent === 'Crear otro libro')!;
+  const form = nodes(ui.app, 'section').find(n => nodes(n, 'h2').some(h => h.textContent === 'Crear un nuevo libro'))! as any;
+  assert.equal(form.style.display, 'none');
+  for (const [display, expanded] of [['block', 'true'], ['none', 'false'], ['block', 'true']]) {
+    await toggle.events.click();
+    assert.equal(form.style.display, display);
+    assert.equal(toggle.attrs['aria-expanded'], expanded);
+    assert.equal(toggle.disabled, false);
+  }
+});

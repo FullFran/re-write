@@ -62,6 +62,8 @@ export const REVIEW_CSS = `
   --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-code: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   --measure: 46rem; --tap: 44px; --radius: 8px;
+  /* Height of the section navigation while it sticks to the top; 0 where it is a side column. */
+  --nav-h: calc(var(--tap) + 2 * var(--space-1));
   --gutter: max(var(--space-4), env(safe-area-inset-left), env(safe-area-inset-right));
 }
 @media (prefers-color-scheme: dark) {
@@ -93,6 +95,8 @@ article > :first-child, .card-box > :first-child { margin-top: 0; }
 article > :last-child, .card-box > :last-child { margin-bottom: 0; }
 .card-box h2 { margin: 0 0 var(--space-2); font-size: var(--text-lg); }
 .card-box article { margin: 0; padding: var(--space-4) 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+/* A jump (a navigation link, a decided card, an opened scene) lands below the navigation bar. */
+section, article, .scene-viewer { scroll-margin-top: calc(var(--nav-h) + var(--space-3)); }
 article:focus { outline: 2px solid var(--ink); outline-offset: 4px; }
 :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 blockquote { margin: var(--space-3) 0; padding: var(--space-1) 0 var(--space-1) var(--space-3); border-left: 3px solid var(--edge); }
@@ -138,6 +142,24 @@ summary { min-height: var(--tap); padding: var(--space-3) 0; color: var(--muted)
 .scenes-grid > button { text-align: left; }
 .scene-viewer { margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--line); }
 
+/* Section navigation: one row under the thumb's reach, scrolled sideways, stuck to the top. */
+.section-nav { position: sticky; top: 0; z-index: 2; margin: 0 calc(-1 * var(--gutter)); padding-top: env(safe-area-inset-top); border-bottom: 1px solid var(--line); background: var(--paper); }
+.section-nav ul { position: relative; display: flex; gap: var(--space-1); margin: 0; padding: var(--space-1) var(--gutter); overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; list-style: none; }
+.section-nav ul::-webkit-scrollbar { display: none; }
+.section-nav a { display: flex; align-items: center; gap: var(--space-2); min-height: var(--tap); padding: 0 var(--space-3); border-radius: var(--radius); color: var(--muted); font: var(--text-sm)/1.3 var(--font-ui); text-decoration: none; white-space: nowrap; }
+/* Where the reader is: weight and a filled shape, not colour alone. */
+.section-nav a[aria-current=location] { background: var(--pressed); color: var(--ink); font-weight: 700; }
+.count { min-width: 1.5rem; padding: 0 var(--space-1); border: 1px solid var(--edge); border-radius: 1rem; color: var(--ink); font-size: var(--text-xs); font-weight: 700; text-align: center; }
+.count[hidden] { display: none; }
+
+/* A section heading folds its section; the chevron points down when open. */
+.fold { display: flex; align-items: center; gap: var(--space-3); width: 100%; min-height: var(--tap); padding: 0; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; text-align: left; }
+.fold::before { content: ''; flex: none; width: .5em; height: .5em; margin: 0 var(--space-1) .2em; border: solid var(--muted); border-width: 0 2px 2px 0; transform: rotate(45deg); transition: transform .12s; }
+.fold[aria-expanded=false]::before { margin-bottom: 0; transform: rotate(-45deg); }
+section:has(> .fold-body[hidden]) > h2 { margin-bottom: 0; }
+section:has(> .fold-body[hidden]) > .toolbar { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+section:not(.card-box):has(> .fold-body[hidden]) + section:not(.card-box) > h2 { margin-top: var(--space-2); }
+
 /* The diff wraps; a change is marked by its label, its bar and its line, not by colour alone. */
 .visual-diff { margin: var(--space-3) 0; padding: var(--space-2) 0; border: 1px solid var(--line); border-radius: var(--radius); white-space: pre-wrap; overflow-wrap: anywhere; }
 .visual-diff > div { padding: var(--space-1) var(--space-3); }
@@ -153,9 +175,10 @@ ins { text-decoration-line: underline; text-decoration-color: var(--accept); tex
 /* The newest error follows the reader: it is added at the top of a long page. */
 [role=alert] { margin: 0 0 var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--reject); border-left-width: 4px; border-radius: var(--radius); background: var(--reject-bg); font: var(--text-sm)/1.45 var(--font-ui); }
 main > [role=alert]:first-child { position: sticky; top: max(var(--space-2), env(safe-area-inset-top)); z-index: 3; }
+main:has(> .section-nav) > [role=alert]:first-child { top: calc(var(--nav-h) + max(var(--space-2), env(safe-area-inset-top))); }
 [role=status] { color: var(--accept); font-weight: 600; }
 /* The refresh notice floats, so showing or hiding it never moves the text being read. */
-.notice { position: fixed; z-index: 2; top: max(var(--space-2), env(safe-area-inset-top)); left: 0; right: 0; width: min(100% - 2 * var(--gutter), var(--measure) - 2 * var(--space-4)); margin: 0 auto; padding: var(--space-3) var(--space-4); border: 1px solid var(--edge); border-left: 4px solid var(--accept); border-radius: var(--radius); background: var(--paper); box-shadow: 0 2px 10px rgb(0 0 0 / .2); color: var(--ink); font: var(--text-sm)/1.45 var(--font-ui); }
+.notice { position: fixed; z-index: 2; top: calc(var(--nav-h) + max(var(--space-2), env(safe-area-inset-top))); left: 0; right: 0; width: min(100% - 2 * var(--gutter), var(--measure) - 2 * var(--space-4)); margin: 0 auto; padding: var(--space-3) var(--space-4); border: 1px solid var(--edge); border-left: 4px solid var(--accept); border-radius: var(--radius); background: var(--paper); box-shadow: 0 2px 10px rgb(0 0 0 / .2); color: var(--ink); font: var(--text-sm)/1.45 var(--font-ui); }
 /* Kept rendered while empty: a live region must exist before its text arrives to be announced. */
 .notice[hidden] { display: block; width: 1px; height: 1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); box-shadow: none; }
 /* With an error showing, the notice goes back into the page: two floating boxes would cover each other or a decision. */
@@ -183,6 +206,12 @@ main:has(> [role=alert]) .notice:not([hidden]) { position: static; width: auto; 
   article, .card-box { padding: var(--space-5); }
   .card-box article { padding: var(--space-5) 0; }
 }
+/* Wide screens have room beside the column: the navigation becomes a list there and covers nothing. */
+@media (min-width: 75em) {
+  :root { --nav-h: 0px; }
+  .section-nav { position: fixed; top: 5.5rem; left: calc(50% - var(--measure) / 2 - 14rem); width: 12rem; max-height: calc(100vh - 6.5rem); margin: 0; padding: 0; border: 0; overflow-y: auto; }
+  .section-nav ul { flex-direction: column; padding: 0; overflow: visible; }
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
@@ -207,6 +236,22 @@ let actionsRunning = 0;
 let refreshTimer = null;
 let refreshDelay = REFRESH_MS;
 let refreshing = false;
+// Sections the person folded or unfolded by hand: a choice outlives every re-render.
+const foldChoices = new Map();
+// The navigation row: [section key, short label, the section's own heading].
+const NAV = [
+  ['cambios', 'Cambios', 'Cambios propuestos'],
+  ['hallazgos', 'Hallazgos', 'Hallazgos de la trama'],
+  ['problemas', 'Problemas', 'Posibles problemas'],
+  ['afirmaciones', 'Afirmaciones', 'Afirmaciones por revisar'],
+  ['importar', 'Importar', 'Importar escenas Markdown'],
+  ['escenas', 'Escenas', 'Navegar escenas'],
+  ['canon', 'Canon', 'Canon'],
+  ['historial', 'Historial', 'Historial de cambios del manuscrito'],
+];
+// A section is the current one once its heading has passed this line, in px from the top.
+const SPY_LINE = 120;
+let spyQueued = false;
 const STATE_LABELS = { proposed: 'Pendiente', accepted: 'Aceptada', rejected: 'Rechazada' };
 const NEWS_NOTICE = 'Hay novedades en este libro. Se mostrarán cuando termines lo que tienes a medias: una nota, un formulario o un diálogo abierto.';
 
@@ -312,8 +357,9 @@ function button(label, className, run) {
       await run();
     } catch (error) {
       showError(error.message);
-      node.disabled = false;
     } finally {
+      // Not every action re-renders the page: a button that stays must work again.
+      node.disabled = false;
       actionsRunning--;
     }
   });
@@ -559,13 +605,132 @@ function proposalCard(book, { proposal, diff, applicable }, reload) {
 function section(title, cards, empty, explanation) {
   const box = el('section');
   box.append(el('h2', title));
-  if (explanation) box.append(el('p', explanation, 'meta'));
+  // An empty section is one line: what it holds is explained once it holds something.
+  if (explanation && cards.length) box.append(el('p', explanation, 'meta'));
   if (!cards.length) box.append(el('p', empty, 'meta'));
   for (const card of cards) {
     if (card.id) card.id = encodeURIComponent(title) + '-' + card.id;
   }
   box.append(...cards);
   return box;
+}
+
+function isPhone() {
+  return Boolean(window.matchMedia && window.matchMedia('(max-width: 40em)').matches);
+}
+
+// Turns a built section into one its heading folds. Folded content stays in the
+// page, so a form keeps its text and files. The heading keeps its exact text.
+function foldable(box, key, openByDefault) {
+  const head = box.children[0];
+  const heading = head.className === 'toolbar' ? head.children[0] : head;
+  const toggle = el('button', heading.textContent, 'fold');
+  toggle.type = 'button';
+  heading.textContent = '';
+  heading.append(toggle);
+  const body = el('div', undefined, 'fold-body');
+  box.id = 'sec-' + key;
+  body.id = box.id + '-body';
+  toggle.setAttribute('aria-controls', body.id);
+  body.append(...[...box.children].slice(1));
+  box.replaceChildren(head, body);
+  const show = (open) => {
+    body.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+  };
+  show(foldChoices.has(key) ? foldChoices.get(key) : openByDefault);
+  const setOpen = (open) => {
+    foldChoices.set(key, open);
+    show(open);
+  };
+  toggle.addEventListener('click', () => {
+    setOpen(body.hidden);
+    queueSpy();
+  });
+  box.fold = { setOpen, toggle };
+  return box;
+}
+
+function goToSection(key) {
+  const target = document.getElementById('sec-' + key);
+  if (!target) return;
+  if (target.fold) target.fold.setOpen(true);
+  target.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
+  // Keyboard and screen reader continue from the section, not from the navigation.
+  if (target.fold) target.fold.toggle.focus({ preventScroll: true });
+  if (view && view.nav) view.nav.setCurrent(key);
+}
+
+// Built once per render and kept through a background refresh, which only
+// updates its counts: a link keeps its focus and the row keeps its scroll.
+function sectionNav() {
+  const node = el('nav', undefined, 'section-nav');
+  node.setAttribute('aria-label', 'Secciones');
+  const list = el('ul');
+  const links = new Map();
+  for (const [key, label, title] of NAV) {
+    const link = el('a');
+    link.href = '#sec-' + key;
+    const count = el('span', undefined, 'count');
+    count.hidden = true;
+    link.append(el('span', label), count);
+    link.setAttribute('aria-label', title);
+    link.setAttribute('aria-current', 'false');
+    link.addEventListener('click', (event) => {
+      // The address stays as it is: Clerk's components route through the hash.
+      event.preventDefault();
+      goToSection(key);
+    });
+    const item = el('li');
+    item.append(link);
+    list.append(item);
+    links.set(key, { link, count, title });
+  }
+  node.append(list);
+  let current = null;
+  return {
+    node,
+    setCounts(counts) {
+      for (const [key, { link, count, title }] of links) {
+        const pending = counts[key] || 0;
+        count.hidden = !pending;
+        count.textContent = pending ? String(pending) : '';
+        link.setAttribute('aria-label', pending ? title + ': ' + pending + (pending === 1 ? ' pendiente' : ' pendientes') : title);
+      }
+    },
+    setCurrent(key) {
+      if (key === current) return;
+      current = key;
+      for (const [other, { link }] of links) link.setAttribute('aria-current', other === key ? 'location' : 'false');
+      // Keep the current link in sight inside the row.
+      const link = links.get(key).link;
+      if (typeof link.offsetLeft !== 'number') return;
+      const left = link.offsetLeft - 16;
+      const right = link.offsetLeft + link.offsetWidth + 16;
+      if (left < list.scrollLeft) list.scrollLeft = left;
+      else if (right > list.scrollLeft + list.clientWidth) list.scrollLeft = right - list.clientWidth;
+    },
+  };
+}
+
+// Marks the section being read: the last one whose heading has passed the line.
+function syncNav() {
+  spyQueued = false;
+  if (!view || !view.nav) return;
+  let current = NAV[0][0];
+  for (const [key] of NAV) {
+    const target = document.getElementById('sec-' + key);
+    if (target && target.getBoundingClientRect && target.getBoundingClientRect().top <= SPY_LINE) current = key;
+  }
+  const root = document.documentElement;
+  if (root && window.scrollY > 0 && window.innerHeight + window.scrollY >= root.scrollHeight - 2) current = NAV[NAV.length - 1][0];
+  view.nav.setCurrent(current);
+}
+
+function queueSpy() {
+  if (spyQueued || !window.requestAnimationFrame) return;
+  spyQueued = true;
+  window.requestAnimationFrame(syncNav);
 }
 
 function createBookSection(onCreated) {
@@ -987,25 +1152,56 @@ function bookSections(currentBook, data) {
   const pending = (c) => c.editorial_status === 'proposed';
 
   let openQuoteHandler = null;
+  let scenesFold = null;
+  // Opening a scene unfolds the scene list; a quiet reopen (a background refresh) leaves it as the person left it.
+  const showScene = (file, quote, anchor, status, quiet) => {
+    if (!openQuoteHandler) return undefined;
+    if (!quiet && scenesFold) scenesFold.setOpen(true);
+    return openQuoteHandler(file, quote, anchor, status, quiet);
+  };
   const scenesBox = scenesSection(currentBook, data.scenes || [], reload, (fn) => { openQuoteHandler = fn; });
   const findingsBox = findingsSection(currentBook, data.finding_views || [], reload, (file, quote, anchor, status) => {
-    if (openQuoteHandler) openQuoteHandler(file, quote, anchor, status);
+    showScene(file, quote, anchor, status);
   });
 
+  const proposed = data.proposals.filter((p) => p.proposal.status === 'proposed');
+  const decided = data.proposals.filter((p) => p.proposal.status !== 'proposed');
+  const shownProposals = data.proposals.filter((p) => p.proposal.status === 'proposed' || decidedProposals.has(currentBook + '/' + p.proposal.proposal_id));
+  const shownClaims = data.claims.filter((c) => pending(c) || decidedClaims.has(currentBook + '/' + c.claim_id));
+  const outside = data.claims.filter((c) => c.editorial_status === 'accepted' && !data.canon.some((canonical) => canonical.claim_id === c.claim_id));
+  const rejected = data.claims.filter((c) => c.editorial_status === 'rejected');
+  const cards = (list, build) => list.map((item) => build(currentBook, item, reload));
+
+  // On a phone only what waits for a decision starts open; tools and reference are
+  // one tap away. A section with nothing in it is a single line, so it stays open,
+  // and a book without scenes opens the form that gives it some.
+  const phone = isPhone();
+  const hasScenes = Boolean(data.scenes && data.scenes.length);
+  const reference = (count) => !phone || count === 0;
+  scenesFold = foldable(scenesBox, 'escenas', reference(hasScenes ? 1 : 0)).fold;
+
+  // Order: first what the writer came to decide (the manuscript, then the analysis
+  // of it), then the tools that feed the book, then what is already settled.
   const nodes = [
-    importSection(currentBook, reload),
-    notionImportSection(currentBook, reload),
+    foldable(section('Cambios propuestos', cards(shownProposals, proposalCard), 'Ningún cambio pendiente.', 'Las decisiones de esta sesión permanecen aquí para confirmar su estado.'), 'cambios', true),
+    foldable(findingsBox, 'hallazgos', true),
+    foldable(section('Posibles problemas', cards(data.findings, findingCard), 'Sin hallazgos, lo que no demuestra que no haya problemas.'), 'problemas', true),
+    foldable(section('Afirmaciones por revisar', cards(shownClaims, claimCard), 'Ninguna pendiente.', 'Las decisiones de esta sesión permanecen aquí para confirmar su estado.'), 'afirmaciones', true),
+    foldable(importSection(currentBook, reload), 'importar', !phone || !hasScenes),
+    foldable(notionImportSection(currentBook, reload), 'notion', !phone),
     scenesBox,
-    findingsBox,
-    section('Cambios propuestos', data.proposals.filter((p) => p.proposal.status === 'proposed' || decidedProposals.has(currentBook + '/' + p.proposal.proposal_id)).map((p) => proposalCard(currentBook, p, reload)), 'Ningún cambio pendiente.', 'Las decisiones de esta sesión permanecen aquí para confirmar su estado.'),
-    section('Posibles problemas', data.findings.map((f) => findingCard(currentBook, f, reload)), 'Sin hallazgos, lo que no demuestra que no haya problemas.'),
-    section('Afirmaciones por revisar', data.claims.filter((c) => pending(c) || decidedClaims.has(currentBook + '/' + c.claim_id)).map((c) => claimCard(currentBook, c, reload)), 'Ninguna pendiente.', 'Las decisiones de esta sesión permanecen aquí para confirmar su estado.'),
-    section('Canon', data.canon.map((c) => claimCard(currentBook, c, reload)), 'El canon está vacío.', 'Solo hechos narrados aceptados por una persona y con evidencia válida. Aceptar un cambio de texto no aprueba sus afirmaciones.'),
-    section('Afirmaciones fuera del Canon', data.claims.filter((c) => c.editorial_status === 'accepted' && !data.canon.some((canonical) => canonical.claim_id === c.claim_id)).map((c) => claimCard(currentBook, c, reload)), 'Ninguna afirmación aceptada fuera del Canon.', 'Una afirmación aceptada puede seguir fuera del Canon por su tipo o por su evidencia.'),
-    section('Afirmaciones rechazadas', data.claims.filter((c) => c.editorial_status === 'rejected').map((c) => claimCard(currentBook, c, reload)), 'Ninguna afirmación rechazada.', 'Las afirmaciones rechazadas no forman parte del Canon.'),
-    section('Historial de cambios del manuscrito', data.proposals.filter((p) => p.proposal.status !== 'proposed').map((p) => proposalCard(currentBook, p, reload)), 'Sin decisiones todavía.', 'Aceptar una propuesta cambia el manuscrito, pero no convierte sus afirmaciones en Canon. Las propuestas rechazadas no cambian el texto.'),
+    foldable(section('Canon', cards(data.canon, claimCard), 'El canon está vacío.', 'Solo hechos narrados aceptados por una persona y con evidencia válida. Aceptar un cambio de texto no aprueba sus afirmaciones.'), 'canon', reference(data.canon.length)),
+    foldable(section('Afirmaciones fuera del Canon', cards(outside, claimCard), 'Ninguna afirmación aceptada fuera del Canon.', 'Una afirmación aceptada puede seguir fuera del Canon por su tipo o por su evidencia.'), 'fuera-del-canon', reference(outside.length)),
+    foldable(section('Afirmaciones rechazadas', cards(rejected, claimCard), 'Ninguna afirmación rechazada.', 'Las afirmaciones rechazadas no forman parte del Canon.'), 'rechazadas', reference(rejected.length)),
+    foldable(section('Historial de cambios del manuscrito', cards(decided, proposalCard), 'Sin decisiones todavía.', 'Aceptar una propuesta cambia el manuscrito, pero no convierte sus afirmaciones en Canon. Las propuestas rechazadas no cambian el texto.'), 'historial', reference(decided.length)),
   ];
-  return { nodes, openQuote: (...args) => openQuoteHandler ? openQuoteHandler(...args) : undefined };
+  const counts = {
+    cambios: proposed.length,
+    hallazgos: (data.finding_views || []).filter((f) => !f.verdict).length,
+    problemas: data.findings.filter((f) => !f.verdict).length,
+    afirmaciones: data.claims.filter(pending).length,
+  };
+  return { nodes, counts, openQuote: (...args) => showScene(...args) };
 }
 
 async function renderApp(selectedBookId, selectedScene, highlight) {
@@ -1038,18 +1234,26 @@ async function renderApp(selectedBookId, selectedScene, highlight) {
   const createBox = createBookSection(async (newId) => renderApp(newId));
   createBox.style.display = 'none';
   const toggleBtn = button('Crear otro libro', '', () => {
-    createBox.style.display = createBox.style.display === 'none' ? 'block' : 'none';
+    const open = createBox.style.display === 'none';
+    createBox.style.display = open ? 'block' : 'none';
+    toggleBtn.setAttribute('aria-expanded', String(open));
   });
+  toggleBtn.setAttribute('aria-expanded', 'false');
   toolbar.append(toggleBtn);
+  const nav = sectionNav();
   const notice = el('p', undefined, 'notice');
   notice.setAttribute('role', 'status');
   notice.hidden = true;
-  app.append(toolbar, createBox, notice);
+  app.append(toolbar, createBox, nav.node, notice);
 
   const state = await apiState('/books/' + currentBook);
   const built = bookSections(currentBook, state.data);
   app.append(...built.nodes);
-  if (seq === renderSeq) view = { book: currentBook, tag: state.tag, pending: null, sections: built.nodes, notice };
+  nav.setCounts(built.counts);
+  if (seq === renderSeq) {
+    view = { book: currentBook, tag: state.tag, pending: null, sections: built.nodes, notice, nav };
+    syncNav();
+  }
   if (selectedScene) {
     await built.openQuote(selectedScene, highlight?.quote, highlight?.anchor, highlight?.status);
   }
@@ -1071,7 +1275,8 @@ function hasWorkInProgress() {
 // where it was and a button never moves under the pointer.
 function viewportAnchor() {
   for (const card of app.getElementsByTagName('article')) {
-    if (!card.id) continue;
+    // A card in a folded section has no box and would report top 0.
+    if (!card.id || card.offsetParent === null) continue;
     const top = card.getBoundingClientRect().top;
     if (top >= 0) return { id: card.id, top };
   }
@@ -1087,15 +1292,21 @@ async function showRefreshed(current, data) {
   if (seq !== renderSeq || actionsRunning > 0 || hasWorkInProgress()) return false;
   const anchor = viewportAnchor();
   const scrollY = window.scrollY;
-  const focused = document.activeElement && document.activeElement.closest ? document.activeElement.closest('article') : null;
+  const active = document.activeElement;
+  const focused = active && active.closest ? active.closest('article') : null;
+  const focusedFold = active && active.className === 'fold' ? active.closest('section') : null;
   for (const node of current.sections) node.remove();
   app.append(...built.nodes);
   current.sections = built.nodes;
+  current.nav.setCounts(built.counts);
   const anchored = anchor && document.getElementById(anchor.id);
   if (anchored) window.scrollBy(0, anchored.getBoundingClientRect().top - anchor.top);
   else window.scrollTo(0, scrollY);
   const refocus = focused && focused.id && document.getElementById(focused.id);
   if (refocus) refocus.focus({ preventScroll: true });
+  const refold = focusedFold && document.getElementById(focusedFold.id);
+  if (refold && refold.fold) refold.fold.toggle.focus({ preventScroll: true });
+  syncNav();
   return true;
 }
 
@@ -1154,6 +1365,9 @@ function startRefresh() {
   });
   scheduleRefresh();
 }
+
+window.addEventListener('scroll', queueSpy, { passive: true });
+window.addEventListener('resize', queueSpy);
 
 window.addEventListener('load', async () => {
   try {

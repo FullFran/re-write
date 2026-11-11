@@ -245,6 +245,40 @@ test('the review page refreshes its state without a manual reload', async (t) =>
     assert.ok(viewer().textContent.includes(FIRST), 'the open scene shows the accepted text');
   });
 
+  await t.test('a refresh keeps the navigation and the folded sections, and only updates the counts', async () => {
+    const history = () => page.section('Historial de cambios del manuscrito');
+    const fold = (section: any) => page.all(section, (n) => n.className === 'fold')[0];
+    const body = (section: any) => page.all(section, (n) => n.className === 'fold-body')[0];
+    const [nav] = page.all(page.app, (n) => n.tagName === 'NAV');
+    const link = page.all(nav, (n) => n.tagName === 'A')[0];
+    assert.equal(link.attrs['aria-label'], 'Cambios propuestos: 1 pendiente');
+    link.focus();
+
+    const before = history();
+    fold(before).events.click();
+    assert.equal(body(before).hidden, true);
+
+    const id = proposeRevision(h.bookDir, OTHER_SCENE, 'Clara levantó la losa del altar', 'Clara apartó la losa del altar');
+    await page.tick();
+    assert.ok(page.attached(nav), 'the same navigation node is still on the page');
+    assert.equal(page.document.activeElement, link, 'a focused link keeps its focus');
+    assert.equal(link.attrs['aria-label'], 'Cambios propuestos: 2 pendientes');
+    assert.equal(page.all(link, (n) => n.className === 'count')[0].textContent, '2');
+    assert.notEqual(history(), before, 'the sections were rendered again');
+    assert.equal(fold(history()).attrs['aria-expanded'], 'false');
+    assert.equal(body(history()).hidden, true);
+
+    // A focused heading keeps its focus through the swap, and the section opens again.
+    fold(history()).focus();
+    assert.equal((await elsewhere(id, 'reject')).status, 200);
+    await page.tick();
+    assert.equal(page.document.activeElement, fold(history()));
+    fold(history()).events.click();
+    assert.equal(body(history()).hidden, false);
+    assert.equal(link.attrs['aria-label'], 'Cambios propuestos: 1 pendiente');
+    page.body.focus();
+  });
+
   const noteInput = () => page.all(page.section('Hallazgos de la trama'), (n) => n.attrs['aria-label'] === NOTE_LABEL)[0];
 
   await t.test('no refresh while a note is being typed: the text survives and a notice says why', async () => {
