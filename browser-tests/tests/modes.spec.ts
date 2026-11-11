@@ -40,7 +40,11 @@ async function shoot(page: Page, name: string): Promise<void> {
 async function typeInParagraph(page: Page, tap: boolean): Promise<void> {
   await expect(paragraph(page)).toHaveText(/^Elena llevaba/);
   if (tap) await paragraph(page).tap(); else await paragraph(page).click();
-  await page.keyboard.press('Home');
+  // Home would stop at the start of the wrapped line under the pointer, which depends on the
+  // fonts: start from the top instead (title, blank line, then the paragraph).
+  await page.keyboard.press('Control+Home');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
   for (let i = 0; i < 'Elena'.length; i++) await page.keyboard.press('ArrowRight');
   await page.keyboard.type(' (sin guardar)');
   await expect(paragraph(page)).toHaveText(/^Elena \(sin guardar\) llevaba/);
