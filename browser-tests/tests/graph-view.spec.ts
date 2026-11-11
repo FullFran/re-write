@@ -337,3 +337,38 @@ test('performance: 2,000 nodes draw and lay out while the table stays responsive
   expect(drawn).toBeLessThan(15_000);
   expect(errors).toEqual([]);
 });
+
+// TEMPORARY: per-frame render cost of the 2,000-node drawing under setting variants.
+test('diagnostics: frame cost by sigma setting', async ({ page, book }) => {
+  test.setTimeout(240_000);
+  const data = JSON.stringify(bigGraph(2000));
+  await page.route('**/review/api/books/*/graph*', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: data }));
+  await page.addInitScript(() => ((window as any).__graphDebug = {}));
+  await openDesk(page, book);
+  await tool(page, 'Grafo').click();
+  await expect(canvas(page)).toHaveAttribute('data-layout', 'done', { timeout: 120_000 });
+  const frame = (label: string, settings: Record<string, unknown>, noEdges = false) => page.evaluate(({ settings, noEdges }) => {
+    const debug = (window as any).__graphDebug;
+    const sigma = debug.sigma;
+    debug.noEdges = noEdges;
+    sigma.setSettings(settings);
+    const gl = sigma.webGLContext;
+    gl.finish();
+    const t = performance.now();
+    sigma.refresh();
+    gl.finish();
+    return Math.round(performance.now() - t);
+  }, { settings, noEdges }).then((ms) => `${label}=${ms}`);
+  const base = { renderLabels: true, antialiasEdges: true, antialiasNodes: true, pickingDownSizingRatio: 2 };
+  const out = [
+    await frame('base', base),
+    await frame('base2', base),
+    await frame('noLabels', { ...base, renderLabels: false }),
+    await frame('noEdges', base, true),
+    await frame('noAA', { ...base, antialiasEdges: false, antialiasNodes: false }),
+    await frame('picking8', { ...base, pickingDownSizingRatio: 8 }),
+    await frame('minimal', { renderLabels: false, antialiasEdges: false, antialiasNodes: false, pickingDownSizingRatio: 8 }, true),
+  ];
+  const size = await canvas(page).boundingBox();
+  console.log('graph frames ' + out.join(' ') + ' canvas=' + Math.round(size!.width) + 'x' + Math.round(size!.height) + ' gl=' + await page.evaluate(() => { const gl = (window as any).__graphDebug.sigma.webGLContext; const ext = gl.getExtension('WEBGL_debug_renderer_info'); return ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER); }));
+});

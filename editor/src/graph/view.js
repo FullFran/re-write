@@ -150,6 +150,7 @@ export function createGraphView({ book, onSelect = () => {}, onPath = () => {}, 
   function edgeReducer(key, data) {
     const attrs = st.graph.getEdgeAttributes(key);
     const out = { ...data, size: 1 + Math.min(5, 1.5 * Math.log2(1 + attrs.cooccurs)), color: st.colors.edge };
+    if (window.__graphDebug && window.__graphDebug.noEdges) out.visibility = 'hidden'; // TEMPORARY
     if (st.path.length) {
       if (st.pathEdges.has(key)) Object.assign(out, { color: st.colors.path, size: out.size + 3 });
       else out.opacity = 0.12;
@@ -179,6 +180,7 @@ export function createGraphView({ book, onSelect = () => {}, onPath = () => {}, 
       canvas.replaceChildren(el('p', 'Este navegador no puede dibujar el grafo. La tabla tiene los mismos datos.', 'meta graph-view-error'));
       return;
     }
+    if (window.__graphDebug) window.__graphDebug.sigma = st.sigma; // TEMPORARY diagnostics
     st.sigma.on('clickNode', ({ node: id }) => onSelect(id));
     st.sigma.on('enterNode', () => (canvas.style.cursor = 'pointer'));
     st.sigma.on('leaveNode', () => (canvas.style.cursor = ''));
