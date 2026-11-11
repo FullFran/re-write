@@ -137,7 +137,7 @@ test('a prompt streams the answer as server-sent events', async (t) => {
   const token = await connect(eh);
   assert.deepEqual(await turn(eh, token, 'echo hola'), [
     { event: 'delta', data: { text: 'hola' } },
-    { event: 'tool', data: { name: 'list_books', ok: true } },
+    { event: 'tool', data: { name: 'list_books', phase: 'end', ok: true } },
     { event: 'done', data: { aborted: false } },
   ]);
   assert.equal((await eh.api('POST', '/prompt', token, { text: '' })).status, 400);

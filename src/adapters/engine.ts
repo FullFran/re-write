@@ -439,7 +439,12 @@ export class EngineManager {
       }
       case 'tool':
         if (proc.toolsChecked && proc.turn && !proc.turn.limited) {
-          proc.turn.sink.event('tool', { name: message.name.replace(MCP_TOOL_PREFIX, ''), ok: message.ok });
+          // Only fields the protocol parser validated; the page labels the step from them.
+          const { name, phase, ok, call, scene, count } = message;
+          proc.turn.sink.event('tool', {
+            name: name.replace(MCP_TOOL_PREFIX, ''), phase, ...(phase === 'end' ? { ok } : {}),
+            ...(call === undefined ? {} : { call }), ...(scene === undefined ? {} : { scene }), ...(count === undefined ? {} : { count }),
+          });
         }
         return;
       case 'done':

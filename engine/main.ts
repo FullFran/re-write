@@ -17,7 +17,7 @@ import {
   type AgentSession,
 } from '@earendil-works/pi-coding-agent';
 import {
-  DEVICE_VERIFICATION_URI, encode, LineDecoder, MCP_SERVER_NAME, MCP_TOOL_PREFIX, parseCredential,
+  DEVICE_VERIFICATION_URI, encode, LineDecoder, MCP_SERVER_NAME, MCP_TOOL_PREFIX, parseCredential, toolActivity,
   type ChildMessage, type EngineErrorCode, type ParentMessage,
 } from '../src/adapters/engine-protocol.ts';
 
@@ -194,12 +194,28 @@ async function createSession(start: Extract<ParentMessage, { type: 'start' }>): 
     throw new Error('unexpected tools');
   }
 
+  const calls = new Map<string, { call: number; scene?: string }>();
+  let nextCall = 0;
   created.session.subscribe((event) => {
     if (!running) return;
     if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
       send({ type: 'delta', text: event.assistantMessageEvent.delta });
+    } else if (event.type === 'tool_execution_start') {
+      // A small number pairs the start and the end of one call; Pi's own call id stays here.
+      nextCall = (nextCall % 100_000) + 1;
+      const call = nextCall;
+      const { scene } = toolActivity(event.toolName, event.args);
+      calls.set(event.toolCallId, { call, scene });
+      send({ type: 'tool', phase: 'start', call, name: event.toolName, ok: true, ...(scene ? { scene } : {}) });
     } else if (event.type === 'tool_execution_end') {
-      send({ type: 'tool', name: event.toolName, ok: !event.isError });
+      const started = calls.get(event.toolCallId);
+      calls.delete(event.toolCallId);
+      // The scene comes from the arguments and the count from the structured result; no text leaves.
+      const { count } = toolActivity(event.toolName, undefined, event.isError ? undefined : event.result);
+      send({
+        type: 'tool', phase: 'end', name: event.toolName, ok: !event.isError,
+        ...(started ? { call: started.call } : {}), ...(started?.scene ? { scene: started.scene } : {}), ...(count === undefined ? {} : { count }),
+      });
     }
   });
   return created.session;
