@@ -8,7 +8,8 @@ function escapeAttribute(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
-export function reviewHtml(issuer: string, publishableKey: string): string {
+// `engine`: the embedded engine is enabled, so the header links to its page (/review/engine).
+export function reviewHtml(issuer: string, publishableKey: string, options: { engine?: boolean } = {}): string {
   const frontendApi = escapeAttribute(issuer.replace(/\/$/, ''));
   return `<!doctype html>
 <html lang="es">
@@ -23,7 +24,7 @@ export function reviewHtml(issuer: string, publishableKey: string): string {
 <script defer src="/review/app.js"></script>
 </head>
 <body>
-<header><h1>RE;write</h1><div id="user"></div></header>
+<header><h1>RE;write</h1>${options.engine ? '<nav class="header-nav" aria-label="Páginas"><a href="/review/engine">Asistente</a><div id="user"></div></nav>' : '<div id="user"></div>'}</header>
 <main id="app"><p>Cargando…</p></main>
 </body>
 </html>
@@ -79,6 +80,8 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 /* overflow-wrap: anywhere lets a long word or URL break instead of widening the page. */
 body { margin: 0; background: var(--paper); color: var(--ink); font: var(--text-md)/1.6 var(--font-prose); overflow-wrap: anywhere; }
 header { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-2) max(var(--gutter), calc((100% - var(--measure)) / 2 + var(--gutter))); padding-top: max(var(--space-2), env(safe-area-inset-top)); border-bottom: 1px solid var(--line); }
+.header-nav { display: flex; align-items: center; gap: var(--space-3); }
+.header-nav a { display: inline-flex; align-items: center; min-height: var(--tap); padding: 0 var(--space-2); }
 #user { display: flex; align-items: center; justify-content: flex-end; min-width: var(--tap); min-height: var(--tap); }
 main { max-width: var(--measure); margin: 0 auto; padding: var(--space-4) var(--gutter) calc(var(--space-7) + env(safe-area-inset-bottom)); }
 h1 { margin: 0; font-size: var(--text-lg); line-height: 1.25; }

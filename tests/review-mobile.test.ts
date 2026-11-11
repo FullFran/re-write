@@ -408,3 +408,13 @@ test('the refresh anchor is a card on screen, never one inside a folded section'
   ui.app.append(card('above', -300, true), card('folded', 0, false), card('reading', 120, true));
   assert.deepEqual({ ...ui.viewportAnchor() }, { id: 'reading', top: 120 });
 });
+
+test('the header links to the assistant page only when the embedded engine is enabled', () => {
+  const link = /<a [^>]*href="\/review\/engine"[^>]*>Asistente<\/a>/;
+  assert.doesNotMatch(reviewHtml('https://clerk.example', 'pk_test'), link);
+  assert.doesNotMatch(reviewHtml('https://clerk.example', 'pk_test', { engine: false }), link);
+  const html = reviewHtml('https://clerk.example', 'pk_test', { engine: true });
+  assert.match(html, link);
+  // The sign-in mount point stays where the page script looks for it.
+  assert.equal((html.match(/id="user"/g) ?? []).length, 1);
+});

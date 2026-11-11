@@ -760,7 +760,7 @@ export function createHandler(
       }
       if (path.startsWith('/review/api/')) return await serveReviewApi(req, res, path);
       if (req.method === 'GET' && path === '/review') {
-        return serveAsset(res, 'text/html; charset=utf-8', reviewHtml(config.issuer, config.clerkPublishableKey));
+        return serveAsset(res, 'text/html; charset=utf-8', reviewHtml(config.issuer, config.clerkPublishableKey, { engine: engine !== undefined }));
       }
       if (req.method === 'GET' && path === '/review/app.js') return serveAsset(res, 'text/javascript; charset=utf-8', REVIEW_JS);
       if (req.method === 'GET' && path === '/review/app.css') return serveAsset(res, 'text/css; charset=utf-8', REVIEW_CSS);

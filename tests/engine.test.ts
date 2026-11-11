@@ -637,3 +637,17 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     assert.equal(server.exitCode, null, 'the server itself is still waiting for its open connection');
   });
 }
+
+test('the review page links to the assistant page only when the engine is enabled', async (t) => {
+  const link = 'href="/review/engine"';
+  const off = await startHarness();
+  t.after(off.close);
+  const plain = await fetch(`${off.base}/review`);
+  assert.equal(plain.status, 200);
+  assert.ok(!(await plain.text()).includes(link));
+  const eh = await startEngineHarness();
+  t.after(eh.close);
+  const page = await fetch(`${eh.base}/review`);
+  assert.equal(page.status, 200);
+  assert.ok((await page.text()).includes(link));
+});
