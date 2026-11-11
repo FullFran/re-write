@@ -1,0 +1,49 @@
+{
+  "id": "literal-quote-claim",
+  "title": "Propose a claim with a literal quote",
+  "guarantee": "A claim backed by a literal quote is stored as proposed, with valid evidence, and is not canon.",
+  "book": { "id": "sal", "title": "La puerta de Sal", "scenes": ["fixtures/demo-book/escena-01.md", "fixtures/demo-book/escena-02.md"] },
+  "steps": [
+    {
+      "id": "propose",
+      "do": "call",
+      "tool": "propose_claims",
+      "args": {
+        "book": "sal",
+        "extractor": "scripted-agent",
+        "candidates": [{
+          "statement": "Elena has guarded the Salt bridge for eleven years.",
+          "subject": "Elena",
+          "source_file": "scenes/escena-01.md",
+          "quote": "Elena llevaba once años custodiando el puente de Sal",
+          "scope": "book",
+          "epistemic_kind": "narrated_fact"
+        }]
+      },
+      "checks": [
+        { "name": "the claim is created", "path": "propose.data.created.length", "equals": 1 },
+        { "name": "nothing is rejected", "path": "propose.data.rejected", "equals": [] }
+      ]
+    },
+    {
+      "id": "claims",
+      "do": "call",
+      "tool": "list_claims",
+      "args": { "book": "sal" },
+      "checks": [
+        { "name": "the claim stays proposed", "path": "claims.data.claims.*.editorial_status", "equals": ["proposed"] },
+        { "name": "its evidence is valid", "path": "claims.data.claims.*.evidence_status", "equals": ["valid"] },
+        { "name": "it records the declared agent", "path": "claims.data.claims.*.extractor", "equals": ["mcp:scripted-agent"] },
+        { "name": "it records the person whose connection proposed it", "path": "claims.data.claims.*.proposed_by", "equals": ["user_eval"] }
+      ]
+    },
+    {
+      "id": "book",
+      "do": "book_state",
+      "checks": [
+        { "name": "the book stores exactly that claim", "path": "book.claims.*.claim_id", "equals": { "ref": "propose.data.created" } },
+        { "name": "a proposed claim is not canon", "path": "book.canon", "equals": [] }
+      ]
+    }
+  ]
+}

@@ -20,6 +20,7 @@ You need Node 24 or later and git.
 npm ci
 npm run demo    # full walkthrough on a throwaway book; each step is checked
 npm test        # automated tests
+npm run eval    # agent journeys over the MCP harness, no model and no network (docs/evals.md)
 ```
 
 `node scripts/demo.ts walkthrough.log` also saves the walkthrough to a file. A saved run is in [docs/demo-log.txt](docs/demo-log.txt).

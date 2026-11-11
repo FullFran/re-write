@@ -1,0 +1,61 @@
+{
+  "id": "agent-cannot-approve",
+  "title": "Try to approve over MCP",
+  "guarantee": "An agent cannot approve anything.",
+  "book": { "id": "sal", "title": "La puerta de Sal", "scenes": ["fixtures/demo-book/escena-01.md", "fixtures/demo-book/escena-02.md"] },
+  "steps": [
+    {
+      "id": "propose",
+      "do": "call",
+      "tool": "propose_claims",
+      "args": {
+        "book": "sal",
+        "extractor": "scripted-agent",
+        "candidates": [{
+          "statement": "Elena has guarded the Salt bridge for eleven years.",
+          "subject": "Elena",
+          "source_file": "scenes/escena-01.md",
+          "quote": "Elena llevaba once años custodiando el puente de Sal",
+          "scope": "book",
+          "epistemic_kind": "narrated_fact"
+        }]
+      },
+      "checks": [
+        { "name": "there is a claim to approve", "path": "propose.data.created.length", "equals": 1 }
+      ]
+    },
+    {
+      "id": "tools",
+      "do": "list_tools",
+      "checks": [
+        { "name": "no tool accepts, rejects or reviews", "path": "tools.names", "none_match": "accept|approve|reject|decide|review|verdict" }
+      ]
+    },
+    {
+      "id": "accept",
+      "do": "call",
+      "tool": "accept_claim",
+      "args": { "book": "sal", "claim_id": { "ref": "propose.data.created.0" }, "decision": "accept" },
+      "checks": [
+        { "name": "accept_claim is refused", "path": "accept.is_error", "equals": true }
+      ]
+    },
+    {
+      "id": "review",
+      "do": "call",
+      "tool": "review_claim",
+      "args": { "book": "sal", "claim_id": { "ref": "propose.data.created.0" }, "decision": "accept" },
+      "checks": [
+        { "name": "review_claim is refused", "path": "review.is_error", "equals": true }
+      ]
+    },
+    {
+      "id": "book",
+      "do": "book_state",
+      "checks": [
+        { "name": "the claim is still proposed", "path": "book.claims.*.editorial_status", "equals": ["proposed"] },
+        { "name": "nothing reached canon", "path": "book.canon", "equals": [] }
+      ]
+    }
+  ]
+}

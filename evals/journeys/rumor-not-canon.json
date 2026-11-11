@@ -1,0 +1,91 @@
+{
+  "id": "rumor-not-canon",
+  "title": "Promote a rumor",
+  "guarantee": "A rumor cannot reach canon.",
+  "book": { "id": "sal", "title": "La puerta de Sal", "scenes": ["fixtures/demo-book/escena-01.md", "fixtures/demo-book/escena-02.md"] },
+  "steps": [
+    {
+      "id": "promote",
+      "do": "call",
+      "tool": "propose_claims",
+      "args": {
+        "book": "sal",
+        "extractor": "scripted-agent",
+        "candidates": [{
+          "statement": "Bruno sold the bridge key to the people of Ribera.",
+          "subject": "Bruno",
+          "source_file": "scenes/escena-01.md",
+          "quote": "Dicen que Bruno vendió la llave del puente a los de Ribera",
+          "scope": "book",
+          "epistemic_kind": "canon"
+        }]
+      },
+      "checks": [
+        { "name": "an agent cannot label a claim as canon", "path": "promote.is_error", "equals": true }
+      ]
+    },
+    {
+      "id": "fact",
+      "do": "call",
+      "tool": "propose_claims",
+      "args": {
+        "book": "sal",
+        "extractor": "scripted-agent",
+        "candidates": [{
+          "statement": "Elena has guarded the Salt bridge for eleven years.",
+          "subject": "Elena",
+          "source_file": "scenes/escena-01.md",
+          "quote": "Elena llevaba once años custodiando el puente de Sal",
+          "scope": "book",
+          "epistemic_kind": "narrated_fact"
+        }]
+      }
+    },
+    {
+      "id": "rumor",
+      "do": "call",
+      "tool": "propose_claims",
+      "args": {
+        "book": "sal",
+        "extractor": "scripted-agent",
+        "candidates": [{
+          "statement": "Bruno sold the bridge key to the people of Ribera.",
+          "subject": "Bruno",
+          "source_file": "scenes/escena-01.md",
+          "quote": "Dicen que Bruno vendió la llave del puente a los de Ribera",
+          "scope": "book",
+          "epistemic_kind": "rumor",
+          "asserter": "the guard"
+        }]
+      },
+      "checks": [
+        { "name": "the rumor is stored as a rumor", "path": "rumor.data.created.length", "equals": 1 }
+      ]
+    },
+    {
+      "id": "pending",
+      "do": "book_state",
+      "checks": [
+        { "name": "nothing is canon before a person reviews", "path": "pending.canon", "equals": [] }
+      ]
+    },
+    { "id": "accept_fact", "do": "person_reviews_claim", "claim_id": { "ref": "fact.data.created.0" }, "decision": "accept" },
+    {
+      "id": "accept_rumor",
+      "do": "person_reviews_claim",
+      "claim_id": { "ref": "rumor.data.created.0" },
+      "decision": "accept",
+      "checks": [
+        { "name": "the person can accept that the rumor exists", "path": "accept_rumor.editorial_status", "equals": "accepted" }
+      ]
+    },
+    {
+      "id": "book",
+      "do": "book_state",
+      "checks": [
+        { "name": "canon holds the accepted fact only", "path": "book.canon", "equals": { "ref": "fact.data.created" } },
+        { "name": "the accepted rumor is not canon", "path": "book.canon", "not_contains": { "ref": "rumor.data.created.0" } }
+      ]
+    }
+  ]
+}

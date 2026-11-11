@@ -16,6 +16,7 @@
     "hcs:trace": "node scripts/hcs-traceability.ts",
     "hcs:trace:check": "node scripts/hcs-traceability.ts --check",
     "demo": "node scripts/demo.ts",
+    "eval": "node scripts/eval.ts",
     "hcs:try": "bash scripts/hcs-try.sh"
   },
   "dependencies": {
