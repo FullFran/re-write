@@ -181,7 +181,7 @@ test('the page follows docs/design.md: shared tokens, one column, 16 px controls
   assert.doesNotMatch(own, /\b\d+px\b(?<!\b[12]px)/, 'no spacing or size literal outside the scales (1 and 2 px lines aside)');
   assert.match(own, /button, \.button, textarea \{ min-height: var\(--tap\);[^}]*font: var\(--text-md\)/);
   assert.match(own, /main \{[^}]*max-width: var\(--measure\)[^}]*flex-direction: column/);
-  assert.deepEqual([...own.matchAll(/@media \((?:max|min)-width: ([^)]+)\)/g)].map((m) => m[1]), ['40em', '48em'], 'the two breakpoints of the design rules');
+  assert.deepEqual([...own.matchAll(/@media \((?:max|min)-width: ([^)]+)\)/g)].map((m) => m[1]), ['40em', '48em'], 'only breakpoints the design rules name');
   assert.match(own, /:focus-visible/);
   assert.match(own, /prefers-reduced-motion: reduce/);
   assert.match(own, /env\(safe-area-inset-bottom\)/);
