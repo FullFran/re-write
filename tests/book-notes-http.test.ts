@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { git } from './helpers.ts';
@@ -76,4 +76,19 @@ test('note routes are logged under their own route names', async (t) => {
   await reviewApi(logged, '/books/sal/notes/Elena', session);
   const routes = lines.map((line) => JSON.parse(line)).filter((r) => r.event === 'http.request').map((r) => r.route);
   assert.deepEqual(routes, ['/review/api/books/:book/notes', '/review/api/books/:book/notes/:name']);
+});
+
+test('accepting a new note answers 409 and writes nothing while that note file has uncommitted changes', async () => {
+  const project = h.library.open('sal', 'user_fran');
+  const { proposal } = project.proposeNote({ name: 'Carta', text: 'Una carta.\n', rationale: 'r' });
+  writeFileSync(join(h.bookDir, 'notas', 'Carta.md'), 'x');
+  git(h.bookDir, 'add', 'notas/Carta.md');
+  git(h.bookDir, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-qm', 'carta');
+  rmSync(join(h.bookDir, 'notas', 'Carta.md'));
+  const head = git(h.bookDir, 'rev-parse', 'HEAD');
+  const res = await reviewApi(h, `/books/sal/proposals/${proposal.proposal_id}`, await h.session(), { decision: 'accept' });
+  assert.equal(res.status, 409);
+  assert.match((await res.json()).detail, /notas\/Carta\.md has uncommitted changes/);
+  assert.equal(existsSync(join(h.bookDir, 'notas', 'Carta.md')), false);
+  assert.equal(git(h.bookDir, 'rev-parse', 'HEAD'), head);
 });

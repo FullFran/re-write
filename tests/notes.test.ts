@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync, existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Project, SceneConflictError, SceneNotFoundError } from '../src/application/project.ts';
@@ -122,4 +122,21 @@ test('a person edits a note on top of the version they opened, in one commit', (
   assert.equal(git(project.dir, 'log', '-1', '--format=%s'), 'rewrite: edit notas/Elena.md');
   assert.throws(() => project.editNote({ name: 'Elena', base_blob: blob, text: 'otra', by: 'u' }), SceneConflictError);
   assert.throws(() => project.editNote({ name: 'Nadie', base_blob: blob, text: 'otra', by: 'u' }), SceneNotFoundError);
+});
+
+test('a new note is refused while notas/<name>.md has uncommitted changes, at proposal and at accept', () => {
+  const project = bookWith({ Elena: 'Capitana.\n' });
+  rmSync(join(project.dir, 'notas', 'Elena.md'));
+  assert.throws(() => project.proposeNote({ name: 'Elena', text: 'Nueva.\n', rationale: 'r' }), /notas\/Elena\.md has uncommitted changes/);
+
+  const later = bookWith({ Faro: 'Un faro.\n' });
+  const { proposal } = later.proposeNote({ name: 'Ana', text: 'x', rationale: 'r' });
+  git(later.dir, 'mv', 'notas/Faro.md', 'notas/Ana.md');
+  git(later.dir, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-qm', 'rename');
+  rmSync(join(later.dir, 'notas', 'Ana.md'));
+  const head = later.git.head();
+  assert.throws(() => later.reviewProposal(proposal.proposal_id, 'accept', 'user_fran'), /notas\/Ana\.md has uncommitted changes/);
+  assert.equal(existsSync(join(later.dir, 'notas', 'Ana.md')), false);
+  assert.equal(later.git.head(), head);
+  assert.equal(later.showProposal(proposal.proposal_id).applicable, false);
 });

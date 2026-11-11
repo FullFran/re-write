@@ -270,6 +270,8 @@ export class Project {
     let exists = false;
     try { lstatSync(join(this.dir, file)); exists = true; } catch { /* absent */ }
     if (exists) return `${file} already exists; nothing was written`;
+    // A committed note deleted in the working tree: creating it would hide that change.
+    if (this.git.isDirty(file)) return `${file} has uncommitted changes; commit them before creating this note`;
     const twin = this.notes().find((other) => foldName(other) === foldName(name));
     return twin ? `"${name}" differs from the existing note "${twin}" only by case or accents` : null;
   }
