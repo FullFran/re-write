@@ -77,12 +77,28 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             browser-tests/package-lock.json
+            editor/package-lock.json
       # The tests start the server from src/, which needs the root dependencies.
       - run: npm ci
+      # The scene editor module the server serves at /review/editor.js (not committed).
+      - run: npm ci --ignore-scripts
+        working-directory: editor
+      - run: npm test
+        working-directory: editor
+      - run: npm run build
+        working-directory: editor
       - run: npm ci
         working-directory: browser-tests
       - run: npx playwright test
         working-directory: browser-tests
+      # The scene editor's views on desktop and phone, kept for review.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: editor-screenshots
+          path: browser-tests/test-results/**/*.png
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
@@ -131,6 +147,19 @@ jobs:
             fi
             sleep 1
           done
+      # The editor module is built inside the image, never committed: the image must serve it.
+      - name: Serve the scene editor module
+        run: |
+          docker exec "$CONTAINER" node -e "
+            require('node:http').get({ host: '127.0.0.1', port: process.env.PORT, path: '/review/editor.js', headers: { host: 'rewrite.invalid' } }, (res) => {
+              let size = 0;
+              res.on('data', (chunk) => { size += chunk.length; });
+              res.on('end', () => {
+                console.log('status=' + res.statusCode + ' type=' + res.headers['content-type'] + ' bytes=' + size);
+                process.exit(res.statusCode === 200 && /^text\/javascript/.test(res.headers['content-type']) && size > 0 ? 0 : 1);
+              });
+            }).on('error', () => process.exit(1));
+          "
       - name: Remove container
         if: always()
         run: docker rm -f "$CONTAINER" || true
