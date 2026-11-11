@@ -67,10 +67,12 @@ the selected rating has `aria-pressed`.
 
 ## Layout and breakpoints
 
-- Base styles are fluid and already work on a phone. Three breakpoints only:
+- Base styles are fluid and already work on a phone. Three breakpoints for the page:
   `max-width: 40em` (phone: full-width controls, sticky decision bar, tools and
-  reference folded), `min-width: 48em` (more padding) and `min-width: 75em` (the
-  section navigation moves beside the column).
+  reference folded, the mode switch docked at the bottom), `min-width: 48em` (more
+  padding) and `min-width: 75em` (the section navigation moves beside the column). The
+  writing desk adds one of its own, `64em`: below it Ayuda's text and help are two panes,
+  from it they are two columns.
 - Nothing scrolls sideways: `overflow-wrap: anywhere` on `body`, `pre-wrap` for
   diffs and code, `min-width: 0` on flexible controls.
 - `viewport-fit=cover` is set, so the page pads itself with `env(safe-area-inset-*)`
@@ -155,8 +157,58 @@ the selected rating has `aria-pressed`.
   the saved version next to the person's text with two actions: **Usar la versión
   guardada** and **Guardar mi versión encima**. Nothing is overwritten without that
   second, explicit choice.
-- An open editor pauses the background refresh like any unfinished work: news waits
-  behind the notice until the editor is closed.
+- The editor lives in the writing desk (see Modes), which the background refresh never
+  re-renders: news keeps reaching the rest of the page while the person writes. When the
+  open scene is saved somewhere else, the desk says so in one line
+  (**Esta escena ha cambiado fuera de este editor.**), with **Cargar la versión guardada**
+  only when nothing is unsaved; otherwise saving shows the comparison above.
+
+## Modes
+
+Issue #101: the writer chooses how much help is on screen. One switch, three modes, all
+in the same page and over the same text:
+
+| Mode | What is on screen |
+| --- | --- |
+| **Concentración** | The writing desk only: the open scene in the editor. No review section, no section navigation, no card, no analysis; the assistant is closed and never opens by itself. |
+| **Ayuda RE;write** | The same desk plus **Ayuda para esta escena**: the scene's proposed changes, findings, possible problems and claims, with their usual actions. |
+| **Revisión** | The full review page as described above; the desk is hidden, not closed. |
+
+- **The switch** is a group (`.mode-switch`, `role="group"`, `aria-label="Modo"`) of three
+  buttons with `aria-pressed`, at the end of the book row. On a phone it is a dock fixed to
+  the bottom, above the safe area; `--dock-h` is its height, and the decision bar, the
+  assistant button and the end of the page stop above it. A tap on it does not take the
+  focus from the text (its `mousedown` is cancelled); coming back from Revisión, where the
+  hidden editor loses the focus, puts the caret back where it was if it was in the text.
+- **Remembered** per person in `localStorage` (`rewrite:mode:<hash of the person>`, as the
+  editor view), and so is the scene open in the desk for each book
+  (`rewrite:desk-scene:<hash>:<book>`). Without a choice the page opens in Revisión; without
+  a book it is Revisión whatever was chosen.
+- **The writing desk** (`#desk`, a `section` labelled **Escritura**) is built once and moved
+  back into the page by every render: a decision, a refresh or a mode change never rebuilds
+  the editor, so the text, the cursor, the selection and the undo history stay. Its head:
+  **‹** / **›** (named **Escena anterior** / **Escena siguiente**; the words show from 40em)
+  around a scene list (`aria-label="Escena"`), the scene's title (its first heading, else the
+  file name) and its word count. **Guardar**, **Cerrar editor** and the save status sit above
+  the text and stick to the top while writing. **Editar escena** in Revisión opens that scene
+  here; **Cerrar editor** goes back to Revisión at that scene.
+- **Ayuda para esta escena** (an `aside`) is built only in Ayuda, from the book data the page
+  already holds, filtered to the open scene. From 64em it is a column on the right of the
+  editor that scrolls on its own; with the assistant open it goes under the text up to 100em,
+  where there is room for three columns. Below 64em **Texto** and **Ayuda (n)** swap the two
+  panes; *n* counts what waits for a decision. Its cards have their own ids (`ayuda-…`).
+- **A quote** of a finding, a possible problem or a claim selects its words in the editor
+  and scrolls them to the middle. The editor holds the raw Markdown and quotes are literal, so
+  the quote is looked up in the editor's text (the occurrence nearest its anchor wins); when
+  the person already rewrote it, the help says **No se encuentra la cita en el texto del
+  editor** instead of selecting something else. Reading view gives way to the live preview to
+  show the selection.
+- **The assistant**: switching to Concentración closes the panel; its button stays, outlined
+  instead of filled. In Ayuda, **Preguntar al asistente por esta escena** opens it with the
+  scene as the item.
+- The editor module exposes `select(from, to)` for this; new editor behaviour (wikilinks,
+  for example) belongs in its own CodeMirror extension module in `editor/src/`, added to the
+  editor's extension list as `live-preview.js` is.
 
 ## Messages
 

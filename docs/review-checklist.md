@@ -145,14 +145,28 @@ Tests pin the order, the landmark, the counts and the fold state (`tests/review-
 
 ## 11. Edit a Scene
 
-Tests pin the save path, the conflict refusal, the draft and the paused refresh (`tests/scene-edit.test.ts`, `tests/scene-editor-page.test.ts`); typing on real keyboards is checked here.
+Tests pin the save path, the conflict refusal, the draft and the refresh that leaves the editor alone (`tests/scene-edit.test.ts`, `tests/scene-editor-page.test.ts`, `tests/review-modes.test.ts`); typing on real keyboards is checked here.
 
-- [ ] Open a scene under **Navegar escenas** and press **Editar escena**: the field shows the scene's Markdown with its marks. *(automated)*
+- [ ] Open a scene under **Navegar escenas** and press **Editar escena**: the page switches to **Concentración** and the field shows the scene's Markdown with its marks. **Cerrar editor** comes back to **Revisión** at that scene. *(automated)*
 - [ ] Type with accents, dialogue dashes and a dictated or autocorrected word on a phone keyboard; press **Guardar**: the status says **Guardado** and, after a reload, the scene shows exactly what was typed.
 - [ ] Ctrl+S (Cmd+S on a Mac) in the field saves instead of opening the browser's save dialog.
 - [ ] Open the same scene in two tabs, save in one, then save in the other: the second shows **No se guardó: la escena cambió mientras editabas** with both versions, and keeps its text. *(automated)*
-- [ ] While a scene is open in the editor, accept a proposal for it from a second tab: the editor is not replaced, the page shows **Hay novedades en este libro…**, and saving shows the conflict. *(automated)*
+- [ ] While a scene is open in the editor, accept a proposal for it from a second tab: the editor is not replaced, within a few seconds the desk says **Esta escena ha cambiado fuera de este editor.**, and saving shows the conflict. *(automated)*
 - [ ] After saving an edit, a pending proposal for that scene shows **No aplicable: la escena ha cambiado** and offers no accept. *(automated)*
 - [ ] Type without saving and reload the tab: reopening the editor recovers the text. Close the tab and open the page again: the text is gone.
 - [ ] Try to leave the page with unsaved text: the browser asks first.
 - [ ] With a screen reader, the field is announced with the scene's name and the save status is read when it changes.
+
+## 12. Modes: Concentración, Ayuda RE;write, Revisión
+
+Tests pin the remembered mode, the kept editor, the scene's items, quote selection and the dock (`tests/review-modes.test.ts`, `browser-tests/tests/modes.spec.ts`, which also saves screenshots of both writing modes, light and dark, on desktop and on a phone). Real devices and the feel of writing are checked here.
+
+- [ ] A new account opens in **Revisión**, with every section as before. Choose **Concentración** and reload: the page opens in **Concentración** at the same scene.
+- [ ] In **Concentración** only the book, the mode switch, the scene picker, the scene's title and word count, **Guardar** with its status and the editor are on screen. No proposal, finding or claim appears, the assistant does not open by itself and its button is outlined, not filled.
+- [ ] Type in the middle of a paragraph without saving, then switch to **Ayuda RE;write**, **Revisión** and back with a thumb on a real phone: the text and the caret are where they were, and the keyboard did not have to be reopened twice.
+- [ ] In **Ayuda RE;write** on a computer the help column is on the right of the text and lists only the open scene's changes, findings, possible problems and claims, each with its usual actions. On a phone **Texto** and **Ayuda (n)** swap the two.
+- [ ] Tap a quote in the help: the editor shows the scene with those words selected and in view. Rewrite those words and tap again: the help says the quote is no longer in the text.
+- [ ] Accept or reject from the help column: the decision is taken, the card says **Decisión guardada · Deshacer**, and the editor keeps its text and its unsaved changes.
+- [ ] **‹** and **›** and the scene list open the neighbouring scenes; unsaved text of the scene left is offered again when coming back.
+- [ ] On a phone the switch sits at the bottom above the home indicator, each button is a full thumb target, and the accept and reject bar and the assistant button stop above it. Nothing scrolls sideways.
+- [ ] With the keyboard only: Tab reaches the switch, Enter or Space changes the mode, and a screen reader announces the group **Modo** and which mode is pressed.
