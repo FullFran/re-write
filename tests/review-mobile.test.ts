@@ -274,7 +274,8 @@ test('a quote that opens its scene works from the keyboard', () => {
 
 test('the chosen rating is exposed as pressed, not only drawn', () => {
   const card = page().narrativeFindingCard('sal', FINDING, async () => {});
-  const pressed = Object.fromEntries(byTag(card, 'button').map((b) => [b.textContent, b.attrs['aria-pressed']]));
+  const ratings = byTag(card, 'button').filter((b) => ['Me ayuda', 'Ruido'].includes(b.textContent));
+  const pressed = Object.fromEntries(ratings.map((b) => [b.textContent, b.attrs['aria-pressed']]));
   assert.deepEqual(pressed, { 'Me ayuda': 'true', Ruido: 'false' });
 });
 

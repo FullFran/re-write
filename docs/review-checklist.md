@@ -34,7 +34,7 @@ Items marked *(automated)* are checked on every pull request by the browser test
 
 - [ ] Choose a proposal intended for rejection.
 - [ ] Click **Rechazar**. *(automated)*
-- [ ] Confirm the card remains where you acted, now with the **Rechazada** badge and no decision buttons. *(automated)*
+- [ ] Confirm the card remains where you acted, now with the **Rechazada** badge, no decision buttons, and **Decisión guardada · Deshacer**. *(automated)*
 - [ ] Reload the page and scroll to **Historial de cambios del manuscrito** (Manuscript change history). *(automated)*
 - [ ] Confirm the rejected proposal is listed with the **Rechazada** badge. *(automated)*
 - [ ] Confirm the original scene text remains byte-identical and unmodified. *(automated)*
@@ -43,7 +43,7 @@ Items marked *(automated)* are checked on every pull request by the browser test
 
 - [ ] Choose a valid pending proposal that you wish to incorporate.
 - [ ] Click **Aceptar cambio**. *(automated)*
-- [ ] Confirm the card remains where you acted, now with the **Aceptada** badge and no decision buttons. *(automated)*
+- [ ] Confirm the card remains where you acted, now with the **Aceptada** badge, no decision buttons, and **Decisión guardada · Deshacer**. *(automated)*
 - [ ] Reload the page and scroll to **Historial de cambios del manuscrito**. *(automated)*
 - [ ] Confirm the proposal appears with the **Aceptada** badge and displays the version commit hash (e.g., `versión a1b2c3d4e5`). *(automated)*
 
@@ -55,6 +55,18 @@ Items marked *(automated)* are checked on every pull request by the browser test
 - [ ] Confirm proposed claims show **Pendiente** and do not enter **Canon**. *(automated)*
 - [ ] Confirm accepted rumors/beliefs and claims with stale evidence appear under **Afirmaciones fuera del Canon**, each with a reason.
 - [ ] Confirm rejected claims remain visible under **Afirmaciones rechazadas** with **Rechazada** badges.
+
+## 5b. Take a Decision Back (#98)
+
+- [ ] Reject a proposal, click **Deshacer** on the same card: it is **Pendiente** again with **Aceptar cambio** and **Rechazar**, its history reads "Rechazada por … · Reabierta por …", and the scene text is unchanged. Accept it. *(automated)*
+- [ ] Accept a proposal, then click **Deshacer** (or **Volver a revisar** in Historial): a box titled **Revertir cambio de texto** explains that an inverse proposal is created and the text does not change until a person accepts it. **Cancelar** closes it and writes nothing. *(automated)*
+- [ ] Click **Crear propuesta inversa**: focus moves to the inverse proposal in **Cambios propuestos** ("Revierte el cambio aceptado P-…", with a link). Accept it and confirm the scene bytes are back exactly. *(automated)*
+- [ ] In Historial, the original change lists "Aceptada por … · Reversión pedida por … · propuesta inversa Q-…" with links, and offers **Volver a proponer**, which creates a pending proposal "Vuelve a proponer el cambio P-…". *(automated)*
+- [ ] After a reload, every decided item in Historial still offers **Volver a revisar** (state is on the server). *(automated)*
+- [ ] On an accepted or rejected claim, and on a rated finding, **Deshacer decisión editorial** makes it pending again; a reopened claim leaves Canon, a reopened finding shows "Valoración reabierta" with the earlier verdict. *(automated, claims and narrative findings)*
+- [ ] Open the same book in two tabs. In one, reject and undo a proposal; in the other, accept it: the second tab shows "Esta decisión cambió en otra pestaña. Recarga para ver el estado actual." with **Recargar**, and nothing is written. *(automated)*
+- [ ] With the revert box open, wait for a background refresh: the box stays open (the notice shows instead). *(automated)*
+- [ ] On a phone, the saved-decision line and Historial fit the screen with no sideways scroll. *(automated; screenshots in the browser job's results)*
 
 ## 6. Verify Stale Proposal Handling
 
