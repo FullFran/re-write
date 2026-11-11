@@ -4,7 +4,12 @@
  * two scripts the page loads from the issuer, so the page runs its own code against the
  * real server and nothing reaches the network. Run with Node 24 (types are stripped);
  * it prints one JSON line with the addresses and exits when its stdin closes.
+ *
+ * With `--engine` the embedded engine is on, behind a stand-in engine process (below) that
+ * calls no model: it logs in at once and answers each prompt by echoing its first line.
  */
+import { randomBytes } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
@@ -18,6 +23,35 @@ process.env.GIT_CONFIG_NOSYSTEM = '1';
 process.env.HOME = tempDir();
 
 const BOOK = 'sal';
+
+// The stand-in engine process: protocol of src/adapters/engine-protocol.ts, no model. Its
+// answer quotes the first line it was given, so a test can see the host context line.
+const ENGINE_CHILD = String.raw`
+const send = (m) => process.stdout.write(JSON.stringify(m) + '\n');
+send({ type: 'ready', piVersion: '0.0.0-browser' });
+let buffer = '';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk.toString('utf8');
+  let i;
+  while ((i = buffer.indexOf('\n')) >= 0) {
+    const m = JSON.parse(buffer.slice(0, i));
+    buffer = buffer.slice(i + 1);
+    if (m.type === 'login.start') {
+      send({ type: 'login.code', userCode: 'ECHO-1234' });
+      setTimeout(() => send({ type: 'login.done', credential: { access: 'a', refresh: 'r', expires: Date.now() + 3600000, accountId: 'acc' } }), 1500);
+    }
+    if (m.type === 'prompt') {
+      send({ type: 'session', tools: ['mcp__rewrite__read_scene'] });
+      send({ type: 'tool', phase: 'start', call: 1, name: 'mcp__rewrite__read_scene', scene: 'scenes/escena-01.md' });
+      send({ type: 'tool', phase: 'end', call: 1, name: 'mcp__rewrite__read_scene', ok: true, scene: 'scenes/escena-01.md' });
+      send({ type: 'delta', text: '**Recibido:**\n\n> ' + m.text.split('\n')[0] + '\n\n- uno\n- dos' });
+      send({ type: 'done' });
+    }
+    if (m.type === 'shutdown') process.exit(0);
+  }
+});
+process.stdin.on('end', () => process.exit(0));
+`;
 const USER = 'user_fran';
 
 function listen(server: Server): Promise<string> {
@@ -77,6 +111,11 @@ library.grant(BOOK, USER);
 const app = createServer();
 const base = await listen(app);
 const config: ServerConfig = { issuer, resource: `${base}/mcp`, reviewOrigin: base, clerkPublishableKey: 'pk_test_placeholder' };
+if (process.argv.includes('--engine')) {
+  const entry = join(tempDir(), 'engine-child.mjs');
+  writeFileSync(entry, ENGINE_CHILD);
+  config.engine = { key: randomBytes(32), dataDir: data, entry, mcpUrl: `${base}/mcp`, maxProcesses: 2, idleMs: 60_000 };
+}
 app.on('request', createHandler(config, library));
 
 script = clerkScript(await new SignJWT({ iss: issuer, sub: USER, sid: 'sess_1', azp: base })
