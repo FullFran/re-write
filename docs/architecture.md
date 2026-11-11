@@ -139,6 +139,8 @@ Routes available on the review door (`/review`):
 - `POST /review/api/books/{book}/import`: uploads and commits Markdown scenes (`com.fullfran.rewrite.book.import`).
 - `POST /review/api/books/{book}/claims/{id}`, `/proposals/{id}`, `/findings/{id}`: reviews claims, proposals, and findings (`com.fullfran.rewrite.review.decide`).
 
+The embedded engine ([engine.md](engine.md), off by default) adds no door. A writer reaches it at `/review/api/engine/*` with their browser session, and those routes touch no book: they start a login, send a prompt, abort a turn or disconnect. The engine process itself reaches book data only through the MCP door, with a host-issued token that resolves to that writer and is honoured on loopback only. So what the engine can do to a book is exactly what the writer's own connected MCP client can do: read and propose.
+
 Review decisions (`com.fullfran.rewrite.review.decide`) and book creation (`com.fullfran.rewrite.book.create`) are never grantable to a package, and the MCP door refuses them whatever is granted. That is a host-owned setting: generation content cannot add an approve tool, remove the untrusted-text instruction or widen it (HCS-0008-R007). Per-person credentials for projected MCP servers follow [#4](https://github.com/FullFran/re-write/issues/4).
 
 Book creation retains one accepted existence signal: an occupied name returns

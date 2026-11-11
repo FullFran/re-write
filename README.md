@@ -75,6 +75,10 @@ rewrite review-proposal /tmp/book <proposal-id> accept --by "your name"
 
 Add `--json` to any command. Exit codes: 0 for success, 1 for a refusal, 2 for a usage error.
 
+## Embedded engine (experimental, off by default)
+
+A signed-in writer can connect their own ChatGPT account with a device code at `/review/engine` and talk with an assistant that runs on the server and uses RE;write's MCP tools as that writer (read and propose, never accept or reject). It needs `REWRITE_ENGINE=1`, a key, and an image built with `--build-arg WITH_ENGINE=1`. Read [docs/engine.md](docs/engine.md) first: a real sign-in and OpenAI's terms for this use are not verified.
+
 ## HCS checks
 
 RE;write vendors one pinned [HCS](https://github.com/FullFran/hcs) release in `vendor/hcs/` (pin in `vendor/hcs/PIN.json`). `npm test` checks the vendored files against the release's `SHA256SUMS` and measures its conformance cases (it fails only on a regression against a baseline, so re-write can diverge on purpose); CI also runs the traceability drift check. To move to a new release, run `npm run hcs:sync -- <version> <sha256>`. The reference runner will run in M7 ([#44](https://github.com/FullFran/re-write/issues/44)). See [HCS pin and local checks](docs/hcs.md).

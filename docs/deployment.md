@@ -32,6 +32,8 @@ Build from the `Dockerfile`, mount a named volume at `/data`, and expose port 80
 | `PORT` | `8080` | Already set in the image |
 | `REWRITE_LOG_SALT` | (deployment secret) | HMAC-SHA256 key for pseudonymous subject and book identifiers; keep stable within the deployment |
 
+The embedded engine (chat with an assistant from the browser, using the writer's own ChatGPT account) is off by default and has its own settings and build argument: see [engine.md](engine.md) before enabling it.
+
 The server refuses to start if a setting is missing or the URLs are not HTTPS. It needs no Clerk secret key, and **it has no setting that turns authentication off**.
 
 ## Read the metadata request log
@@ -146,3 +148,4 @@ Do these with the synthetic book only.
 - **This is not a sandbox for the people involved.** Anyone with shell access to the container can do anything. And a person who pastes their own browser session token into an agent would give it their review rights.
 - **Coauthors of one book see all of it.** Permissions are per book, not per scene.
 - **Book text goes to each person's model provider** when their agent reads it.
+- **With the embedded engine enabled, the server stores each connected writer's ChatGPT credential**, encrypted with `REWRITE_ENGINE_KEY`, inside the data volume. Whoever holds the volume and the key holds those logins. See [engine.md](engine.md#security-boundaries).
