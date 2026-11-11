@@ -117,7 +117,7 @@ test('runner self-test: a tool list that grows past its budget fails the metadat
   assert.deepEqual(failing(outcome), ['chatgpt-tool-metadata', 'onboarding']);
   const metadata = outcome.journeys.find((item) => item.id === 'chatgpt-tool-metadata')!;
   assert.deepEqual(metadata.checks.filter((check) => check.status === 'FAIL').map((check) => `${check.check}: ${check.note}`), [
-    'the tool list stays under 28 KB: expected at most 28000',
+    'the tool list stays under 30 KB: expected at most 30000',
   ]);
 });
 

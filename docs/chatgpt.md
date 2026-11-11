@@ -26,9 +26,11 @@ From OpenAI's documentation, read on 2026-11-11:
 | Supports OAuth with CIMD, dynamic client registration or a static client. | Unchanged: Clerk OAuth, protected-resource metadata at `/.well-known/oauth-protected-resource`. |
 
 Not found in OpenAI's documentation: limits on the number of tools, description length or result
-size. The budget is our own: the `chatgpt-tool-metadata` eval keeps the tool list under 28 KB. It was
-about 17 KB with 12 tools; the 7 note and graph tools of [notes-and-graph.md](notes-and-graph.md)
-bring it to about 26 KB. About 600 bytes of each tool are fixed schema overhead, so new tools keep
+size. The budget is our own: the `chatgpt-tool-metadata` eval keeps the tool list under 30 KB. It was
+about 17 KB with 12 tools; the 8 note and graph tools of [notes-and-graph.md](notes-and-graph.md)
+bring it to about 28 KB. It was raised from 28 KB to 30 KB for `graph_suggest_links` rather than
+shortening the untrusted-text sentence, a safety instruction every tool that returns manuscript
+text must keep word for word. About 600 bytes of each tool are fixed schema overhead, so new tools keep
 short descriptions and open output schemas rather than spelling out every field.
 
 Which plans may use write tools is not settled: the developer guide lists Plus, Pro, Business,
