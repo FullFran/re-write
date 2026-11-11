@@ -23,6 +23,8 @@ Later, adding Google needs your own Google OAuth credentials. Clerk then links i
 
 Build from the `Dockerfile`, mount a named volume at `/data`, and expose port 8080 through HTTPS. Keep the original `Host` header at the proxy, or requests get 403.
 
+The image builds the scene editor module from `editor/` (its own pinned dependencies and lockfile, bundled by esbuild) in a first stage and copies only `editor/dist/editor.js` into the final image, so the build needs the npm registry as the root dependencies already do. The server reads that file once at start and serves it at `/review/editor.js` (about 105 KB gzipped, `cache-control: no-cache` with an ETag, so a phone downloads it once per version). Running the server from a checkout without that build still works: the review page edits scenes in a plain text field. To get the editor locally: `cd editor && npm ci --ignore-scripts && npm run build`.
+
 | Variable | Example | Purpose |
 | --- | --- | --- |
 | `MCP_OAUTH_ISSUER` | `https://clerk.example.com` | Clerk Frontend API URL, exactly as it appears in `iss` |

@@ -1,7 +1,9 @@
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 import { basename, join, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -37,6 +39,30 @@ export interface ServerConfig {
   clerkPublishableKey: string;
   /** Present only when the embedded engine is enabled. */
   engine?: EngineSettings;
+  /** The built scene editor module (editor/, docs/deployment.md); defaults to editor/dist/editor.js. */
+  editorBundle?: string;
+}
+
+const EDITOR_BUNDLE = fileURLToPath(new URL('../../editor/dist/editor.js', import.meta.url));
+
+interface EditorAsset {
+  plain: Buffer;
+  gzip: Buffer;
+  etag: string;
+}
+
+// The editor module is read once, when the server starts. Without it (a checkout that never
+// ran the build) its address is 404 and the review page keeps its plain text field.
+function loadEditorAsset(file: string): EditorAsset | null {
+  let plain: Buffer;
+  try {
+    plain = readFileSync(file);
+  } catch {
+    return null;
+  }
+  // Weak, because the gzipped and the plain bytes are the same module.
+  const etag = `W/"${createHash('sha256').update(plain).digest('base64url').slice(0, 27)}"`;
+  return { plain, gzip: gzipSync(plain, { level: 9 }), etag };
 }
 
 const MAX_BODY_BYTES = 1_048_576;
@@ -368,6 +394,7 @@ export function createHandler(
   const allowedHost = new URL(config.resource).host;
   const engineHost = config.engine ? new URL(config.engine.mcpUrl).host : null;
   const resourcePath = new URL(config.resource).pathname;
+  const editorAsset = loadEditorAsset(config.editorBundle ?? EDITOR_BUNDLE);
   const metadataUrl = metadataUrlFor(config.resource);
   const metadata = {
     resource: config.resource,
@@ -910,12 +937,27 @@ export function createHandler(
     throw new HttpError(404, 'not found');
   };
 
-  const serveAsset = (res: ServerResponse, type: string, content: string): void => {
+  const serveAsset = (res: ServerResponse, type: string, content: string | Buffer): void => {
     res.setHeader('content-type', type);
     res.setHeader('content-security-policy', reviewCsp(config.issuer));
     res.setHeader('x-content-type-options', 'nosniff');
     res.setHeader('referrer-policy', 'no-referrer');
     res.end(content);
+  };
+
+  // Phones fetch the editor once and then only ask whether it changed (no-cache plus ETag).
+  const serveEditor = (req: IncomingMessage, res: ServerResponse, asset: EditorAsset): void => {
+    res.setHeader('cache-control', 'no-cache');
+    res.setHeader('etag', asset.etag);
+    res.setHeader('vary', 'Accept-Encoding');
+    if (req.headers['if-none-match'] === asset.etag) {
+      res.statusCode = 304;
+      res.end();
+      return;
+    }
+    const gzip = /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''));
+    if (gzip) res.setHeader('content-encoding', 'gzip');
+    serveAsset(res, 'text/javascript; charset=utf-8', gzip ? asset.gzip : asset.plain);
   };
 
   return withRequestLog(config.resource, (req, res) => {
@@ -968,6 +1010,7 @@ export function createHandler(
       }
       // With the engine on, the assistant panel's styles and script follow the page's own.
       if (req.method === 'GET' && path === '/review/app.js') return serveAsset(res, 'text/javascript; charset=utf-8', engine ? REVIEW_JS + ASSISTANT_JS : REVIEW_JS);
+      if (req.method === 'GET' && path === '/review/editor.js' && editorAsset) return serveEditor(req, res, editorAsset);
       if (req.method === 'GET' && path === '/review/app.css') return serveAsset(res, 'text/css; charset=utf-8', engine ? REVIEW_CSS + ASSISTANT_CSS : REVIEW_CSS);
       throw new HttpError(404, 'not found');
     })().catch((error) => {
