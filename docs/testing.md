@@ -35,3 +35,5 @@ npx playwright test
 ```
 
 On a failure, `browser-tests/test-results/` holds a screenshot and a trace for each failed test (`npx playwright show-trace <trace.zip>`); in CI the `browser` job uploads them as the `browser-results` artifact.
+
+In CI the `browser` job runs inside Playwright's own image for the pinned version (`mcr.microsoft.com/playwright:v1.65.0-noble`, pinned by digest in `.github/workflows/ci.yml`), which already holds Chromium and its system libraries, so the job installs nothing with apt. When you change the `@playwright/test` version in `browser-tests/package.json`, change the image tag and digest with it.
