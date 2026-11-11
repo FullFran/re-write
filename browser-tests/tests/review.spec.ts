@@ -32,9 +32,10 @@ test('rejecting a proposal shows it rejected and leaves the manuscript bytes unc
   await expect(card).toContainText('Una imagen más intensa');
   await card.getByRole('button', { name: 'Rechazar' }).click();
 
-  // The card stays where the person acted, with its new state and no decision.
+  // The card stays where the person acted, with its new state, no decision and a way back.
   await expect(card.locator('.state-badge')).toHaveText('Rechazada');
-  await expect(card.getByRole('button')).toHaveCount(0);
+  await expect(card.locator('.decision')).toHaveCount(0);
+  await expect(card.getByRole('button')).toHaveText(['Deshacer']);
   expect(book.bytes(SCENE).equals(before)).toBe(true);
   expect(book.git('diff', '--name-only', head, 'HEAD', '--', 'scenes')).toBe('');
   expect(book.cli('show', id).proposal.status).toBe('rejected');
@@ -59,7 +60,7 @@ test('a stale proposal warns, offers no accept, and can still be rejected withou
   await expect(stale.getByRole('button', { name: 'Aceptar cambio' })).toBeVisible();
   await winner.getByRole('button', { name: 'Aceptar cambio' }).click();
   await expect(winner.locator('.state-badge')).toHaveText('Aceptada');
-  await expect(winner.getByRole('button')).toHaveCount(0);
+  await expect(winner.getByRole('button')).toHaveText(['Deshacer']);
 
   // Accepting the first changed the passage the second was made against, in one new
   // commit that keeps the previous text in history.
@@ -74,7 +75,7 @@ test('a stale proposal warns, offers no accept, and can still be rejected withou
 
   await stale.getByRole('button', { name: 'Rechazar' }).click();
   await expect(stale.locator('.state-badge')).toHaveText('Rechazada');
-  await expect(stale.getByRole('button')).toHaveCount(0);
+  await expect(stale.getByRole('button')).toHaveText(['Deshacer']);
   expect(book.bytes(SCENE).equals(accepted)).toBe(true);
   expect(book.git('diff', '--name-only', head, 'HEAD', '--', 'scenes')).toBe('');
   expect(book.cli('show', second).proposal.status).toBe('rejected');
