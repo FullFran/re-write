@@ -89,12 +89,9 @@ const page = {
 const sceneFile = z.string().min(1).max(300).describe('Scene path from list_scenes, for example "scenes/003-el-puente.md"');
 const MAX_NOTE_CHARS = 20_000;
 const MAX_MENTIONS = 100;
-const noteName = z.string().min(1).max(200).describe('Note name from list_notes, for example "Elena"; an alias or a different case or accents also finds it');
-const nodeRef = z.string().min(1).max(300).describe('A note name from list_notes (or an alias), or a scene path from list_scenes such as "scenes/003-el-puente.md"');
-const asOfScene = z.string().min(1).max(300).optional().describe('Scene path from list_scenes: leave out the scenes after it in reading order, to avoid spoilers. Notes and links between notes are always kept.');
-const graphNode = z.object({ id: z.string(), kind: z.enum(['note', 'scene']), name: z.string(), type: z.string().nullable(), order: z.number().int().nullable() }).passthrough();
-const graphEdge = z.object({ kind: z.enum(['mention', 'link', 'cooccurs']), from: z.string(), to: z.string(), weight: z.number().int() });
-const linkGroup = z.object({ target: z.string(), occurrences: z.number().int(), first: z.object({ source: z.string(), line: z.number().int(), column: z.number().int() }), candidates: z.array(z.string()).optional() });
+const noteName = z.string().min(1).max(200).describe('Note name from list_notes, or an alias');
+const nodeRef = z.string().min(1).max(300).describe('Note name (or alias) or scene path');
+const asOfScene = z.string().min(1).max(300).optional().describe('Scene path: ignore the scenes after it (no spoilers)');
 
 // Declared result shapes. Every field is optional and objects stay open because error results carry
 // a problem (docs/problems.md) as structuredContent too, and clients validate those against the same schema.
@@ -385,9 +382,9 @@ export function buildMcpServer(library: Library, subject: string, capabilities: 
 
   register('list_notes', {
     title: 'Ver notas',
-    description: `Use this when you need the book's notes (characters, places, objects, plot threads) before read_note, the graph tools or propose_note. Each note has its type and aliases from its frontmatter; unresolved lists [[links]] in scenes or notes that name no note yet, and ambiguous those that name several. ${UNTRUSTED}`,
+    description: `Use this when you need the book's notes (characters, places, objects, plot threads), with type and aliases. unresolved lists [[links]] that name no note; ambiguous, those naming several. ${UNTRUSTED}`,
     inputSchema: { book, ...page },
-    outputSchema: resultSchema({ ...paged('notes'), unresolved: z.array(linkGroup), ambiguous: z.array(linkGroup) }),
+    outputSchema: resultSchema({ ...paged('notes'), unresolved: z.array(item), ambiguous: z.array(item) }),
     annotations: reading,
   }, (args) => data(() => {
     const summary = notesSummary(library.open(args.book, subject));
@@ -397,18 +394,14 @@ export function buildMcpServer(library: Library, subject: string, capabilities: 
 
   register('read_note', {
     title: 'Leer nota',
-    description: `Use this when you need one note: its text, its frontmatter, the [[links]] it makes and its backlinks, linked (scenes and notes that link to it, with the sentence) and unlinked (its name or an alias written as plain text). Long notes come in pages: call again with offset set to next_offset. At most ${MAX_MENTIONS} mentions of each kind are returned; the totals say how many there are. ${UNTRUSTED}`,
+    description: `Use this when you need one note: text, frontmatter, its [[links]], and backlinks: linked (who links it, with the sentence) and unlinked (its name as plain text), ${MAX_MENTIONS} of each at most. Page long notes with next_offset. ${UNTRUSTED}`,
     inputSchema: {
       book,
       name: noteName,
-      offset: z.number().int().min(0).optional().describe('Character to start at; use next_offset from the previous page'),
-      limit: z.number().int().min(1).optional().describe(`Characters to return, at most ${MAX_NOTE_CHARS}`),
+      offset: z.number().int().min(0).optional().describe('Character to start at (next_offset)'),
+      limit: z.number().int().min(1).optional().describe(`Characters, at most ${MAX_NOTE_CHARS}`),
     },
-    outputSchema: resultSchema({
-      name: z.string(), file: z.string(), type: z.string().nullable(), aliases: z.array(z.string()), problems: z.array(z.string()),
-      text: z.string(), total: z.number().int(), next_offset: z.number().int().nullable(), blob: z.string(),
-      links: z.array(item), backlinks: item,
-    }),
+    outputSchema: resultSchema({ name: z.string(), text: z.string(), next_offset: z.number().int().nullable(), links: z.array(item), backlinks: item }),
     annotations: reading,
   }, (args) => data(() => {
     const project = library.open(args.book, subject);
@@ -430,11 +423,11 @@ export function buildMcpServer(library: Library, subject: string, capabilities: 
 
   register('propose_note', {
     title: 'Proponer nota',
-    description: 'Use this only when the person asks for a new note (a character, place, object or plot thread), or agrees to one you suggest, for example for an unresolved [[link]] from list_notes. The text is the whole Markdown note, optionally starting with a frontmatter block such as "---\ntype: personaje\naliases: [la capitana]\n---\n" (type: personaje, lugar, objeto, trama or otra). It never writes the note: the person accepts or rejects it at review_url. To change an existing note, use propose_revision with its file from list_notes. Repeating a call creates no duplicates.',
+    description: 'Use this only when the person asks for a new note or agrees to one you suggest. It never writes: the person accepts it at review_url. To change a note, use propose_revision on its file. Repeating a call creates no duplicates.',
     inputSchema: {
       book,
-      name: z.string().min(1).max(200).describe('Name of the new note, which is also what [[links]] name; no "/", "\\", ":", "#", "|", "^", "[" or "]"'),
-      text: z.string().min(1).max(MAX_NOTE_CHARS).describe('The whole note, in Markdown'),
+      name: z.string().min(1).max(200).describe('Note name, what [[links]] use; no / \\ : # | ^ [ ]'),
+      text: z.string().min(1).max(MAX_NOTE_CHARS).describe('Whole Markdown note; may start with ---, type: personaje|lugar|objeto|trama|otra, aliases: [a, b], ---'),
       rationale: text.describe('Why, in a sentence for the person reviewing'),
     },
     outputSchema: resultSchema({ proposal: item, created: z.boolean(), ...toReview }),
@@ -446,14 +439,14 @@ export function buildMcpServer(library: Library, subject: string, capabilities: 
 
   register('graph_neighbors', {
     title: 'Vecinos en el grafo',
-    description: 'Use this when the person asks what or who is connected to a character, place, object, plot thread or scene: returns the nodes within depth steps (the node itself at distance 0) and the edges among them. Edges are mention (a scene links a note), link (a note links a note) and cooccurs (two notes linked from the same scene; weight counts the scenes).',
+    description: 'Use this when the person asks who or what is connected to a note or scene: nodes within depth steps and their edges (mention: scene to note; link: note to note; cooccurs: notes sharing scenes, weight = scenes).',
     inputSchema: {
       book,
       node: nodeRef,
-      depth: z.number().int().min(1).max(3).optional().describe('Steps from the node, 1 to 3 (default 1)'),
+      depth: z.number().int().min(1).max(3).optional().describe('Steps, 1 to 3 (default 1)'),
       as_of_scene: asOfScene,
     },
-    outputSchema: resultSchema({ center: z.string(), nodes: z.array(graphNode), edges: z.array(graphEdge) }),
+    outputSchema: resultSchema({ center: z.string(), nodes: z.array(item), edges: z.array(item) }),
     annotations: reading,
   }, (args) => data(() => {
     const { analysis, graph } = graphOf(library.open(args.book, subject), args.as_of_scene);
@@ -462,17 +455,17 @@ export function buildMcpServer(library: Library, subject: string, capabilities: 
 
   register('graph_orphans', {
     title: 'Notas huérfanas',
-    description: 'Use this when the person asks for forgotten threads: notes that no scene links, that link to no note and that no note links to.',
+    description: 'Use this when the person asks for forgotten threads: notes with no link to or from anything.',
     inputSchema: { book, as_of_scene: asOfScene },
-    outputSchema: resultSchema({ orphans: z.array(graphNode) }),
+    outputSchema: resultSchema({ orphans: z.array(item) }),
     annotations: reading,
   }, (args) => data(() => ({ orphans: orphans(graphOf(library.open(args.book, subject), args.as_of_scene).graph) })));
 
   register('graph_path', {
     title: 'Camino en el grafo',
-    description: 'Use this when the person asks how two characters, places, objects, threads or scenes are connected: returns a shortest path (fewest steps, any edge, either direction) as nodes, or null when they are not connected.',
+    description: 'Use this when the person asks how two notes or scenes are connected: a shortest path as nodes, or null.',
     inputSchema: { book, from: nodeRef, to: nodeRef, as_of_scene: asOfScene },
-    outputSchema: resultSchema({ path: z.array(graphNode).nullable(), length: z.number().int().nullable() }),
+    outputSchema: resultSchema({ path: z.array(item).nullable(), length: z.number().int().nullable() }),
     annotations: reading,
   }, (args) => data(() => {
     const { analysis, graph } = graphOf(library.open(args.book, subject), args.as_of_scene);
@@ -483,15 +476,15 @@ export function buildMcpServer(library: Library, subject: string, capabilities: 
 
   register('graph_central', {
     title: 'Notas centrales',
-    description: 'Use this when the person asks who or what carries the story: ranks notes (or scenes) by degree, the number of distinct nodes each one is connected to, highest first.',
+    description: 'Use this when the person asks who or what carries the story: notes (or scenes) by degree, most connected first.',
     inputSchema: {
       book,
-      metric: z.enum(['degree']).optional().describe('The ranking measure; only degree for now (default)'),
-      kind: z.enum(['note', 'scene']).optional().describe('Rank notes (default) or scenes'),
-      limit: z.number().int().min(1).max(MAX_PAGE).optional().describe(`How many to return, at most ${MAX_PAGE} (default ${DEFAULT_PAGE})`),
+      metric: z.enum(['degree']).optional().describe('Only degree for now'),
+      kind: z.enum(['note', 'scene']).optional().describe('Default note'),
+      limit: z.number().int().min(1).max(MAX_PAGE).optional().describe(`At most ${MAX_PAGE} (default ${DEFAULT_PAGE})`),
       as_of_scene: asOfScene,
     },
-    outputSchema: resultSchema({ metric: z.string(), ranking: z.array(graphNode) }),
+    outputSchema: resultSchema({ metric: z.string(), ranking: z.array(item) }),
     annotations: reading,
   }, (args) => data(() => {
     const { graph } = graphOf(library.open(args.book, subject), args.as_of_scene);
