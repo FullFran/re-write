@@ -225,6 +225,24 @@ th[aria-sort=descending] .graph-sort::after { content: '▼'; }
 .graph-table tr.selected .graph-node { font-weight: 700; }
 .graph-detail { margin: var(--space-4) 0; padding: var(--space-3) var(--space-4); border: 1px solid var(--line); border-radius: var(--radius); }
 .graph-detail h3 { margin-top: 0; }
+.graph-table tr.on-path td:first-child { box-shadow: inset 4px 0 0 var(--accept); }
+.graph-types { display: flex; flex-wrap: wrap; gap: 0 var(--space-4); margin: 0; padding: 0 var(--space-2); border: 1px solid var(--line); border-radius: var(--radius); }
+.graph-types legend { padding: 0 var(--space-1); font-size: var(--text-sm); color: var(--muted); }
+.graph-controls input[type=range] { min-height: var(--tap); width: 8rem; margin: 0; }
+.graph-controls output { font-variant-numeric: tabular-nums; }
+.graph-controls select { min-height: var(--tap); }
+.graph-view { margin: var(--space-3) 0 var(--space-5); }
+.graph-view-controls > button { min-height: var(--tap); }
+.graph-canvas { position: relative; height: min(60vh, 640px); border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); overflow: hidden; }
+.graph-legend { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); margin: var(--space-2) 0; padding: 0; font-size: var(--text-sm); }
+.graph-swatch { display: inline-block; width: 12px; height: 12px; margin-right: var(--space-1); border-radius: 50%; vertical-align: baseline; }
+.graph-analysis { margin: var(--space-4) 0; padding: var(--space-2) var(--space-4); border: 1px solid var(--line); border-radius: var(--radius); }
+.graph-analysis > summary { min-height: var(--tap); display: flex; align-items: center; font-weight: 700; cursor: pointer; }
+.graph-op h3 { margin: var(--space-4) 0 var(--space-1); font-size: var(--text-lg); }
+.graph-op ol, .graph-op ul { margin: var(--space-1) 0; padding-left: var(--space-5); }
+.graph-op li { margin: var(--space-1) 0; }
+.graph-pick { min-height: var(--tap); margin-right: var(--space-1); }
+.graph-view-error { padding: var(--space-3); }
 .help-status:empty { display: none; }
 /* Concentración keeps the assistant one tap away, quietly: outlined, never the loudest thing on screen. */
 body[data-mode=focus] .assistant-fab { border-color: var(--edge); background: var(--paper); color: var(--ink); box-shadow: none; }
@@ -1922,6 +1940,8 @@ function notesGroups(notes, onOpen) {
   return out;
 }
 
+// One collator for every graph sort: localeCompare with a locale builds one per call.
+const GRAPH_COLLATOR = new Intl.Collator('es');
 const graphNodeName = (node) => (node.kind === 'scene' ? deskSceneName(node.name) : node.name);
 const graphNodeType = (node) => (node.kind === 'scene' ? 'Escena' : NOTE_TYPES[node.type] || 'Sin tipo');
 const countLabel = (n, one, many) => n.toLocaleString('es') + ' ' + (n === 1 ? one : many);
@@ -1933,26 +1953,111 @@ function relationText(edge, selected) {
   return edge.from === selected ? 'la menciona ' + countLabel(edge.weight, 'vez', 'veces') : 'aparece ' + countLabel(edge.weight, 'vez', 'veces');
 }
 
+// The note types the Grafo filters offer, with notes of no known type as their own group.
+const GRAPH_TYPES = [['personaje', 'Personaje'], ['lugar', 'Lugar'], ['objeto', 'Objeto'], ['trama', 'Trama'], ['otra', 'Otra'], ['none', 'Sin tipo']];
+const graphTypeKey = (node) => (NOTE_TYPES[node.type] ? node.type : 'none');
+const GRAPH_VIEW_ERROR = 'No se pudo cargar el dibujo del grafo. La tabla tiene los mismos datos.';
+
+// The Grafo drawing (editor/src/graph/), a chunk the editor module imports on demand. null when
+// either is missing: the table works without it.
+let graphViewModule = null;
+function loadGraphViewModule() {
+  if (!graphViewModule) {
+    graphViewModule = loadEditorModule()
+      .then((mod) => (mod && typeof mod.loadGraphView === 'function' ? mod.loadGraphView() : null))
+      .then((mod) => (mod && typeof mod.createGraphView === 'function' ? mod : null))
+      .catch(() => null)
+      .then((mod) => {
+        if (!mod) graphViewModule = null;
+        return mod;
+      });
+  }
+  return graphViewModule;
+}
+
 /**
- * The story graph as an accessible list (issue #115): a table of nodes sortable by its column
- * headers, and the neighbours of the chosen node. It never depends on a canvas, works from the
- * keyboard (arrows move between nodes) and is the view phones start with. onOpen(id) opens a
- * note or a scene in the editor. Returns { node, select(id) }.
+ * The story graph (issue #115): a table of nodes sortable by its column headers, the neighbours
+ * of the chosen node and, when "Dibujo" is on, the drawing with its "Análisis" panel. The table
+ * never depends on the canvas, works from the keyboard (arrows move between nodes) and is what
+ * phones start with; the drawing starts on wider screens. The filters (types, scenes, orphans,
+ * "hasta la escena N") apply to both; the drawing can also be cut to the local graph (phones
+ * start there). Choosing a node in either marks it in both
+ * and is announced. onOpen(id) opens a note or a scene in the editor; current is the id of the
+ * note or scene open in the desk, the centre of the local graph until a node is chosen. Returns
+ * { node, select(id), destroy() }.
  */
-function graphList(book, onOpen) {
+function graphList(book, onOpen, current) {
   const box = el('div', undefined, 'graph-list');
-  const st = { data: null, sort: 'degree', desc: true, scenes: false, asOf: '', selected: null, rows: new Map() };
+  const phone = isPhone();
+  const st = {
+    data: null, sort: 'degree', desc: true, scenes: false, asOf: '', selected: null, rows: new Map(),
+    types: new Set(GRAPH_TYPES.map(([key]) => key)), orphans: false, scope: phone ? 'local' : 'global', depth: 2,
+    drawing: !phone, view: null, viewLoading: false, path: [], closed: false,
+  };
+  const check = (label, checked, onChange) => {
+    const wrap = el('label');
+    const input = el('input');
+    input.type = 'checkbox';
+    input.checked = checked;
+    input.addEventListener('change', () => onChange(input.checked));
+    wrap.append(input, document.createTextNode(' ' + label));
+    return { wrap, input };
+  };
   const controls = el('div', undefined, 'graph-controls');
-  const scenesLabel = el('label');
-  const scenesBox = el('input');
-  scenesBox.type = 'checkbox';
-  scenesLabel.append(scenesBox, document.createTextNode(' Mostrar escenas'));
-  const asOfLabel = el('label', 'Hasta ');
-  const asOf = el('select');
-  asOfLabel.append(asOf);
-  controls.append(scenesLabel, asOfLabel);
+  const drawingBox = check('Dibujo', st.drawing, (on) => {
+    st.drawing = on;
+    renderView();
+  });
+  const scopeLabel = el('label', 'Alcance ');
+  const scope = el('select');
+  for (const [key, label] of [['global', 'Grafo global'], ['local', 'Grafo local']]) {
+    const option = el('option', label);
+    option.value = key;
+    scope.append(option);
+  }
+  scope.value = st.scope;
+  scopeLabel.append(scope);
+  const depthLabel = el('label', 'Profundidad ');
+  const depth = el('input');
+  depth.type = 'range';
+  depth.min = '1';
+  depth.max = '3';
+  depth.step = '1';
+  depth.value = String(st.depth);
+  const depthOut = el('output', String(st.depth));
+  depthLabel.append(depth, depthOut);
+  const scenesBox = check('Mostrar escenas', false, (on) => {
+    st.scenes = on;
+    refresh();
+  });
+  const orphansBox = check('Solo huérfanas', false, (on) => {
+    st.orphans = on;
+    refresh();
+  });
+  const types = el('fieldset', undefined, 'graph-types');
+  types.append(el('legend', 'Tipos'));
+  const typeBoxes = new Map();
+  for (const [key, label] of GRAPH_TYPES) {
+    const one = check(label, true, (on) => {
+      if (on) st.types.add(key);
+      else st.types.delete(key);
+      refresh();
+    });
+    typeBoxes.set(key, one.input);
+    types.append(one.wrap);
+  }
+  const asOfLabel = el('label', 'Hasta la escena ', 'graph-asof');
+  const asOf = el('input');
+  asOf.type = 'range';
+  asOf.min = '1';
+  asOf.step = '1';
+  const asOfOut = el('output');
+  asOfLabel.append(asOf, asOfOut);
+  asOfLabel.hidden = true;
+  controls.append(drawingBox.wrap, scopeLabel, depthLabel, scenesBox.wrap, orphansBox.wrap, asOfLabel, types);
   const live = el('p', '', 'meta graph-live');
   live.setAttribute('role', 'status');
+  const viewBox = el('div', undefined, 'graph-view-box');
   const table = el('table', undefined, 'graph-table');
   const thead = el('thead');
   const headRow = el('tr');
@@ -1980,16 +2085,49 @@ function graphList(book, onOpen) {
   const detail = el('section', undefined, 'graph-detail');
   detail.setAttribute('aria-label', 'Vecinos del nodo elegido');
   detail.hidden = true;
-  box.append(el('p', 'Cada nota del libro con sus conexiones. El grado cuenta las notas y escenas distintas con las que conecta; Escenas, las escenas que la mencionan. Elige un nodo para ver sus vecinos.', 'meta'),
-    controls, live, table, detail);
+  box.append(el('p', 'Cada nota del libro con sus conexiones. El grado cuenta las notas y escenas distintas con las que conecta; Escenas, las escenas que la mencionan. Elige un nodo, en la tabla o en el dibujo, para ver sus vecinos.', 'meta'),
+    controls, live, viewBox, table, detail);
 
-  const shown = (node) => st.scenes || node.kind !== 'scene';
   const nodeById = () => new Map(st.data.nodes.map((node) => [node.id, node]));
+  // The centre of the local graph: the chosen node, else the note or scene open in the desk.
+  const centre = () => {
+    const byId = nodeById();
+    return [st.selected, current].find((id) => id && byId.has(id)) || null;
+  };
+  const passes = (node) => (node.kind === 'scene' ? st.scenes : st.types.has(graphTypeKey(node))) && (!st.orphans || node.degree === 0);
+  // The nodes the drawing shows: the table's filters, then the local cut (the centre always stays).
+  function visibleNodes() {
+    const nodes = st.data.nodes.filter(passes);
+    const middle = st.scope === 'local' ? centre() : null;
+    if (!middle) return nodes;
+    const allowed = new Set(nodes.map((node) => node.id));
+    allowed.add(middle);
+    const near = new Map();
+    for (const edge of st.data.edges) {
+      if (!allowed.has(edge.from) || !allowed.has(edge.to)) continue;
+      if (!near.has(edge.from)) near.set(edge.from, []);
+      if (!near.has(edge.to)) near.set(edge.to, []);
+      near.get(edge.from).push(edge.to);
+      near.get(edge.to).push(edge.from);
+    }
+    const within = new Set([middle]);
+    let ring = [middle];
+    for (let step = 0; step < st.depth && ring.length; step++) {
+      const next = [];
+      for (const id of ring) for (const other of near.get(id) || []) if (!within.has(other)) {
+        within.add(other);
+        next.push(other);
+      }
+      ring = next;
+    }
+    return st.data.nodes.filter((node) => within.has(node.id));
+  }
+  const shown = (node) => st.scenes || node.kind !== 'scene';
   function compare(a, b) {
-    const name = graphNodeName(a).localeCompare(graphNodeName(b), 'es');
+    const name = GRAPH_COLLATOR.compare(graphNodeName(a), graphNodeName(b));
     let by = 0;
     if (st.sort === 'name') by = name;
-    else if (st.sort === 'type') by = graphNodeType(a).localeCompare(graphNodeType(b), 'es');
+    else if (st.sort === 'type') by = GRAPH_COLLATOR.compare(graphNodeType(a), graphNodeType(b));
     else if (st.sort === 'degree') by = a.degree - b.degree;
     else by = (a.scenes === null ? -1 : a.scenes) - (b.scenes === null ? -1 : b.scenes);
     return (st.desc ? -by : by) || name;
@@ -1998,7 +2136,8 @@ function graphList(book, onOpen) {
   function renderRows() {
     for (const head of heads) head.th.setAttribute('aria-sort', head.key === st.sort ? (st.desc ? 'descending' : 'ascending') : 'none');
     st.rows = new Map();
-    const nodes = st.data.nodes.filter(shown).sort(compare);
+    const onPath = new Set(st.path);
+    const nodes = st.data.nodes.filter(passes).sort(compare);
     tbody.replaceChildren(...nodes.map((node) => {
       const row = el('tr');
       const cell = el('td');
@@ -2008,17 +2147,24 @@ function graphList(book, onOpen) {
       pick.addEventListener('click', () => select(node.id));
       cell.append(pick);
       row.append(cell, el('td', graphNodeType(node)), el('td', String(node.degree)), el('td', node.scenes === null ? '—' : String(node.scenes)));
-      if (node.id === st.selected) row.className = 'selected';
+      row.className = [node.id === st.selected ? 'selected' : '', onPath.has(node.id) ? 'on-path' : ''].join(' ').trim();
       st.rows.set(node.id, { row, pick });
       return row;
     }));
     if (!nodes.length) {
       const row = el('tr');
-      const cell = el('td', 'Este libro aún no tiene notas.');
+      const cell = el('td', st.data.nodes.length ? 'Ningún nodo pasa estos filtros.' : 'Este libro aún no tiene notas.');
       cell.setAttribute('colspan', '4');
       row.append(cell);
       tbody.replaceChildren(row);
     }
+  }
+
+  function markRow(id, on) {
+    const entry = id && st.rows.get(id);
+    if (!entry) return;
+    entry.pick.setAttribute('aria-pressed', String(on));
+    entry.row.classList.toggle('selected', on);
   }
 
   // Up and Down move between the nodes of the table, Home and End to the first and the last.
@@ -2048,7 +2194,7 @@ function graphList(book, onOpen) {
       joined.get(other).push(relationText(edge, node.id));
     }
     const neighbours = [...joined.keys()].map((id) => byId.get(id)).filter(Boolean);
-    const visible = neighbours.filter(shown).sort((a, b) => b.degree - a.degree || graphNodeName(a).localeCompare(graphNodeName(b), 'es'));
+    const visible = neighbours.filter(shown).sort((a, b) => b.degree - a.degree || GRAPH_COLLATOR.compare(graphNodeName(a), graphNodeName(b)));
     const hiddenScenes = neighbours.length - visible.length;
     const openIt = el('button', 'Abrir ' + graphNodeName(node));
     openIt.type = 'button';
@@ -2069,20 +2215,104 @@ function graphList(book, onOpen) {
     detail.hidden = false;
   }
 
-  // Chooses a node: its row is marked and its neighbours listed, and the choice is announced.
+  // The drawing: its chunk is fetched the first time "Dibujo" is on, never before.
+  async function renderView() {
+    scopeLabel.hidden = !st.drawing;
+    depthLabel.hidden = !st.drawing || st.scope !== 'local';
+    if (!st.drawing) {
+      viewBox.hidden = true;
+      return;
+    }
+    viewBox.hidden = false;
+    if (!st.data) return;
+    if (!st.view) {
+      if (st.viewLoading) return;
+      st.viewLoading = true;
+      viewBox.replaceChildren(el('p', 'Cargando el dibujo…', 'meta'));
+      const mod = await loadGraphViewModule();
+      st.viewLoading = false;
+      if (st.closed) return;
+      if (!mod) {
+        viewBox.replaceChildren(el('p', GRAPH_VIEW_ERROR, 'meta graph-view-error'));
+        return;
+      }
+      st.view = mod.createGraphView({
+        book,
+        onSelect: (id) => select(id),
+        onPath: (ids) => {
+          st.path = ids;
+          renderRows();
+        },
+        announce: (text) => (live.textContent = text),
+      });
+      viewBox.replaceChildren(st.view.node);
+    }
+    const nodes = visibleNodes();
+    const ids = new Set(nodes.map((node) => node.id));
+    st.view.show({
+      nodes: nodes.map((node) => ({ ...node, label: graphNodeName(node) })),
+      edges: st.data.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to)),
+    }, { selected: st.selected });
+    st.view.select(st.selected);
+  }
+
+  function refresh() {
+    renderRows();
+    renderDetail();
+    renderView();
+  }
+
+  // Makes a node visible again when a filter hides it, so a choice always shows. Says whether a
+  // filter changed.
+  function reveal(node) {
+    let changed = false;
+    if (node.kind === 'scene' && !st.scenes) {
+      st.scenes = true;
+      scenesBox.input.checked = true;
+      changed = true;
+    }
+    if (node.kind === 'note' && !st.types.has(graphTypeKey(node))) {
+      st.types.add(graphTypeKey(node));
+      typeBoxes.get(graphTypeKey(node)).checked = true;
+      changed = true;
+    }
+    if (st.orphans && node.degree !== 0) {
+      st.orphans = false;
+      orphansBox.input.checked = false;
+      changed = true;
+    }
+    return changed;
+  }
+
+  // Chooses a node: its row is marked, its neighbours listed, the drawing marks it, and the
+  // choice is announced. In the local graph the chosen node becomes the centre, so the drawing
+  // is cut again; otherwise only the marks change.
   function select(id, focusRow) {
     const node = st.data && nodeById().get(id);
     if (!node) return;
-    if (!shown(node)) {
-      st.scenes = true;
-      scenesBox.checked = true;
-    }
+    const changed = reveal(node);
+    const previous = st.selected;
     st.selected = id;
-    renderRows();
-    renderDetail();
+    if (changed || (st.drawing && st.scope === 'local')) refresh();
+    else {
+      // Only the two rows whose mark changes are touched, so a large table answers at once.
+      markRow(previous, false);
+      markRow(id, true);
+      renderDetail();
+      // The drawing follows a frame later, so the table answers first on a slow machine.
+      if (st.view) requestAnimationFrame(() => setTimeout(() => st.view && st.view.select(st.selected), 0));
+    }
     live.textContent = 'Elegido: ' + graphNodeName(node) + ', ' + graphNodeType(node).toLowerCase() + ', grado ' + node.degree + '.';
     const row = st.rows.get(id);
     if (focusRow && row) row.pick.focus();
+  }
+
+  function showAsOf() {
+    const total = st.data.scenes.length;
+    const at = st.asOf ? st.data.scenes.indexOf(st.asOf) + 1 : total;
+    const text = at + ' de ' + total + ': ' + (total ? deskSceneName(st.data.scenes[at - 1]) : '');
+    asOfOut.textContent = text;
+    asOf.setAttribute('aria-valuetext', text);
   }
 
   async function load() {
@@ -2094,32 +2324,48 @@ function graphList(book, onOpen) {
       live.textContent = error.message;
       return;
     }
+    if (st.closed) return;
     st.data = data;
-    if (!asOf.children.length) {
-      const all = el('option', 'el final del libro');
-      all.value = '';
-      asOf.append(all, ...data.scenes.map((file) => {
-        const option = el('option', 'la escena ' + deskSceneName(file));
-        option.value = file;
-        return option;
-      }));
+    if (asOfLabel.hidden && data.scenes.length) {
+      asOf.max = String(data.scenes.length);
+      asOf.value = asOf.max;
+      asOfLabel.hidden = false;
     }
+    showAsOf();
     const notes = data.nodes.filter((node) => node.kind === 'note').length;
     live.textContent = countLabel(notes, 'nota', 'notas') + ' y ' + countLabel(data.nodes.length - notes, 'escena', 'escenas') + (st.asOf ? ' hasta ' + deskSceneName(st.asOf) : '') + '.';
-    renderRows();
-    renderDetail();
+    refresh();
   }
-  scenesBox.addEventListener('change', () => {
-    st.scenes = scenesBox.checked;
-    renderRows();
-    renderDetail();
+  scope.addEventListener('change', () => {
+    st.scope = scope.value;
+    refresh();
   });
-  asOf.addEventListener('change', () => {
-    st.asOf = asOf.value;
-    load();
+  depth.addEventListener('input', () => {
+    st.depth = Number(depth.value);
+    depthOut.textContent = depth.value;
+    refresh();
   });
+  // The slider says where it is while it moves, and asks for the graph when it stops.
+  asOf.addEventListener('input', () => {
+    if (!st.data) return;
+    const n = Number(asOf.value);
+    st.asOf = n >= st.data.scenes.length ? '' : st.data.scenes[n - 1];
+    showAsOf();
+  });
+  asOf.addEventListener('change', () => load());
+  scopeLabel.hidden = !st.drawing;
+  depthLabel.hidden = !st.drawing || st.scope !== 'local';
+  viewBox.hidden = !st.drawing;
   load();
-  return { node: box, select };
+  return {
+    node: box,
+    select,
+    destroy() {
+      st.closed = true;
+      if (st.view) st.view.destroy();
+      st.view = null;
+    },
+  };
 }
 
 function createDesk() {
@@ -2390,7 +2636,11 @@ function createDesk() {
     return list;
   }
 
+  // The open Grafo panel, closed (its drawing and worker stopped) when the panel changes.
+  let graphPanel = null;
   function setPanel(which) {
+    if (graphPanel) graphPanel.destroy();
+    graphPanel = null;
     state.panel = which;
     panel.hidden = !which;
     if (which) node.setAttribute('data-panel', which);
@@ -2437,10 +2687,13 @@ function createDesk() {
   // "Grafo": the story graph as a sortable table with each node's neighbours.
   function showGraph() {
     setPanel('graph');
+    const file = state.file || '';
+    const current = file.startsWith('notas/') ? 'note:' + file.slice('notas/'.length, -'.md'.length) : file ? 'scene:' + file : null;
     const list = graphList(state.book, (id) => {
       const file = id.replace(/^(note|scene):/, '');
       return open(id.startsWith('note:') ? noteFile(file) : file, true).catch((error) => showError(error.message));
-    });
+    }, current);
+    graphPanel = list;
     panel.replaceChildren(panelHead('Grafo'), list.node);
     focusPanel();
   }

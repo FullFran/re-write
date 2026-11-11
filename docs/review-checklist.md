@@ -173,11 +173,14 @@ Tests pin the remembered mode, the kept editor, the scene's items, quote selecti
 
 ## 13. Notes, Wikilinks and the Graph List
 
-Tests pin link rendering, completion, following a link, backlinks, the note save and the graph table (`editor/test/wikilinks.test.mjs`, `tests/book-graph-http.test.ts`, `browser-tests/tests/notes-graph.spec.ts`, which also saves screenshots on desktop and on a phone). Real keyboards and screen readers are checked here.
+Tests pin link rendering, completion, following a link, backlinks, the note save and the graph table (`editor/test/wikilinks.test.mjs`, `editor/test/graph-analysis.test.mjs`, `tests/book-graph-http.test.ts`, `browser-tests/tests/notes-graph.spec.ts` and `graph-view.spec.ts`, which also save screenshots on desktop and on a phone). Real keyboards and screen readers are checked here.
 
 - [ ] In **Vista previa en vivo**, a line with `[[Elena|la capitana]]` reads **la capitana**, underlined; moving the cursor onto the line shows the brackets. A link to a note that does not exist is grey and dashed. *(automated)*
 - [ ] Type `[[` and a few letters of a note or an alias, without accents or capitals, on a phone keyboard: the list offers it; choosing it closes the link. Dictation and autocorrect after the link still work.
 - [ ] Tap a link shown as text on a phone: its note opens in the editor. With a keyboard, Enter with the cursor inside a link does the same. *(automated)*
 - [ ] **Notas** in **Concentración** and in **Ayuda RE;write** lists the notes by type; a note opens, saves with **Guardar** and shows **Menciones enlazadas** and **Menciones sin enlazar**; a mention opens its scene with the words selected. *(automated)*
 - [ ] **Grafo** shows the table; with a screen reader, sorting by a header announces the order, the arrows move between nodes, and choosing one reads **Elegido: …**.
-- [ ] **Hasta** a scene removes the later scenes from the table and lowers the counts. *(automated)*
+- [ ] **Hasta la escena** at an earlier scene removes the later scenes from the table and the drawing and lowers the counts; a screen reader reads the slider as "N de M: <escena>". *(automated)*
+- [ ] **Dibujo** on a desktop: the drawing appears with communities in colour; on a real phone (iOS Safari, Android Chrome) one finger pans the drawing, two fingers zoom, a tap on a node chooses its row, and the page still scrolls outside the drawing.
+- [ ] **Análisis**: **Buscar camino** between two notes draws the path and the screen reader reads the steps; **Quitar camino** clears it; a ranking name chooses the node in the table. *(automated)*
+- [ ] Switch the system theme while the drawing is open: labels, edges and colours follow at once and stay readable.

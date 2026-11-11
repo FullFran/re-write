@@ -14,6 +14,8 @@ export default defineConfig({
     locale: 'es-ES',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    // The Grafo drawing is WebGL; headless Chromium draws it in software only when asked.
+    launchOptions: { args: ['--enable-unsafe-swiftshader'] },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
 });

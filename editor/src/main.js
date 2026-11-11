@@ -190,3 +190,11 @@ export function createSceneEditor({ text, label, view = 'live', notes = [], onCh
     destroy: () => cm.destroy(),
   };
 }
+
+/* global __GRAPH_CHUNK__ */
+// The Grafo drawing (issue #115) is a separate chunk next to this module, named by the build,
+// so opening the editor never downloads it. Rejects when the chunk is missing.
+export function loadGraphView() {
+  if (typeof __GRAPH_CHUNK__ !== 'string') return Promise.reject(new Error('the graph view is not built'));
+  return import(new URL(__GRAPH_CHUNK__, import.meta.url).href);
+}

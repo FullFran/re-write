@@ -241,9 +241,42 @@ Issue #115, slice 2 ([notes and graph](notes-and-graph.md)).
   Up/Down move between nodes, Home/End to the first and the last, Enter chooses one. The chosen
   row is marked, a live line (`role="status"`) says **Elegido: <nodo>, <tipo>, grado <n>.**, and
   **Vecinos de <nodo> (n)** lists its neighbours with how they are joined (link, shared scenes,
-  mentions) and **Abrir <nodo>**. **Mostrar escenas** (off by default) adds the scenes;
-  **Hasta** cuts the graph at a scene. This table is the way to the graph data that never needs a
-  canvas, and the view phones start with.
+  mentions) and **Abrir <nodo>**. **Mostrar escenas** (off by default) adds the scenes. This
+  table is the way to the graph data that never needs a canvas, and the view phones start with.
+
+### The graph drawing and Análisis
+
+Issue #115, slice 3. The Grafo panel's filters apply to the table and to the drawing alike:
+**Tipos** (a `fieldset` of checkboxes: Personaje, Lugar, Objeto, Trama, Otra, Sin tipo),
+**Mostrar escenas**, **Solo huérfanas** and **Hasta la escena**, a slider over the scenes in
+reading order whose `aria-valuetext` reads "N de M: <escena>" (the graph is fetched again when the
+slider stops). **Dibujo** (on by default from 40em up, off on phones) shows the drawing above the
+table; its code is fetched only then.
+
+- **Drawing.** sigma.js (WebGL) on a `--paper` box with a `--line` border, `role="img"` and an
+  `aria-label` that counts nodes and connections and says the table holds the same data. Node
+  size by **Tamaño** (Grado or PageRank, square-root scaled), colour by **Color** (Comunidad, the
+  Louvain community, or Tipo), edge thickness by co-occurrence weight. A legend (`aria-label`
+  "Leyenda de colores") names each colour. Colours come from the page tokens (`--ink` labels,
+  `--edge` edges, `--accept` for a path) and from a categorical palette per theme, each colour at
+  least 3:1 against that theme's `--paper`; the drawing follows a theme change at once.
+- **Selection.** A node clicked or tapped in the drawing chooses its table row, and a row chosen
+  in the table marks its node (larger, labelled, its neighbours kept and the rest faded), with the
+  same live line. **Alcance** (shown with the drawing) is Grafo global or Grafo local; the local
+  graph is centred on the chosen node, else on the note or scene open in the desk, with
+  **Profundidad** 1 to 3. Phones start in the local graph.
+- **Camera.** Drag or one-finger pan, wheel or pinch zoom; **Acercar**, **Alejar** and **Encajar**
+  buttons do the same from the keyboard.
+- **Análisis**, a `details` (open from 40em up), has five regions, each a list of node buttons
+  that choose the node: **Centralidad** (top 10 by Grado, PageRank or Intermediación, with
+  values), **Comunidades** (largest first, with their colour), **Camino más corto** (Desde,
+  Hasta, Buscar camino: the path is drawn in `--accept` with the rest faded, its rows get an
+  `--accept` bar in the table, the steps are listed and announced; Quitar camino clears it),
+  **Huérfanas y componentes** and **Enlaces sugeridos** (pairs that share neighbours but never
+  meet, with how many; suggestions only, nothing is written).
+- **Without the drawing** (its code missing or WebGL unavailable) the box says so in one fixed
+  line and the table, filters and editor work as before.
+- Every control is at least `--tap` high and the panel never scrolls sideways on a phone.
 
 ## Messages
 
