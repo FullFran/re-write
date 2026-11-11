@@ -631,7 +631,7 @@ export function createHandler(
   const engineSystemPrompt = (subject: string): Promise<string> => {
     hostInstructions ??= (async () => {
       const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-      const server = buildMcpServer(library, subject);
+      const server = buildMcpServer(library, subject, undefined, undefined, null, `${config.reviewOrigin}/review`);
       const client = new Client({ name: 'rewrite-engine', version: '0.1.0' });
       try {
         await server.connect(serverSide);
