@@ -196,6 +196,8 @@ body[data-mode=focus] .toolbar, body[data-mode=help] .toolbar { margin-bottom: v
 .format-buttons > button { padding: var(--space-1) var(--space-2); font-size: var(--text-sm); }
 .format-buttons > [data-format=bold] { font-weight: 700; }
 .format-buttons > [data-format=italic] { font-style: italic; }
+/* Buscar opens the search panel (editor/src/search.js), drawn right under the toolbar. */
+.scene-format > .format-search { flex: none; margin-left: auto; padding: var(--space-1) var(--space-2); font-size: var(--text-sm); }
 .desk-help h2 { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-lg); }
 .desk-help h3 { margin-top: var(--space-5); }
 .desk-help .ask-scene { width: 100%; }
