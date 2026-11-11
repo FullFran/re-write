@@ -233,8 +233,10 @@ test('the conversation survives a reload, and Nueva conversación clears it', as
   await expect(panel.locator('.answer li')).toHaveText(['uno', 'dos']);
   await expect(panel.locator('.activity li')).toHaveText(['Leída: escena 01']);
   await expect(panel.getByText('El asistente ya no recuerda los mensajes anteriores.')).toHaveCount(0);
-  const stored = await page.evaluate(() => Object.keys(sessionStorage));
-  expect(stored).toEqual([expect.stringMatching(/^rewrite\.assistant\./)]);
+  // Keyed by a hash of the person (never the subject itself) and the book.
+  const stored = await page.evaluate(() => Object.keys(sessionStorage).sort());
+  expect(stored).toEqual(['rewrite.assistant.' + await page.evaluate(() => sessionStorage.getItem('rewrite:person')) + '.' + book.book, 'rewrite:person'].sort());
+  expect(stored.join(' ')).not.toContain('user_');
 
   await panel.getByRole('button', { name: 'Ajustes' }).click();
   await panel.getByLabel('Ajustes del asistente').getByRole('button', { name: 'Nueva conversación' }).click();
@@ -244,7 +246,7 @@ test('the conversation survives a reload, and Nueva conversación clears it', as
   await page.reload();
   await page.locator('#assistant-toggle').click();
   await expect(panel.getByRole('button', { name: 'Busca incoherencias en el libro' })).toBeVisible();
-  expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
+  expect(await page.evaluate(() => Object.keys(sessionStorage).filter((key) => key.startsWith('rewrite.assistant.')))).toEqual([]);
 });
 
 test('after a reload, a conversation the engine no longer holds is marked with one line', async ({ page, book }) => {

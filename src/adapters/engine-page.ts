@@ -127,11 +127,13 @@ const ASSISTANT_MESSAGES = {
   rate_limited: 'Has pedido demasiados códigos seguidos. Espera unos minutos y prueba de nuevo.',
   turn_limit: 'La respuesta se ha detenido porque era demasiado larga o tardaba demasiado.',
   model_unavailable: 'Ese modelo ya no está disponible para tu cuenta.',
+  settings_unavailable: 'No se pudieron guardar tus ajustes. Prueba de nuevo.',
 };
 // The efforts the server accepts, in the words of a writer.
 const EFFORT_LABELS = { low: 'Rápido', medium: 'Equilibrado', high: 'A fondo' };
 const FORGOTTEN = 'El asistente ya no recuerda los mensajes anteriores.';
-// What the writer saw, per book, in this tab only (sessionStorage); never on the server.
+// What the writer saw, per person and book, in this tab only (sessionStorage); never on
+// the server. The person part is the hash from rememberPerson in the review page.
 const TRANSCRIPT_KEY = 'rewrite.assistant.';
 const MAX_STORED_TURNS = 200;
 const MAX_STORED_TEXT = 70000;
@@ -242,8 +244,11 @@ const assistantState = {
 // ---- The visible transcript, kept per book in sessionStorage ----
 
 function transcriptStore() {
+  if (!personKey) return null;
   try { return window.sessionStorage || null; } catch (error) { return null; }
 }
+
+const transcriptKey = (book) => TRANSCRIPT_KEY + personKey + '.' + book;
 
 const storableText = (value) => typeof value === 'string' && value.length <= MAX_STORED_TEXT;
 
@@ -269,7 +274,7 @@ function loadTranscript(book) {
   const store = transcriptStore();
   if (!store) return [];
   try {
-    const value = JSON.parse(store.getItem(TRANSCRIPT_KEY + book) || '[]');
+    const value = JSON.parse(store.getItem(transcriptKey(book)) || '[]');
     return Array.isArray(value) ? value.slice(-MAX_STORED_TURNS).map(storedTurn).filter(Boolean) : [];
   } catch (error) {
     return [];
@@ -282,22 +287,14 @@ function saveTranscript() {
   if (!store || !book) return;
   const turns = assistantState.turns.map(storedTurn).filter(Boolean).slice(-MAX_STORED_TURNS);
   try {
-    if (turns.length) store.setItem(TRANSCRIPT_KEY + book, JSON.stringify(turns));
-    else store.removeItem(TRANSCRIPT_KEY + book);
+    if (turns.length) store.setItem(transcriptKey(book), JSON.stringify(turns));
+    else store.removeItem(transcriptKey(book));
   } catch (error) { /* full or blocked: the panel keeps working without it */ }
 }
 
+// Every stored transcript of this tab, whoever's.
 function clearTranscripts() {
-  const store = transcriptStore();
-  if (!store) return;
-  try {
-    const keys = [];
-    for (let i = 0; i < store.length; i++) {
-      const key = store.key(i);
-      if (key && key.startsWith(TRANSCRIPT_KEY)) keys.push(key);
-    }
-    for (const key of keys) store.removeItem(key);
-  } catch (error) { /* nothing stored */ }
+  forgetTab([TRANSCRIPT_KEY]);
 }
 
 // The page selected another book: show that book's transcript.
@@ -334,11 +331,17 @@ function assistantButton(label, className, onClick) {
 
 async function engineApi(method, path, body) {
   const token = await window.Clerk.session.getToken();
-  return fetch('/review/api/engine' + path, {
+  const res = await fetch('/review/api/engine' + path, {
     method,
     headers: Object.assign({ authorization: 'Bearer ' + token }, body === undefined ? {} : { 'content-type': 'application/json' }),
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+  // The session is no longer valid: what this tab showed of the conversation goes.
+  if (res.status === 401) {
+    clearTranscripts();
+    if (!assistantState.running) assistantState.turns = [];
+  }
+  return res;
 }
 
 function assistantMessage(code) {

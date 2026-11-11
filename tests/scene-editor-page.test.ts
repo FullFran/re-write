@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { createHash } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -7,7 +8,12 @@ import { git, read } from './helpers.ts';
 import { proposeRevision, reviewApi, startHarness, type Harness } from './server-helpers.ts';
 
 const SCENE = 'scenes/escena-01.md';
-const DRAFT_KEY = `rewrite:draft:sal:${SCENE}`;
+/** Drafts are kept per person: a hash of the session's subject, never the subject itself. */
+const draftKeyOf = (session: string) => {
+  const sub = JSON.parse(Buffer.from(session.split('.')[1], 'base64url').toString('utf8')).sub;
+  return `rewrite:draft:${createHash('sha256').update(`rewrite:person:${sub}`).digest('hex').slice(0, 32)}:sal:${SCENE}`;
+};
+let DRAFT_KEY = '';
 
 /**
  * Runs the script the server really serves against a minimal DOM, as review-refresh.test.ts
@@ -101,6 +107,9 @@ async function openPage(h: Harness, session: string) {
       },
       Clerk: { load: async () => {}, isSignedIn: true, mountUserButton() {}, session: { getToken: async () => session } },
     },
+    crypto,
+    TextEncoder,
+    atob,
     fetch: (path: string, init: RequestInit = {}) => {
       if (init.method === 'POST') posts.push(path);
       return fetch(`${h.base}${path}`, init);
@@ -108,6 +117,7 @@ async function openPage(h: Harness, session: string) {
     setTimeout: (run: () => unknown, delay: number) => { timers.push({ id: ++nextTimer, run, delay }); return nextTimer; },
     clearTimeout: (id: number) => { const at = timers.findIndex((t) => t.id === id); if (at !== -1) timers.splice(at, 1); },
   });
+  DRAFT_KEY = draftKeyOf(session);
   await pageListeners.load();
 
   const button = (label: string): Element => {
@@ -260,7 +270,7 @@ test('CRLF and LF scenes keep their line endings, and opening one never marks it
   const { h, page } = await quietPage(t, (h) => commitScene(h, CRLF, '# Uno\r\n\r\nDos.\r\n'));
   await page.openEditor(CRLF);
   assert.equal(page.editor()!.value, '# Uno\n\nDos.\n');
-  assert.equal(page.storage.size, 0, 'nothing unsaved after opening');
+  assert.equal([...page.storage.keys()].filter((key) => key.startsWith('rewrite:draft:')).length, 0, 'nothing unsaved after opening');
   await page.click('Guardar');
   assert.equal(page.posts.length, 0, 'saving an unchanged scene sends nothing');
   await page.type('# Uno\n\nDos.\nTres.\n');
@@ -283,7 +293,7 @@ test('a scene with mixed line endings or a lone CR opens read-only until the per
     assert.equal(page.editor()!.readOnly, true);
     assert.ok(page.text(/mezcla finales de línea/), 'one line explains why');
     assert.equal(page.visible('Guardar'), 0, 'nothing can be saved before normalising');
-    assert.equal(page.storage.size, 0);
+    assert.equal([...page.storage.keys()].filter((key) => key.startsWith('rewrite:draft:')).length, 0);
     await page.click('Cerrar editor');
     assert.equal(page.confirms.length, 0, 'opening and closing is not an unsaved change');
     assert.equal(read(h.bookDir, file), before);
