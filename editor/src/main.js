@@ -7,6 +7,7 @@ import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { Annotation, Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
+import { formatKeymap, formatToolbar } from './format.js';
 import { livePreview } from './live-preview.js';
 import { markdown } from './markdown.js';
 import { renderReading } from './reading.js';
@@ -81,12 +82,14 @@ const editability = (editable) => [EditorView.editable.of(editable), EditorState
  * Builds an editor. `onChange` runs after each edit by the person, `onSave` on Ctrl/Cmd+S,
  * `onViewChange` when the person picks another view. `notes` ({ name, type, aliases }) are the
  * book's notes that wikilinks resolve and `[[` completes against, and `onOpenNote(target)` runs
- * when the person follows a link. Returns the same small surface as the page's plain text
- * field: dom, getValue, setValue, setEditable, isEditable, select, focus, destroy, plus
- * setNotes. New behaviour belongs in its own extension module added to the list below, as
+ * when the person follows a link; `margins()` ({ top, bottom } in px) is what covers the window
+ * around the text, which scrolling the caret into view keeps clear. Returns the same small surface as the page's plain text
+ * field: dom, getValue, setValue, setEditable, isEditable, getSelection, select, focus, destroy,
+ * plus setNotes, caretRect and toolbar (the formatting toolbar of format.js, which the page
+ * may move). New behaviour belongs in its own extension module added to the list below, as
  * live-preview.js and wikilinks.js are.
  */
-export function createSceneEditor({ text, label, view = 'live', notes = [], onChange = () => {}, onSave = () => {}, onViewChange = () => {}, onOpenNote = () => {} }) {
+export function createSceneEditor({ text, label, view = 'live', notes = [], onChange = () => {}, onSave = () => {}, onViewChange = () => {}, onOpenNote = () => {}, margins = () => null }) {
   const doc = document;
   let current = isView(view) ? view : 'live';
   let editable = true;
@@ -102,6 +105,8 @@ export function createSceneEditor({ text, label, view = 'live', notes = [], onCh
   reading.className = 'scene-reading';
   reading.setAttribute('aria-label', 'Lectura de la escena');
   const modeSlot = new Compartment();
+  // Set right after the view exists; the first updates happen before it.
+  let format = null;
   const editSlot = new Compartment();
 
   const cm = new EditorView({
@@ -112,6 +117,7 @@ export function createSceneEditor({ text, label, view = 'live', notes = [], onCh
         history(),
         keymap.of([
           { key: 'Mod-s', preventDefault: true, run: () => { onSave(); return true; } },
+          ...formatKeymap,
           ...defaultKeymap,
           ...historyKeymap,
         ]),
@@ -121,9 +127,13 @@ export function createSceneEditor({ text, label, view = 'live', notes = [], onCh
         // Phone keyboards: the browser's spelling, autocorrect and capitals, as in a text field.
         EditorView.contentAttributes.of({ 'aria-label': label, spellcheck: 'true', autocorrect: 'on', autocapitalize: 'sentences' }),
         EditorView.updateListener.of((update) => {
+          if ((update.docChanged || update.selectionSet) && format) format.refresh(update.state);
           if (update.docChanged && !update.transactions.some((tr) => tr.annotation(fromPage))) onChange();
         }),
         theme,
+        // What covers the window around the text (a sticky head, a dock, a phone keyboard), so
+        // the caret is never scrolled under it.
+        EditorView.scrollMargins.of(() => margins()),
         wikilinks({ notes, onOpen: (target) => onOpenNote(target) }),
         modeSlot.of(viewExtension(current)),
         editSlot.of(editability(true)),
@@ -144,7 +154,10 @@ export function createSceneEditor({ text, label, view = 'live', notes = [], onCh
     return btn;
   });
   bar.append(...buttons);
-  root.append(bar, host, reading);
+  // The formatting toolbar (format.js) edits the same text; Lectura has nothing to format.
+  format = formatToolbar(cm, doc);
+  format.refresh(cm.state);
+  root.append(bar, format.dom, host, reading);
 
   function show(id) {
     current = id;
@@ -155,12 +168,15 @@ export function createSceneEditor({ text, label, view = 'live', notes = [], onCh
     else reading.replaceChildren();
     reading.hidden = !isReading;
     host.hidden = isReading;
+    format.dom.hidden = isReading;
     cm.dispatch({ effects: modeSlot.reconfigure(viewExtension(id)) });
   }
   show(current);
 
   return {
     dom: root,
+    // The formatting toolbar, inside dom until the page places it elsewhere (its sticky head).
+    toolbar: format.dom,
     getValue: () => cm.state.doc.toString(),
     setValue(value) {
       cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: value }, annotations: fromPage.of(true) });
@@ -169,6 +185,7 @@ export function createSceneEditor({ text, label, view = 'live', notes = [], onCh
     setEditable(value) {
       editable = value;
       cm.dispatch({ effects: editSlot.reconfigure(editability(value)) });
+      format.setDisabled(!value);
     },
     isEditable: () => editable,
     setNotes(list) {
@@ -176,6 +193,16 @@ export function createSceneEditor({ text, label, view = 'live', notes = [], onCh
     },
     // Selects [from, to) of the text and scrolls it to the middle of the editor. The reading
     // view cannot show a selection, so it gives way to the live preview (not remembered).
+    // Where the caret is in the viewport ({ top, bottom }), or null when it is not drawn.
+    caretRect() {
+      const rect = cm.coordsAtPos(cm.state.selection.main.head);
+      return rect ? { top: rect.top, bottom: rect.bottom } : null;
+    },
+    // The selection as [from, to) and its text, for the page's "Analizar" (empty when none).
+    getSelection() {
+      const { from, to } = cm.state.selection.main;
+      return { from, to, text: cm.state.sliceDoc(from, to) };
+    },
     select(from, to) {
       if (current === 'reading') show('live');
       const end = Math.max(0, Math.min(to, cm.state.doc.length));
