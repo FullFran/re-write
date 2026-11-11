@@ -18,6 +18,8 @@ Items marked *(automated)* are checked on every pull request by the browser test
 ## 2. Inspect a Pending Proposal and Diff
 
 - [ ] Select the synthetic book from the book dropdown selector.
+- [ ] With two books, select the one that is not first. Accept or reject a change, import a scene, wait for a refresh, reload, and open `/review/engine`: the same book stays selected each time and the address shows `?book=<id>`. *(automated)*
+- [ ] Open `/review?book=<an id you cannot open>`: one line says the book is not available before another one shows.
 - [ ] Under the **Cambios propuestos** (Proposed changes) section, locate an active proposal card.
 - [ ] Confirm the card displays:
   - The editorial rationale explaining why the change was proposed.

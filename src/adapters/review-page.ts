@@ -241,6 +241,11 @@ let currentBookTitle = '';
 // The assistant panel, when the engine is enabled (src/adapters/engine-page.ts sets it).
 let assistant = null;
 let renderSeq = 0;
+// The book the person chose last, by its id. Every render and every reload after an
+// action follows it, so a late answer for another book never brings that book back.
+let selectedBook = null;
+const BOOK_KEY = 'rewrite.book';
+const GONE_NOTICE = 'El libro que tenías abierto ya no está disponible o ya no tienes acceso. Te mostramos ';
 let actionsRunning = 0;
 let refreshTimer = null;
 let refreshDelay = REFRESH_MS;
@@ -306,6 +311,39 @@ function showError(message) {
   app.prepend(alert);
 }
 
+// The book named in the address (?book=<id>), else the last one chosen in this browser.
+// Both are only a preference: the list of books the server returns decides, and the
+// server checks access on every request. The hash belongs to Clerk and is never used.
+function preferredBook() {
+  try {
+    const named = new URLSearchParams(window.location.search).get('book');
+    if (named) return named;
+  } catch {}
+  try {
+    return window.localStorage.getItem(BOOK_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function recordBook(book) {
+  try {
+    window.localStorage.setItem(BOOK_KEY, book);
+  } catch {}
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('book') === book) return;
+    params.set('book', book);
+    window.history.replaceState(window.history.state, '', window.location.pathname + '?' + params.toString() + window.location.hash);
+  } catch {}
+}
+
+function httpError(res, data) {
+  const error = new Error(data.error || 'No se pudo completar la operación');
+  error.status = res.status;
+  return error;
+}
+
 async function api(path, body) {
   const token = await window.Clerk.session.getToken();
   const res = await fetch('/review/api' + path, {
@@ -317,7 +355,7 @@ async function api(path, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'No se pudo completar la operación');
+  if (!res.ok) throw httpError(res, data);
   return data;
 }
 
@@ -330,7 +368,7 @@ async function apiState(path, known) {
   const res = await fetch('/review/api' + path, { method: 'GET', headers });
   if (res.status === 304) return { changed: false };
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'No se pudo completar la operación');
+  if (!res.ok) throw httpError(res, data);
   return { changed: true, data, tag: res.headers ? res.headers.get('etag') : null };
 }
 
@@ -352,7 +390,7 @@ async function apiUpload(path, file, mapping, dryRun) {
     body: file,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'No se pudo completar la operación');
+  if (!res.ok) throw httpError(res, data);
   return data;
 }
 
@@ -1182,7 +1220,10 @@ function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
 
 // Everything below the toolbar for one book, built without touching the page.
 function bookSections(currentBook, data) {
-  const reload = (scene, highlight) => renderApp(currentBook, scene, highlight);
+  // An action that finishes after the person changed book does not render its old book.
+  const reload = async (scene, highlight) => {
+    if (currentBook === selectedBook) await renderApp(currentBook, scene, highlight);
+  };
   const pending = (c) => c.editorial_status === 'proposed';
 
   let openQuoteHandler = null;
@@ -1240,10 +1281,14 @@ function bookSections(currentBook, data) {
 
 async function renderApp(selectedBookId, selectedScene, highlight) {
   const seq = ++renderSeq;
+  const wanted = selectedBookId || preferredBook();
+  selectedBook = wanted || null;
   // Nothing refreshes in the background until this render has settled.
   view = null;
   openScene = null;
   const { books } = await api('/books');
+  // A newer render started meanwhile: it owns the page.
+  if (seq !== renderSeq) return;
   app.replaceChildren();
 
   if (!books.length) {
@@ -1252,8 +1297,11 @@ async function renderApp(selectedBookId, selectedScene, highlight) {
     return;
   }
 
-  const currentBook = books.some((b) => b.book_id === selectedBookId) ? selectedBookId : books[0].book_id;
+  const found = books.some((b) => b.book_id === wanted);
+  const currentBook = found ? wanted : books[0].book_id;
   currentBookTitle = books.find((b) => b.book_id === currentBook).title;
+  selectedBook = currentBook;
+  recordBook(currentBook);
   const toolbar = el('div', undefined, 'toolbar');
   const picker = el('select');
   picker.setAttribute('aria-label', 'Libro');
@@ -1280,8 +1328,15 @@ async function renderApp(selectedBookId, selectedScene, highlight) {
   notice.setAttribute('role', 'status');
   notice.hidden = true;
   app.append(toolbar, createBox, nav.node, notice);
+  // A book that is gone or no longer shared is said in one line, never a silent switch.
+  if (wanted && !found) {
+    const gone = el('p', GONE_NOTICE + '«' + currentBookTitle + '».', 'notice');
+    gone.setAttribute('role', 'status');
+    app.append(gone);
+  }
 
   const state = await apiState('/books/' + currentBook);
+  if (seq !== renderSeq) return;
   const built = bookSections(currentBook, state.data);
   app.append(...built.nodes);
   nav.setCounts(built.counts);
@@ -1357,6 +1412,7 @@ async function refreshOnce() {
   const current = view;
   if (!current || refreshing || document.hidden || actionsRunning > 0) return;
   refreshing = true;
+  let lost = false;
   try {
     const state = await apiState('/books/' + current.book, current.tag);
     if (current !== view) return;
@@ -1377,12 +1433,15 @@ async function refreshOnce() {
     } else if (current === view) {
       setNotice(current.notice, true);
     }
-  } catch {
-    // A failed poll is not the person's problem: retry later, and less often.
-    refreshDelay = Math.min(refreshDelay * 2, REFRESH_MAX_MS);
+  } catch (error) {
+    // The book is gone or no longer shared: render again, which explains the switch.
+    if (current === view && (error.status === 403 || error.status === 404)) lost = true;
+    // Any other failed poll is not the person's problem: retry later, and less often.
+    else refreshDelay = Math.min(refreshDelay * 2, REFRESH_MAX_MS);
   } finally {
     refreshing = false;
   }
+  if (lost) await renderApp(current.book).catch((err) => showError(err.message));
 }
 
 function scheduleRefresh() {

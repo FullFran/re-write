@@ -110,7 +110,8 @@ test('on a phone the floating button opens a bottom sheet, and asking about a pr
 test('the old assistant address opens the panel in the review page', async ({ page, book }) => {
   await page.setViewportSize(DESKTOP);
   await page.goto(`${book.base}/review/engine`);
-  await expect(page).toHaveURL(`${book.base}/review`);
+  // The panel flag leaves the address; the chosen book (issue #103) is recorded in it.
+  await expect(page).toHaveURL(`${book.base}/review?book=${book.book}`);
   await expect(page.getByRole('complementary', { name: 'Asistente' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Conectar ChatGPT' })).toBeVisible();
 });
