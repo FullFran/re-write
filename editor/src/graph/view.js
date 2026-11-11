@@ -170,6 +170,9 @@ export function createGraphView({ book, onSelect = () => {}, onPath = () => {}, 
           sharedGestureWheelMessage: 'Usa Ctrl + rueda para acercar el grafo',
           sharedGestureAppleWheelMessage: 'Usa ⌘ + rueda para acercar el grafo',
           sharedGestureTouchMessage: 'Usa dos dedos para mover el grafo',
+          // Sizes in screen pixels (sigma 4 defaults to graph units), framed with the nodes.
+          itemSizesReference: 'screen',
+          autoRescaleContent: 'nodes',
           hideEdgesOnMove: true,
           allowInvalidContainer: true, labelRenderedSizeThreshold: 9, minCameraRatio: 0.05, maxCameraRatio: 10, stagePadding: 24 },
       });
