@@ -159,11 +159,15 @@ on. Without the chunk the drawing says so and the table and the editor work as b
 
 **Performance.** Positions are kept for the page's lifetime per book and node, so changing a
 filter only lays out the new nodes, and the layout runs off the main thread (in the page, with
-fewer iterations, only if no worker can start). Choosing a node only redraws the marks. The
-browser job measures a synthetic graph of 2,000 notes and about 7,000 connections
-(`browser-tests/tests/graph-view.spec.ts`): it logs the time to draw and to lay out, how long a
-table choice takes to answer while the layout runs, and the longest main-thread task, and fails
-when drawing takes 15 s or a choice takes 1 s.
+fewer iterations, only if no worker can start). Choosing a node marks its row first and redraws
+the drawing's marks a frame later, without moving the camera; the layout's result is applied in
+one update, so the drawing redraws once. The browser job measures a synthetic graph of 2,000
+notes and about 6,000 connections (`browser-tests/tests/graph-view.spec.ts`) and prints the times
+(`graph performance {...}` in the job log): to draw, to lay out, the first choice, later choices
+(row and drawing, each under 1 s) and a filter (under 5 s). The job has no GPU: WebGL runs on
+SwiftShader, where a frame of that graph takes about 80 ms but each new drawing state is compiled
+on first use, which makes the first frames take seconds there. Those first-use times are printed,
+not asserted; on a machine with a GPU they do not occur.
 
 ## Exports
 
