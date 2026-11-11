@@ -1,4 +1,5 @@
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -85,6 +86,27 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.setHeader('content-type', 'application/json');
   res.setHeader('cache-control', 'no-store');
   res.end(JSON.stringify(body));
+}
+
+/**
+ * JSON with a validator, so a page that polls pays for a body only when the state
+ * changed. The validator is a digest of the body the caller is already allowed to
+ * read, and it is computed after authorization, never instead of it.
+ */
+function conditionalJson(req: IncomingMessage, res: ServerResponse, body: unknown): void {
+  const payload = JSON.stringify(body);
+  const etag = `"${createHash('sha256').update(payload).digest('base64url').slice(0, 32)}"`;
+  const known = (req.headers['if-none-match'] ?? '').split(',').map((tag) => tag.trim().replace(/^W\//, ''));
+  res.setHeader('etag', etag);
+  res.setHeader('cache-control', 'no-store');
+  if (known.includes(etag)) {
+    res.statusCode = 304;
+    res.end();
+    return;
+  }
+  res.statusCode = 200;
+  res.setHeader('content-type', 'application/json');
+  res.end(payload);
 }
 
 function problem(res: ServerResponse, status: number, detail: string): void {
@@ -308,7 +330,7 @@ export function createHandler(config: ServerConfig, library: Library): RequestLi
 
     if (parts.length === 2 && req.method === 'GET') {
       const project = open(READ);
-      return json(res, 200, { ...project.reviewQueue(), scenes: project.scenes() });
+      return conditionalJson(req, res, { ...project.reviewQueue(), scenes: project.scenes() });
     }
 
     if (parts.length === 3 && parts[2] === 'findings' && req.method === 'GET') {

@@ -125,7 +125,7 @@ There are two doors. The MCP door can read and propose. The review door, behind 
 Routes available on the review door (`/review`):
 - `GET /review/api/books`: lists accessible books (`com.fullfran.rewrite.book.read`).
 - `POST /review/api/books`: creates a book and grants access to the creator (`com.fullfran.rewrite.book.create`).
-- `GET /review/api/books/{book}`: reads the review queue and scene list (`com.fullfran.rewrite.book.read`).
+- `GET /review/api/books/{book}`: reads the review queue and scene list (`com.fullfran.rewrite.book.read`). The answer carries an `ETag`; a request with a matching `If-None-Match` gets `304` with no body. The review page uses this to poll every 5 seconds while its tab is visible, and authorization is still checked on every poll.
 - `GET /review/api/books/{book}/findings`: reads narrative findings with current evidence status (`com.fullfran.rewrite.book.read`).
 - `GET /review/api/books/{book}/export`: downloads findings with ratings and notes as JSON (`com.fullfran.rewrite.book.read`).
 - `GET /review/api/books/{book}/scenes`: lists scene files in the book (`com.fullfran.rewrite.book.read`).
