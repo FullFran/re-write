@@ -56,7 +56,8 @@ const LIST_PROBLEM = 'aliases must be a list like [a, b] or lines starting with 
  */
 export function parseFrontmatter(text: string): Frontmatter {
   const none: Frontmatter = { type: null, aliases: [], problems: [], body_start: 0 };
-  const first = /^---\r?\n/.exec(text);
+  // A byte order mark some editors write is skipped, never a reason to ignore the frontmatter.
+  const first = /^\uFEFF?---\r?\n/.exec(text);
   if (!first) return none;
   const lines: { text: string; end: number }[] = [];
   let at = first[0].length;

@@ -45,3 +45,9 @@ test('a note name is refused when it holds invisible characters or dots that a r
   for (const name of ['Elena.', 'Sr..Pérez', 'a..b', 'Fin...']) assert.match(checkNoteName(name) ?? 'accepted', /dot/, name);
   for (const name of ['Sr. Pérez', 'v1.2', 'Ángel Peña', 'Café con leche']) assert.equal(checkNoteName(name), null, name);
 });
+
+test('a frontmatter after a UTF-8 byte order mark is read, and the body starts after it', () => {
+  const text = '﻿---\ntype: lugar\naliases: [Faro viejo]\n---\nCuerpo.\n';
+  assert.deepEqual(parseFrontmatter(text), { type: 'lugar', aliases: ['Faro viejo'], problems: [], body_start: text.indexOf('Cuerpo') });
+  assert.deepEqual(parseFrontmatter('﻿Solo texto.\n'), { type: null, aliases: [], problems: [], body_start: 0 });
+});
