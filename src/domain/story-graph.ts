@@ -177,12 +177,18 @@ function firstAtLeast(list: number[], x: number): number {
  * a space) or line break to the next one, cut around the mention with `…` when it is longer than
  * MAX_CONTEXT.
  */
-function contextOf(source: Source, start: number, end: number): string {
+function sentenceRange(source: Source, start: number, end: number): [number, number] {
   const text = source.text;
   const sentences = sentencesOf(source);
   let from = Math.max(0, lastAtMost(sentences.starts, start));
   const to = Math.min(text.length, firstAtLeast(sentences.terminatorEnds, end + 1), firstAtLeast(sentences.breaks, end));
   while (from < start && SPACE.test(text[from])) from += 1;
+  return [from, to];
+}
+
+function contextOf(source: Source, start: number, end: number): string {
+  const text = source.text;
+  const [from, to] = sentenceRange(source, start, end);
   if (to - from <= MAX_CONTEXT) return text.slice(from, to);
   const room = Math.max(0, MAX_CONTEXT - (end - start));
   let left = Math.max(from, start - Math.floor(room / 2));
@@ -481,20 +487,78 @@ export function orphans(graph: StoryGraph): GraphNode[] {
   return graph.nodes.filter((node) => node.kind === 'note' && adj.get(node.id)!.length === 0);
 }
 
+export interface LinkAnchor {
+  note: string;
+  line: number;
+  column: number;
+  /** The mention as written. */
+  text: string;
+  /** Its sentence for reading, cut with … when long. */
+  context: string;
+  /** An exact passage that appears once in the note: what propose_revision's `find` takes. */
+  find: string;
+  /** `find` with the mention turned into a link to the other note. */
+  replace: string;
+}
+
+/** The half-widths tried, in UTF-16 code units, when a mention's sentence is too long or repeated. */
+const ANCHOR_WINDOWS = [0, 20, 40, 80, 120];
+
 /**
  * Plain-text mentions of note `ofNote` (its name or an alias, whole words, outside links and code) in
- * the body of note `inNote`, at most `max`: literal passages a proposal can turn into `[[ofNote]]`.
+ * the body of note `inNote`, as anchors for a link: each with a `find` that is an exact passage
+ * appearing exactly once in the note (its sentence when that is short and unique, else the smallest
+ * window around the mention, widened to whole words within its line, that is unique, never cut
+ * with an ellipsis) and the `replace` that links it. Mentions with no unique passage are counted in
+ * `mentions` but give no anchor. `budget.left` is the text, in UTF-16 code units, the call may still
+ * scan; when a note does not fit, nothing is scanned and `unchecked` is true.
  */
-export function linkAnchors(analysis: Analysis, inNote: string, ofNote: string, max = 3): { note: string; line: number; column: number; text: string; context: string }[] {
+export function linkAnchors(analysis: Analysis, inNote: string, ofNote: string, max = 3, budget = { left: Infinity }): { mentions: number; unchecked: boolean; anchors: LinkAnchor[] } {
   const info = analysis.notes.find((note) => note.name === ofNote);
   if (!info) throw new Error(`unknown note: ${ofNote}`);
   const source = analysis.sources.find((s) => s.kind === 'note' && s.id === inNote);
-  if (!source) return [];
+  if (!source) return { mentions: 0, unchecked: false, anchors: [] };
+  const text = source.text;
+  if (budget.left < text.length) return { mentions: 0, unchecked: true, anchors: [] };
+  budget.left -= text.length;
+  const unique = (from: number, to: number) => {
+    const passage = text.slice(from, to);
+    const first = text.indexOf(passage);
+    budget.left -= 2 * text.length;
+    return text.indexOf(passage, first + 1) === -1;
+  };
   const terms = [...new Set([info.name, ...info.aliases].map(foldName).filter(Boolean))];
-  return plainMentions(source, terms).slice(0, max).map(([start, end]) => {
-    const { line, column } = positionAt(sentencesOf(source).lines, start);
-    return { note: inNote, line, column, text: source.text.slice(start, end), context: contextOf(source, start, end) };
-  });
+  const mentions = plainMentions(source, terms);
+  const lines = sentencesOf(source).lines;
+  const anchors: LinkAnchor[] = [];
+  for (const [start, end] of mentions) {
+    if (anchors.length >= max) break;
+    if (budget.left < 0) return { mentions: mentions.length, unchecked: true, anchors };
+    const [sentenceFrom, sentenceTo] = sentenceRange(source, start, end);
+    let found: [number, number] | null = sentenceTo - sentenceFrom <= MAX_CONTEXT && unique(sentenceFrom, sentenceTo) ? [sentenceFrom, sentenceTo] : null;
+    const { line } = positionAt(lines, start);
+    const lineFrom = lines[line - 1];
+    const lineEnd = text.indexOf('\n', start);
+    const lineTo = lineEnd === -1 ? text.length : lineEnd;
+    for (const half of ANCHOR_WINDOWS) {
+      if (found) break;
+      let from = Math.max(lineFrom, start - half);
+      let to = Math.min(lineTo, end + half);
+      // Widen to whole words, so a passage never starts or ends inside a word (or a surrogate pair).
+      while (from > lineFrom && !SPACE.test(text[from - 1])) from -= 1;
+      while (to < lineTo && !SPACE.test(text[to])) to += 1;
+      if (to - from <= MAX_CONTEXT && unique(from, to)) found = [from, to];
+    }
+    if (!found) continue;
+    const written = text.slice(start, end);
+    const link = written === info.name ? `[[${info.name}]]` : `[[${info.name}|${written}]]`;
+    const find = text.slice(found[0], found[1]);
+    anchors.push({
+      note: inNote, line, column: start - lineFrom + 1, text: written, context: contextOf(source, start, end),
+      find, replace: `${text.slice(found[0], start)}${link}${text.slice(end, found[1])}`,
+    });
+  }
+  return { mentions: mentions.length, unchecked: false, anchors };
 }
 
 /** What knowsEdges reads from a claim: the fields of a stored claim it needs, nothing else. */
@@ -670,15 +734,38 @@ export interface LinkSuggestion {
 export const MAX_VIA = 5;
 
 /**
+ * The most steps link suggestions may take. Measured on the CI machine so that the largest accepted
+ * graph answers well within a second (docs/notes-and-graph.md); the cost is known before any work.
+ */
+export const MAX_SUGGEST_WORK = 2_000_000;
+
+/**
+ * The steps suggestLinks would take, computed in O(nodes + edges) before any work: for each note it
+ * starts from, the degrees of its neighbours summed (each neighbour's neighbours are visited).
+ */
+export function suggestionCost(graph: StoryGraph, node?: string): number {
+  const adj = adjacency(graph);
+  const kind = new Map(graph.nodes.map((n) => [n.id, n.kind]));
+  if (node !== undefined) return (adj.get(node) ?? []).reduce((sum, w) => sum + adj.get(w)!.length, 0);
+  let cost = 0;
+  for (const [w, around] of adj) {
+    let notes = 0;
+    for (const v of around) if (kind.get(v) === 'note') notes += 1;
+    cost += around.length * notes;
+  }
+  return cost;
+}
+
+/**
  * Notes that could be linked: pairs of notes with at least one shared neighbour (a scene that
  * mentions both, a note linked to both, a note they co-occur with) and no `[[link]]` between them in
  * either direction. Adamic-Adar sums 1 / ln(degree) over the shared neighbours, so a rare shared
  * neighbour weighs more than a hub; Jaccard divides the shared neighbours by all the neighbours of
  * the pair. With `node`, its best `top` partners (from = node); without, the best `top` pairs of the
  * book (from < to). Highest score first, then more shared neighbours, then ids. Costs the sum of the
- * squared degrees of the neighbours visited, refused above `maxWork`.
+ * squared degrees of the neighbours visited (suggestionCost), refused above `maxWork` before any work.
  */
-export function suggestLinks(graph: StoryGraph, query: { metric: SuggestMetric; node?: string; top: number }, maxWork = MAX_GRAPH_WORK): LinkSuggestion[] {
+export function suggestLinks(graph: StoryGraph, query: { metric: SuggestMetric; node?: string; top: number }, maxWork = MAX_SUGGEST_WORK): LinkSuggestion[] {
   const adj = adjacency(graph);
   const kind = new Map(graph.nodes.map((node) => [node.id, node.kind]));
   if (query.node !== undefined) {
@@ -687,27 +774,27 @@ export function suggestLinks(graph: StoryGraph, query: { metric: SuggestMetric; 
   }
   const linked = new Set<string>();
   for (const edge of graph.edges) if (edge.kind === 'link') linked.add(`${edge.from}\u0000${edge.to}`).add(`${edge.to}\u0000${edge.from}`);
+  if (suggestionCost(graph, query.node) > maxWork) throw new GraphTooLargeError('link suggestions', graph.nodes.length, graph.edges.length);
   const sources = query.node !== undefined ? [query.node] : graph.nodes.filter((node) => node.kind === 'note').map((node) => node.id);
-  const pairs = new Map<string, { from: string; to: string; sum: number; common: number; via: string[] }>();
-  let work = 0;
+  const pairs: { from: string; to: string; sum: number; common: number; via: string[] }[] = [];
   for (const u of sources) {
+    // The partners of one note, keyed by the other note only.
+    const partners = new Map<string, { from: string; to: string; sum: number; common: number; via: string[] }>();
     for (const w of adj.get(u)!) {
       const around = adj.get(w)!;
       const weight = 1 / Math.log(around.length);
       for (const v of around) {
-        work += 1;
-        if (work > maxWork) throw new GraphTooLargeError('link suggestions', graph.nodes.length, graph.edges.length);
-        if (v === u || kind.get(v) !== 'note' || (query.node === undefined && v < u) || linked.has(`${u}\u0000${v}`)) continue;
-        const key = `${u}\u0000${v}`;
-        const pair = pairs.get(key) ?? { from: u, to: v, sum: 0, common: 0, via: [] };
+        if (v === u || kind.get(v) !== 'note' || (query.node === undefined && v < u)) continue;
+        let pair = partners.get(v);
+        if (!pair) { pair = { from: u, to: v, sum: 0, common: 0, via: [] }; partners.set(v, pair); }
         pair.sum += weight;
         pair.common += 1;
         if (pair.via.length < MAX_VIA) pair.via.push(w);
-        pairs.set(key, pair);
       }
     }
+    for (const pair of partners.values()) if (!linked.has(`${u}\u0000${pair.to}`)) pairs.push(pair);
   }
-  return [...pairs.values()]
+  return pairs
     .map(({ from, to, sum, common, via }) => ({
       from, to, common, via,
       score: round6(query.metric === 'adamic_adar' ? sum : common / (adj.get(from)!.length + adj.get(to)!.length - common)),

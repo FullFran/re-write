@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  analyseBook, betweenness, buildGraph, GraphTooLargeError, knowsEdges, linkAnchors, pageRank, suggestLinks,
+  analyseBook, betweenness, buildGraph, GraphTooLargeError, knowsEdges, linkAnchors, MAX_SUGGEST_WORK, pageRank, suggestionCost, suggestLinks,
   type KnowledgeClaim, type StoryGraph,
 } from '../src/domain/story-graph.ts';
 
@@ -139,13 +139,44 @@ test('betweenness and suggestions refuse a graph above the work cap instead of h
   assert.throws(() => suggestLinks(suggestGraph, { metric: 'adamic_adar', top: 5 }, 3), (error: unknown) => error instanceof GraphTooLargeError && /too large for link suggestions/.test(error.message));
 });
 
-test('link anchors: plain-text mentions of one note in the other, the literal text a proposal can turn into a link', () => {
+test('suggestions measure their cost before any work and refuse a dense graph at once', () => {
+  // 300 notes linked from one scene: every pair co-occurs, every note has 300 neighbours.
+  const names = Array.from({ length: 300 }, (_, i) => `note:N${String(i).padStart(3, '0')}`);
+  const edges: [kind: 'mention' | 'cooccurs', from: string, to: string][] = names.map((id) => ['mention', 'scene:s', id]);
+  for (let i = 0; i < names.length; i += 1) for (let j = i + 1; j < names.length; j += 1) edges.push(['cooccurs', names[i], names[j]]);
+  const dense = graphOf(edges);
+  assert.equal(suggestionCost(dense), 300 * 300 * 300, 'each note visits 300 neighbours of 300 neighbours each');
+  assert.equal(suggestionCost(dense, names[0]), 300 * 300);
+  assert.ok(suggestionCost(dense) > MAX_SUGGEST_WORK);
+  const start = performance.now();
+  assert.throws(() => suggestLinks(dense, { metric: 'adamic_adar', top: 10 }), (error: unknown) => error instanceof GraphTooLargeError && /too large for link suggestions/.test(error.message));
+  const ms = performance.now() - start;
+  assert.ok(ms < 100, `refused after ${Math.round(ms)} ms`);
+  assert.equal(suggestLinks(dense, { metric: 'adamic_adar', node: names[0], top: 3 }).length, 3, 'one note of the same graph stays under the cap');
+});
+
+test('link anchors: plain-text mentions of one note in the other, with a find that is an exact, unique passage and its linked replacement', () => {
   const analysis = analyseBook({
-    notes: [note('Elena', 'Cruza el puente con Tomás. Luego [[Tomás]] calla.'), note('Tomás', '---\naliases: [el viajero]\n---\nNo conoce a nadie.')],
+    notes: [
+      note('Elena', 'Cruza el puente con Tomás. Luego [[Tomás]] calla.'),
+      note('Tomás', '---\naliases: [el viajero]\n---\nNo conoce a nadie.'),
+      note('Ana', 'Habla con el viajero.'),
+      note('Eco', 'Saluda a Tomás.\nSaluda a Tomás.\n'),
+      note('Largo', `${'pasa '.repeat(60)}Tomás${' y pasa'.repeat(60)}.`),
+    ],
     scenes: [],
   });
-  assert.deepEqual(linkAnchors(analysis, 'Elena', 'Tomás'), [
-    { note: 'Elena', line: 1, column: 21, text: 'Tomás', context: 'Cruza el puente con Tomás.' },
-  ]);
-  assert.deepEqual(linkAnchors(analysis, 'Tomás', 'Elena'), []);
+  assert.deepEqual(linkAnchors(analysis, 'Elena', 'Tomás'), { mentions: 1, unchecked: false, anchors: [
+    { note: 'Elena', line: 1, column: 21, text: 'Tomás', context: 'Cruza el puente con Tomás.', find: 'Cruza el puente con Tomás.', replace: 'Cruza el puente con [[Tomás]].' },
+  ] });
+  assert.deepEqual(linkAnchors(analysis, 'Tomás', 'Elena'), { mentions: 0, unchecked: false, anchors: [] });
+  assert.deepEqual(linkAnchors(analysis, 'Ana', 'Tomás').anchors.map((a) => [a.find, a.replace]), [['Habla con el viajero.', 'Habla con [[Tomás|el viajero]].']]);
+  assert.deepEqual(linkAnchors(analysis, 'Eco', 'Tomás'), { mentions: 2, unchecked: false, anchors: [] }, 'a repeated passage is never offered');
+  const long = linkAnchors(analysis, 'Largo', 'Tomás').anchors;
+  assert.equal(long.length, 1);
+  assert.ok(long[0].context.includes('…'), 'the context for reading is cut');
+  assert.ok(!long[0].find.includes('…') && long[0].find.includes('Tomás') && long[0].find.length <= 240);
+  const text = analysis.sources.find((s) => s.id === 'Largo')!.text;
+  assert.equal(text.indexOf(long[0].find), text.lastIndexOf(long[0].find), 'the find is unique');
+  assert.deepEqual(linkAnchors(analysis, 'Elena', 'Tomás', 3, { left: 5 }), { mentions: 0, unchecked: true, anchors: [] }, 'a spent budget checks nothing');
 });

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { analyseBook, backlinks, buildGraph, knowsEdges, MAX_ANALYSED_CHARS, pageRank, type KnowledgeClaim } from '../src/domain/story-graph.ts';
+import {
+  analyseBook, backlinks, betweenness, buildGraph, knowsEdges, MAX_ANALYSED_CHARS, MAX_GRAPH_WORK, MAX_SUGGEST_WORK, pageRank, suggestionCost, suggestLinks,
+  type KnowledgeClaim, type StoryGraph,
+} from '../src/domain/story-graph.ts';
 import { codeRanges, parseWikilinks } from '../src/domain/wikilink.ts';
 
 /**
@@ -101,4 +104,33 @@ test('PageRank and knows edges over a growing chain of notes run in linear time'
   };
   linear('pagerank', chain, ({ graph, count }) => assert.equal(pageRank(graph).size, count + 1), 'every note and the scene');
   linear('knows', chain, ({ analysis, claims, count }) => assert.equal(knowsEdges(analysis, claims).edges.length, count));
+});
+
+/** Every pair of `count` notes co-occurs: the densest graph of that size. */
+function complete(count: number): StoryGraph {
+  const ids = Array.from({ length: count }, (_, i) => `note:N${String(i).padStart(4, '0')}`);
+  const edges = [];
+  for (let i = 0; i < count; i += 1) for (let j = i + 1; j < count; j += 1) edges.push({ kind: 'cooccurs' as const, from: ids[i], to: ids[j], weight: 1 });
+  return { nodes: ids.map((id) => ({ id, kind: 'note' as const, name: id.slice(5), type: null, order: null })), edges };
+}
+
+test('the densest graph that suggestions and betweenness accept answers within a second (timed with REWRITE_SCALE_FULL=1)', (t) => {
+  // A complete graph of k notes costs k (k - 1)^2 suggestion steps and k^3 betweenness steps.
+  let k = 2;
+  while ((k + 1) * k * k <= MAX_SUGGEST_WORK) k += 1;
+  assert.ok(suggestionCost(complete(k)) <= MAX_SUGGEST_WORK);
+  assert.ok(suggestionCost(complete(k + 1)) > MAX_SUGGEST_WORK);
+  let n = 2;
+  while ((n + 1) ** 3 <= MAX_GRAPH_WORK) n += 1;
+  if (!FULL) return;
+  for (const [name, run] of [
+    [`suggestions on ${k} notes`, () => suggestLinks(complete(k), { metric: 'adamic_adar', top: 10 })],
+    [`betweenness on ${n} notes`, () => betweenness(complete(n))],
+  ] as const) {
+    const start = performance.now();
+    run();
+    const ms = performance.now() - start;
+    t.diagnostic(`${name}: ${Math.round(ms)} ms`);
+    assert.ok(ms < BOUND_MS, `${name}: ${Math.round(ms)} ms`);
+  }
 });
