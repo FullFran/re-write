@@ -198,6 +198,16 @@ test('every note and graph tool answers for the book it is given, never another 
   const [salSuggest, otroSuggest] = await both('graph_suggest_links', {});
   assert.deepEqual(salSuggest.data.suggestions.map((s: any) => [s.from, s.to]), [['note:Elena', 'note:Tomás']]);
   assert.deepEqual(otroSuggest.data.suggestions.map((s: any) => [s.from, s.to]), [['note:Elena', 'note:Faro']]);
+  assert.deepEqual([otroSuggest.data.suggestions[0].anchors, otroSuggest.data.suggestions[0].anchor_problem], [[], 'no aparece en el texto: ninguna de las dos notas nombra a la otra']);
+});
+
+test('graph_suggest_links offers no anchor for a passage that is not unique, and says why', async () => {
+  const { call, addNotes } = await setup();
+  await addNotes({ ...NOTES, Elena: '---\ntype: personaje\naliases: [la capitana]\n---\nCustodia el [[Puente de Sal]].\nSaluda a Tomás.\nSaluda a Tomás.\n' });
+  const [suggestion] = (await call('graph_suggest_links', { node: 'Elena' })).data.suggestions;
+  assert.equal(suggestion.to, 'note:Tomás');
+  assert.deepEqual(suggestion.anchors, []);
+  assert.equal(suggestion.anchor_problem, 'el pasaje no es único: cada mención se repite igual en la nota');
 });
 
 const claimOn = (source_file: string, quote: string, subject: string, holder: string, fact: string, mode: string) => ({
@@ -253,7 +263,8 @@ test('graph_suggest_links proposes notes to link, with literal anchors for propo
   assert.equal(found.data.metric, 'adamic_adar');
   assert.deepEqual(found.data.suggestions, [{
     from: 'note:Elena', to: 'note:Tomás', score: 0.721348, common: 1, via: ['note:Puente de Sal'],
-    anchors: [{ file: 'notas/Tomás.md', line: 4, column: 24, text: 'Elena', context: 'Un viajero que busca a Elena.' }],
+    anchors: [{ file: 'notas/Tomás.md', line: 4, column: 24, text: 'Elena', context: 'Un viajero que busca a Elena.', find: 'Un viajero que busca a Elena.', replace: 'Un viajero que busca a [[Elena]].' }],
+    anchor_problem: null,
   }]);
   assert.match(found.data.next_step, /propose_revision/);
   const book1 = await call('graph_suggest_links', { top: 1 });

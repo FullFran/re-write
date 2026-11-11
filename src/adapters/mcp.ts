@@ -515,7 +515,7 @@ export function buildMcpServer(library: Library, subject: string, capabilities: 
     return {
       metric,
       suggestions: suggestionsOf(project, analysis, graph, { metric, node, top: args.top ?? 10 }),
-      next_step: 'Show the person the pairs and why (via). Only if they want a link: call propose_revision with file = an anchor\'s file, find = its context copied exactly, replace = the same text with the name as [[Note]]. Without an anchor, read_note and pick a literal sentence. The person accepts it at review_url.',
+      next_step: 'Show the person the pairs and why (via). Only if they want a link: call propose_revision with an anchor\'s file, find and replace exactly as given. Without an anchor, anchor_problem says why: read_note and pick a passage that appears once. The person accepts it at review_url.',
     };
   }));
 

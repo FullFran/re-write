@@ -49,19 +49,36 @@ export function ranking(graph: StoryGraph, metric: CentralMetric, kind?: NodeKin
 /** The most anchors one suggestion carries. */
 export const MAX_ANCHORS = 3;
 
+/** The most note text, in UTF-16 code units, one call may scan for anchors, whatever the notes' sizes. */
+export const MAX_ANCHOR_SCAN = 16_000_000;
+
+/** Why a suggestion has no anchor, in the person's language (Spanish), or null when it has one. */
+export const ANCHOR_PROBLEMS = {
+  absent: 'no aparece en el texto: ninguna de las dos notas nombra a la otra',
+  repeated: 'el pasaje no es único: cada mención se repite igual en la nota',
+  unchecked: 'las notas son demasiado largas para buscar un pasaje',
+} as const;
+
 /**
  * Link suggestions (see suggestLinks), each with up to MAX_ANCHORS anchors: plain-text mentions of
- * one note in the other's file, literal passages an assistant can turn into a `[[link]]` with
- * propose_revision.
+ * one note in the other's file, with a `find` that is an exact passage appearing once in that file
+ * and the `replace` that links it, ready for propose_revision. A suggestion with no anchor says why
+ * in `anchor_problem`.
  */
 export function suggestionsOf(project: Project, analysis: Analysis, graph: StoryGraph, query: { metric: SuggestMetric; node?: string; top: number }) {
+  const budget = { left: MAX_ANCHOR_SCAN };
   return suggestLinks(graph, query).map((suggestion) => {
     const from = suggestion.from.slice('note:'.length);
     const to = suggestion.to.slice('note:'.length);
-    const anchors = [...linkAnchors(analysis, from, to, MAX_ANCHORS), ...linkAnchors(analysis, to, from, MAX_ANCHORS)]
+    const found = [linkAnchors(analysis, from, to, MAX_ANCHORS, budget), linkAnchors(analysis, to, from, MAX_ANCHORS, budget)];
+    const anchors = found.flatMap((side) => side.anchors)
       .slice(0, MAX_ANCHORS)
       .map(({ note, ...where }) => ({ file: project.notePath(note), ...where }));
-    return { ...suggestion, anchors };
+    const anchor_problem = anchors.length ? null
+      : found.some((side) => side.unchecked) ? ANCHOR_PROBLEMS.unchecked
+      : found.some((side) => side.mentions > 0) ? ANCHOR_PROBLEMS.repeated
+      : ANCHOR_PROBLEMS.absent;
+    return { ...suggestion, anchors, anchor_problem };
   });
 }
 
@@ -98,7 +115,10 @@ export function graphQuery(params: URLSearchParams): GraphQuery {
   const suggest = list('suggest', ['adamic_adar', 'jaccard'] as const);
   if (metrics) query.metrics = metrics;
   if (include) query.include = include;
-  if (suggest) query.suggest = suggest[0];
+  if (suggest) {
+    if (suggest.length > 1) throw new GraphQueryError('suggest takes one value: adamic_adar or jaccard');
+    query.suggest = suggest[0];
+  }
   const top = params.get('top');
   if (top !== null) {
     if (!/^\d+$/.test(top) || Number(top) < 1 || Number(top) > MAX_SUGGESTIONS) throw new GraphQueryError(`top must be a whole number from 1 to ${MAX_SUGGESTIONS}`);

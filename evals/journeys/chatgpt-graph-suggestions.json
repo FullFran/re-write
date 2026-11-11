@@ -108,7 +108,8 @@
         { "name": "the note that shares a neighbour but no link is suggested", "path": "suggest.data.suggestions.*.to", "equals": ["note:Tomás"] },
         { "name": "the suggestion says why", "path": "suggest.data.suggestions.0.via", "equals": ["note:Puente de Sal"] },
         { "name": "the anchor is the note file", "path": "suggest.data.suggestions.0.anchors.0.file", "equals": "notas/Elena.md" },
-        { "name": "the anchor carries a literal passage", "path": "suggest.data.suggestions.0.anchors.0.context", "equals": "Desconfía de Tomás." },
+        { "name": "the anchor carries a passage that appears once", "path": "suggest.data.suggestions.0.anchors.0.find", "equals": "Desconfía de Tomás." },
+        { "name": "and the text that links it", "path": "suggest.data.suggestions.0.anchors.0.replace", "equals": "Desconfía de [[Tomás]]." },
         { "name": "the next step is a proposal, not a write", "path": "suggest.data.next_step", "contains": "propose_revision" }
       ]
     },

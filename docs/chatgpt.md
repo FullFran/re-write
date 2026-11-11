@@ -64,9 +64,11 @@ lists Business, Enterprise and Edu. Check it on the writer's own plan.
   `graph_central` ranks by `degree`, `pagerank` or `betweenness` (a graph above the work cap is
   refused with a pointer to degree or PageRank); `graph_neighbors` with `knows: true` adds who
   knows what, from claims with `knowledge`, and lists holder or subject names that match no note
-  instead of guessing. `graph_suggest_links` lists notes that could be linked, with anchors: a
-  suggested link reaches the text only through `propose_revision` on the anchor's note file, which
-  the person accepts at the review URL (its `next_step` says so). The
+  instead of guessing. `graph_suggest_links` lists notes that could be linked, with anchors whose
+  `find` appears once in the note and whose `replace` links it, or an `anchor_problem` saying why
+  there is none: a suggested link reaches the text only through `propose_revision` with those
+  values, which the person accepts at the review URL (its `next_step` says so). A dense book is
+  refused at once rather than computed. The
   `chatgpt-graph-suggestions` journey pins this flow.
   See [notes-and-graph.md](notes-and-graph.md).
 - **Scene lengths.** `list_scenes` adds `chars`, the length of each scene, so the assistant can plan

@@ -116,6 +116,7 @@ test('an unknown metric, include, suggest or top value is a 400 that names it', 
     ['metrics=closeness', /unknown metrics value: closeness/],
     ['include=everything', /unknown include value: everything/],
     ['suggest=magic', /unknown suggest value: magic/],
+    ['suggest=adamic_adar,jaccard', /suggest takes one value: adamic_adar or jaccard/],
     ['suggest=jaccard&top=0', /top must be a whole number from 1 to 50/],
   ] as const) {
     const res = await reviewApi(h, `/books/sal/graph?${query}`, session);

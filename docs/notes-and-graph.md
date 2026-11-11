@@ -137,15 +137,29 @@ without, the best `top` pairs of the book (`from` < `to`). A pair that only co-o
 candidate: sharing scenes without a link is exactly what a suggestion points out. (The drawing below computes
 its own suggestions in the browser over the graph as drawn, with a different candidate set.)
 
-**Work cap.** Betweenness and suggestions are not linear, so each counts its steps before or
-while working and refuses a graph above 25,000,000 steps (`MAX_GRAPH_WORK`) with a message that
-names the operation and points to degree or PageRank, instead of holding the single-threaded
-server. Below it, a book of a few thousand notes and scenes answers within the request. The text
-cap above still bounds the graph's size; PageRank and `knows` edges are linear.
+**Work caps.** Betweenness and suggestions are not linear, so each computes its cost in
+O(nodes + edges) before doing any work and refuses at once, with a message that names the
+operation and points to degree or PageRank, instead of holding the single-threaded server:
+betweenness above 25,000,000 steps (`MAX_GRAPH_WORK`, nodes × (nodes + edges)), suggestions above
+2,000,000 steps (`MAX_SUGGEST_WORK`, `suggestionCost`: for each note started from, the degrees of
+its neighbours summed). The densest graphs each accepts (a complete graph of 126 notes for
+suggestions, 292 for betweenness) are timed on the CI machine by `tests/story-graph-scale.test.ts`
+with `REWRITE_SCALE_FULL=1` and must finish within a second; a book where many notes share one
+scene (300 notes in one scene) is refused in milliseconds. Asking about one note costs far less
+than the whole book. The text cap above still bounds the graph's size; PageRank and `knows` edges
+are linear.
 
-**Anchors.** An anchor is a plain-text mention of one note in the other's note file (`{ file,
-line, column, text, context }`), found like an unlinked mention: the literal passage an assistant
-can turn into a link.
+**Anchors.** An anchor is a plain-text mention of one note in the other's note file, found like an
+unlinked mention: `{ file, line, column, text, context, find, replace }`. `context` is the sentence
+for reading and may be cut with `…`. `find` is an exact passage of the current file that appears
+there once: the mention's sentence when it is at most 240 characters and unique, otherwise the
+smallest window around the mention, widened to whole words within its line, that is unique; it is
+never cut with an ellipsis. `replace` is `find` with the mention turned into `[[Nota]]` (or
+`[[Nota|as written]]` for an alias or a different spelling). A mention with no unique passage gives
+no anchor. A suggestion with no anchor says why in `anchor_problem`, in Spanish for the person:
+`no aparece en el texto: ...` (neither note names the other), `el pasaje no es único: ...` (every
+mention repeats elsewhere in the note), or `las notas son demasiado largas para buscar un pasaje`
+(one call scans at most 16,000,000 characters of notes for anchors); otherwise it is `null`.
 
 **Cost.** Every pass is linear in the text: one forward scan finds code ranges and links, positions
 come from precomputed line starts, exclusions are checked by binary search, and sentence boundaries
@@ -180,10 +194,10 @@ above:
 | --- | --- |
 | `metrics=pagerank,betweenness` (either or both) | `pagerank` and `betweenness` on every node |
 | `include=knows,paragraphs` (either or both) | `knows` (`{ edges, unresolved, ambiguous }`, see "Who knows what") and the `paragraphs` weight on `cooccurs` edges |
-| `suggest=adamic_adar` or `suggest=jaccard`, with `top=1..50` (default 10) | `suggestions: { metric, items }`, the best pairs of the book with their anchors |
+| `suggest=adamic_adar` or `suggest=jaccard` (one value), with `top=1..50` (default 10) | `suggestions: { metric, items }`, the best pairs of the book with their anchors and `anchor_problem` |
 
-Every one respects `as_of_scene`. An unknown value, a `top` out of range, or a graph above the
-work cap is a `400` that names the problem.
+Every one respects `as_of_scene`. An unknown value, more than one `suggest` value, a `top` out of
+range, or a graph above the work cap is a `400` that names the problem.
 
 ### From a suggestion to a link
 
@@ -191,10 +205,10 @@ A suggestion never writes. The recommended assistant flow:
 
 1. `graph_suggest_links` (with `node` when the person asks about one note) and show the person the
    pairs and why (`via`).
-2. Only if the person wants a link: take an anchor and call `propose_revision` with `file` = the
-   anchor's `file`, `find` = its `context` copied exactly, and `replace` = the same text with the
-   name written as `[[Nota]]`. Without an anchor, `read_note` one of the two notes and pick a
-   literal sentence to extend, for example with "Ver [[Nota]].".
+2. Only if the person wants a link: take an anchor and call `propose_revision` with its `file`,
+   `find` and `replace` exactly as given. Without an anchor, `anchor_problem` says why; `read_note`
+   one of the two notes and pick a passage that appears once to extend, for example with
+   "Ver [[Nota]]."
 3. The person accepts or rejects the proposal at the review page. Once accepted, the pair has a
    link and is no longer suggested.
 
