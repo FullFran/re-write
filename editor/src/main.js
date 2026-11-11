@@ -1,0 +1,164 @@
+// The review page's scene editor on CodeMirror 6, served as one ES module at /review/editor.js.
+// The page (src/adapters/review-page.ts) owns saving, drafts and line endings; this module only
+// shows and edits the text. The document is always the Markdown as the person typed it, with
+// every line break as \n: the three views are ways of looking at it, never a conversion.
+import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
+import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { Annotation, Compartment, EditorState } from '@codemirror/state';
+import { EditorView, keymap, lineNumbers } from '@codemirror/view';
+import { tags } from '@lezer/highlight';
+import { livePreview } from './live-preview.js';
+import { markdown } from './markdown.js';
+import { renderReading } from './reading.js';
+
+export const VIEWS = [
+  { id: 'live', label: 'Vista previa en vivo' },
+  { id: 'source', label: 'Markdown' },
+  { id: 'reading', label: 'Lectura' },
+];
+const isView = (id) => VIEWS.some((view) => view.id === id);
+
+// A change the page made (loading a saved version) rather than the person.
+const fromPage = Annotation.define();
+
+// The page's own tokens (docs/design.md), so the editor follows the light and dark themes.
+const theme = EditorView.theme({
+  '&': { color: 'var(--ink)', backgroundColor: 'transparent', fontSize: 'var(--text-md)' },
+  '&.cm-focused': { outline: 'none' },
+  '.cm-scroller': { fontFamily: 'var(--font-prose)', lineHeight: '1.7' },
+  // Writing comfort: a reading measure, centred, with room below the last line.
+  '.cm-content': { maxWidth: '40em', margin: '0 auto', padding: 'var(--space-4) 0 var(--space-7)', caretColor: 'var(--ink)', minHeight: '50vh' },
+  '.cm-line': { padding: '0 var(--space-1)' },
+  // 16 px at least in every view, so iOS does not zoom the page when the text gets focus.
+  '&[data-view=source] .cm-scroller': { fontFamily: 'var(--font-code)', lineHeight: '1.6' },
+  '&[data-view=source] .cm-content': { maxWidth: 'none', margin: '0' },
+  '.cm-gutters': { backgroundColor: 'transparent', color: 'var(--muted)', border: 'none' },
+  '.cm-lp-h1': { fontSize: '1.5em', fontWeight: '700', lineHeight: '1.3' },
+  '.cm-lp-h2': { fontSize: '1.3em', fontWeight: '700', lineHeight: '1.3' },
+  '.cm-lp-h3': { fontSize: '1.15em', fontWeight: '700' },
+  '.cm-lp-h4, .cm-lp-h5, .cm-lp-h6': { fontWeight: '700' },
+  '.cm-lp-em': { fontStyle: 'italic' },
+  '.cm-lp-strong': { fontWeight: '700' },
+  '.cm-lp-strike': { textDecoration: 'line-through' },
+  '.cm-lp-code': { fontFamily: 'var(--font-code)', fontSize: '0.9em' },
+  '.cm-lp-link': { textDecoration: 'underline', textDecorationColor: 'var(--edge)' },
+  '.cm-lp-quote': { borderLeft: '3px solid var(--line)', paddingLeft: 'var(--space-3)', color: 'var(--muted)' },
+  '.cm-lp-break': { textAlign: 'center' },
+  '.cm-lp-scene-break': { color: 'var(--muted)', letterSpacing: '0.3em' },
+  '.cm-lp-bullet': { color: 'var(--muted)' },
+});
+
+// Source highlighting: structure in weight and slant, Markdown punctuation muted.
+const highlight = HighlightStyle.define([
+  { tag: tags.heading, fontWeight: '700' },
+  { tag: tags.emphasis, fontStyle: 'italic' },
+  { tag: tags.strong, fontWeight: '700' },
+  { tag: tags.strikethrough, textDecoration: 'line-through' },
+  { tag: [tags.processingInstruction, tags.meta, tags.url, tags.contentSeparator, tags.labelName], color: 'var(--muted)' },
+  { tag: tags.quote, color: 'var(--muted)' },
+  { tag: tags.monospace, fontFamily: 'var(--font-code)' },
+]);
+
+function viewExtension(id) {
+  if (id === 'source') return [lineNumbers(), EditorView.editorAttributes.of({ 'data-view': 'source' })];
+  return [livePreview, EditorView.editorAttributes.of({ 'data-view': 'live' })];
+}
+
+const editability = (editable) => [EditorView.editable.of(editable), EditorState.readOnly.of(!editable)];
+
+/**
+ * Builds an editor. `onChange` runs after each edit by the person, `onSave` on Ctrl/Cmd+S,
+ * `onViewChange` when the person picks another view. Returns the same small surface as the
+ * page's plain text field: dom, getValue, setValue, setEditable, focus, destroy.
+ */
+export function createSceneEditor({ text, label, view = 'live', onChange = () => {}, onSave = () => {}, onViewChange = () => {} }) {
+  const doc = document;
+  let current = isView(view) ? view : 'live';
+  let editable = true;
+  const root = doc.createElement('div');
+  root.className = 'scene-cm';
+  const bar = doc.createElement('div');
+  bar.className = 'scene-views';
+  bar.setAttribute('role', 'group');
+  bar.setAttribute('aria-label', 'Vista del editor');
+  const host = doc.createElement('div');
+  host.className = 'scene-cm-host';
+  const reading = doc.createElement('div');
+  reading.className = 'scene-reading';
+  reading.setAttribute('aria-label', 'Lectura de la escena');
+  const modeSlot = new Compartment();
+  const editSlot = new Compartment();
+
+  const cm = new EditorView({
+    parent: host,
+    state: EditorState.create({
+      doc: text,
+      extensions: [
+        history(),
+        keymap.of([
+          { key: 'Mod-s', preventDefault: true, run: () => { onSave(); return true; } },
+          ...defaultKeymap,
+          ...historyKeymap,
+        ]),
+        markdown(),
+        syntaxHighlighting(highlight),
+        EditorView.lineWrapping,
+        // Phone keyboards: the browser's spelling, autocorrect and capitals, as in a text field.
+        EditorView.contentAttributes.of({ 'aria-label': label, spellcheck: 'true', autocorrect: 'on', autocapitalize: 'sentences' }),
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged && !update.transactions.some((tr) => tr.annotation(fromPage))) onChange();
+        }),
+        theme,
+        modeSlot.of(viewExtension(current)),
+        editSlot.of(editability(true)),
+      ],
+    }),
+  });
+
+  const buttons = VIEWS.map(({ id, label: name }) => {
+    const btn = doc.createElement('button');
+    btn.type = 'button';
+    btn.textContent = name;
+    btn.dataset.view = id;
+    btn.addEventListener('click', () => {
+      if (current === id) return;
+      show(id);
+      onViewChange(id);
+    });
+    return btn;
+  });
+  bar.append(...buttons);
+  root.append(bar, host, reading);
+
+  function show(id) {
+    current = id;
+    for (const btn of buttons) btn.setAttribute('aria-pressed', String(btn.dataset.view === id));
+    root.dataset.view = id;
+    const isReading = id === 'reading';
+    if (isReading) renderReading(reading, cm.state.doc.toString());
+    else reading.replaceChildren();
+    reading.hidden = !isReading;
+    host.hidden = isReading;
+    cm.dispatch({ effects: modeSlot.reconfigure(viewExtension(id)) });
+  }
+  show(current);
+
+  return {
+    dom: root,
+    getValue: () => cm.state.doc.toString(),
+    setValue(value) {
+      cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: value }, annotations: fromPage.of(true) });
+      if (current === 'reading') renderReading(reading, value);
+    },
+    setEditable(value) {
+      editable = value;
+      cm.dispatch({ effects: editSlot.reconfigure(editability(value)) });
+    },
+    isEditable: () => editable,
+    focus() {
+      if (current === 'reading') buttons.find((btn) => btn.dataset.view === 'reading').focus();
+      else cm.focus();
+    },
+    destroy: () => cm.destroy(),
+  };
+}
