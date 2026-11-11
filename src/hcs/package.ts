@@ -5,7 +5,7 @@ import { gzipSync, gunzipSync } from 'node:zlib';
 import { HcsFailure, hcsError } from './errors.ts';
 import { readTar, writeTar, TarUnsafeNameError, type TarInput } from './tar.ts';
 
-export interface PackageExpected { size: number; contentHash: string }
+export interface PackageExpected { size: number; contentHash: string; contentId?: string }
 export interface PackageLimits { maxBytes?: number; maxMembers?: number }
 const mediaType = 'application/vnd.oci.image.layer.v1.tar+gzip';
 const hashPattern = /^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128})$/;
@@ -28,11 +28,30 @@ export function buildPackage(dir: string) {
   walk(dir, ''); const bytes = gzipSync(writeTar(members), { level: 9 });
   return { bytes, contentHash: `sha256:${createHash('sha256').update(bytes).digest('hex')}`, size: bytes.length, mediaType };
 }
-export function verifyPackage(bytes: Uint8Array, expected: PackageExpected): void {
+// Default bound on the decompressed stream: the default unpack limits (256 MiB of data, 10,000 members).
+const defaultMaxUncompressedBytes = 256 * 1024 * 1024 + 10000 * 1023 + 1024;
+// Transport size, transport digest, then (when the entry declares `contentId`) the digest of the exact uncompressed
+// tar stream under a bound on that stream (HCS-0001-R018). Returns the tar when it had to be decompressed.
+function verifyTransportAndIdentity(bytes: Uint8Array, expected: PackageExpected, maxUncompressedBytes: number): Buffer | undefined {
   if (bytes.length !== expected.size) failure('Package size does not match');
   if (!hashPattern.test(expected.contentHash)) failure('Invalid package content hash');
   const [algorithm, digest] = expected.contentHash.split(':');
   if (createHash(algorithm).update(bytes).digest('hex') !== digest) failure('Package digest does not match');
+  if (expected.contentId === undefined) return undefined;
+  const identity = (message: string): never => { throw new HcsFailure([hcsError('integrity_mismatch', message, { requirement: 'HCS-0001-R018' })]); };
+  if (typeof expected.contentId !== 'string' || !hashPattern.test(expected.contentId)) identity('Invalid package content id');
+  let tar: Buffer;
+  try { tar = gunzipSync(bytes, { maxOutputLength: Math.max(1, maxUncompressedBytes) }); }
+  catch { return identity('Package cannot be decompressed within the limit'); }
+  if (tar.length > maxUncompressedBytes) identity('Package cannot be decompressed within the limit');
+  const [idAlgorithm, idDigest] = expected.contentId.split(':');
+  if (createHash(idAlgorithm).update(tar).digest('hex') !== idDigest) identity('Package content id does not match');
+  return tar;
+}
+export function verifyPackage(bytes: Uint8Array, expected: PackageExpected, limits: { maxUncompressedBytes?: number } = {}): void {
+  const max = limits.maxUncompressedBytes ?? defaultMaxUncompressedBytes;
+  if (!Number.isSafeInteger(max) || max < 0) throw new RangeError('Invalid package limits');
+  verifyTransportAndIdentity(bytes, expected, Math.min(max, 0x7fffffff));
 }
 export function sealTree(dir: string): void {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -52,14 +71,15 @@ function unsealTree(dir: string): void {
   for (const entry of readdirSync(dir, { withFileTypes: true })) if (entry.isDirectory()) unsealTree(join(dir, entry.name));
 }
 export function unpackPackage(bytes: Uint8Array, expected: PackageExpected, targetDir: string, limits: PackageLimits = {}): void {
-  verifyPackage(bytes, expected);
   const maxBytes = limits.maxBytes ?? 256 * 1024 * 1024, maxMembers = limits.maxMembers ?? 10000;
-  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || !Number.isSafeInteger(maxMembers) || maxMembers < 0) throw new RangeError('Invalid package limits');
-  if (taken(targetDir)) throw new Error('Package target already exists');
+  const validLimits = Number.isSafeInteger(maxBytes) && maxBytes >= 0 && Number.isSafeInteger(maxMembers) && maxMembers >= 0;
   // Allow each member a header and up to one padding block, plus the terminator.
-  const cap = Math.min(maxBytes + maxMembers * 1023 + 1024, 0x7fffffff);
+  const cap = validLimits ? Math.min(maxBytes + maxMembers * 1023 + 1024, 0x7fffffff) : defaultMaxUncompressedBytes;
+  const verifiedTar = verifyTransportAndIdentity(bytes, expected, cap);
+  if (!validLimits) throw new RangeError('Invalid package limits');
+  if (taken(targetDir)) throw new Error('Package target already exists');
   let members: ReturnType<typeof readTar>;
-  try { members = readTar(gunzipSync(bytes, { maxOutputLength: Math.max(1, cap) })); }
+  try { members = readTar(verifiedTar ?? gunzipSync(bytes, { maxOutputLength: Math.max(1, cap) })); }
   catch (error) {
     if (error instanceof TarUnsafeNameError) unsafe(error.memberName, 'invalid path');
     throw error;

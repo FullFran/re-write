@@ -4,7 +4,7 @@ import { partitionMembers } from './extensions.ts';
 import { HCS_VERSION } from './version.ts';
 
 export interface Contribution { kind: string; path: string; provides?: string[]; [key: string]: unknown }
-export interface CatalogEntry { id: string; version: string; contentHash: string; size: number; mediaType: string; contributions: Contribution[]; locations?: string[]; requires?: string[]; compatibility?: { platforms?: Record<string, unknown>[]; hosts?: Record<string, unknown>[]; [key: string]: unknown }; [key: string]: unknown }
+export interface CatalogEntry { id: string; version: string; contentHash: string; contentId?: string; size: number; mediaType: string; contributions: Contribution[]; locations?: string[]; requires?: string[]; compatibility?: { platforms?: Record<string, unknown>[]; hosts?: Record<string, unknown>[]; [key: string]: unknown }; [key: string]: unknown }
 export interface CatalogManifest { hcsVersion: string; id: string; version: string; entries: CatalogEntry[]; [key: string]: unknown }
 export const DEFAULT_LIMITS = { maxBytes: 4_194_304, maxDepth: 64 };
 
@@ -57,9 +57,10 @@ export function readCatalog(bytes: Uint8Array | string, limits = DEFAULT_LIMITS)
   const platform = (v: unknown, p: string) => { if (!members(v, p, ['os', 'architecture', 'variant'], ['os', 'architecture'])) return; for (const k of ['os', 'architecture', 'variant']) field(v, k, p, x => text(x) && x.length > 0); };
   const host = (v: unknown, p: string) => { if (!members(v, p, ['id', 'versions'], ['id', 'versions'])) return; field(v, 'id', p, dotted); if ('versions' in v) list(v.versions, ptr(p, 'versions'), (x, q) => { if (!version(x)) invalid(q); }, 1, true); };
   const entry = (v: unknown, p: string) => {
-    if (!members(v, p, ['id', 'version', 'contentHash', 'size', 'mediaType', 'locations', 'contributions', 'requires', 'compatibility'], ['id', 'version', 'contentHash', 'size', 'mediaType', 'contributions'])) return;
+    if (!members(v, p, ['id', 'version', 'contentHash', 'contentId', 'size', 'mediaType', 'locations', 'contributions', 'requires', 'compatibility'], ['id', 'version', 'contentHash', 'size', 'mediaType', 'contributions'])) return;
     field(v, 'id', p, dotted); field(v, 'version', p, version);
     field(v, 'contentHash', p, x => exact(/^(?:sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128})$/, x), 'HCS-0001-R004');
+    field(v, 'contentId', p, x => exact(/^(?:sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128})$/, x), 'HCS-0001-R017');
     field(v, 'size', p, x => typeof x === 'number' && Number.isInteger(x) && x >= 0);
     field(v, 'mediaType', p, x => exact(/^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$/, x), 'HCS-0001-R011');
     if ('locations' in v) list(v.locations, ptr(p, 'locations'), (x, q) => { if (!exact(/^[A-Za-z][A-Za-z0-9+.-]*:[^\s]+$/, x)) invalid(q); }, 0, true);

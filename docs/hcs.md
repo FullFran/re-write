@@ -22,7 +22,7 @@ Rules live in [`tests/fixtures/hcs/divergences.json`](../tests/fixtures/hcs/dive
 
 The test fails only on a **regression**: a case that passes in [`tests/fixtures/hcs/baseline.json`](../tests/fixtures/hcs/baseline.json) and does not pass now. A new case that fails does not block anything; it shows up as `fail` in the report. After fixing a `fail` or moving to a new release, regenerate the baseline with `HCS_BASELINE=write node --test tests/hcs-conformance.test.ts` and review its diff in the pull request. `node --test --test-reporter=tap tests/hcs-conformance.test.ts` prints the per-level table.
 
-Measured with HCS `0.1.0-draft.3`: 91 pass, 0 fail, 217 not applicable (88 host, 41 projection, 37 distribution, 7 client, 44 document cases of schemas without a runner), 0 divergences.
+Measured with HCS `0.1.0-draft.6`: 98 pass, 0 fail, 240 not applicable (94 host, 41 projection, 37 distribution, 17 recovery, 7 client, 44 document cases of schemas without a runner), 0 divergences.
 
 ## Updating to a new HCS release
 
@@ -40,7 +40,7 @@ The reference runner (`vendor/hcs/<version>/conformance/runner/run.py`) will run
 
 ## Package archives
 
-Packages are deterministic gzip-compressed ustar archives. The host reads a package from its content-addressed store (`<store>/<algorithm>/<digest>`, default `<state>/store`, `--store <dir>` on `rewrite catalog apply`) or else from the entry's `https:` `locations` in order; any other location, including `file:`, is refused and reported like an unavailable location. Verification checks the compressed size and content hash before unpacking. Extraction uses a fresh temporary sibling directory, seals the extracted tree read-only, and renames it into place only after success.
+Packages are deterministic gzip-compressed ustar archives. The host reads a package from its content-addressed store (`<store>/<algorithm>/<digest>`, default `<state>/store`, `--store <dir>` on `rewrite catalog apply`) or else from the entry's `https:` `locations` in order; any other location, including `file:`, is refused and reported like an unavailable location. Verification checks the compressed size and content hash before unpacking. When the entry declares `contentId` (HCS-0001-R017, R018), the host then decompresses the archive under a bound on the whole decompressed stream and compares the digest of the exact uncompressed tar with it, before reading permission requests or extracting anything; a malformed identity, a failed or over-limit decompression and a different digest all report `integrity_mismatch` with HCS-0001-R018. An entry without `contentId` keeps the transport-only verification. `rewrite` does not produce `contentId` yet and makes no decision from it (no deduplication, no skipped activation). Extraction uses a fresh temporary sibling directory, seals the extracted tree read-only, and renames it into place only after success.
 
 Pending HCS OQ-0001-6, re-write applies a local safety rule: absolute paths, parent segments, backslashes, NULs, duplicate paths, links, special files and OCI whiteouts are refused. Unsafe members produce `integrity_mismatch` with `x-rewrite-archive`, `x-rewrite-member` and `x-rewrite-reason` details. Extraction defaults to at most 256 MiB of unpacked data and 10,000 members; callers can configure these limits.
 

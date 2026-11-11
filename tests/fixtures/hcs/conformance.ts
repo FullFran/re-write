@@ -42,9 +42,9 @@ const runners: Record<string, (value: HcsCase) => void> = {
     assert.equal(validateEntryStatus(value.input).length === 0 ? 'valid' : 'invalid', value.expect.outcome);
   },
   integrity: value => {
-    const { entry, contentBase64 } = value.input as { entry: PackageExpected; contentBase64: string };
+    const { entry, contentBase64, maxUncompressedBytes } = value.input as { entry: PackageExpected; contentBase64: string; maxUncompressedBytes?: number };
     assert.equal(typeof contentBase64, 'string');
-    const verify = () => verifyPackage(Buffer.from(contentBase64, 'base64'), entry);
+    const verify = () => verifyPackage(Buffer.from(contentBase64, 'base64'), entry, { maxUncompressedBytes });
     if (value.expect.outcome === 'valid') { assert.doesNotThrow(verify); return; }
     assert.equal(value.expect.outcome, 'invalid');
     assert.throws(verify, (error: unknown) => {

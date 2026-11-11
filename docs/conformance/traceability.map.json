@@ -232,6 +232,26 @@
         "tests/hcs-conformance.test.ts"
       ]
     },
+    "HCS-0001-R017": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/catalog.ts"
+      ],
+      "tests": [
+        "tests/hcs-catalog.test.ts",
+        "tests/hcs-conformance.test.ts"
+      ]
+    },
+    "HCS-0001-R018": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/package.ts"
+      ],
+      "tests": [
+        "tests/hcs-package.test.ts",
+        "tests/hcs-conformance.test.ts"
+      ]
+    },
     "HCS-0002-R001": {
       "status": "implemented",
       "code": [
