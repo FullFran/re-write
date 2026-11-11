@@ -409,12 +409,16 @@ test('the refresh anchor is a card on screen, never one inside a folded section'
   assert.deepEqual({ ...ui.viewportAnchor() }, { id: 'reading', top: 120 });
 });
 
-test('the header links to the assistant page only when the embedded engine is enabled', () => {
-  const link = /<a [^>]*href="\/review\/engine"[^>]*>Asistente<\/a>/;
-  assert.doesNotMatch(reviewHtml('https://clerk.example', 'pk_test'), link);
-  assert.doesNotMatch(reviewHtml('https://clerk.example', 'pk_test', { engine: false }), link);
+test('the header opens the assistant panel only when the embedded engine is enabled', () => {
+  const toggle = /<button type="button" id="assistant-toggle" class="header-toggle" aria-controls="assistant" aria-expanded="false">Asistente<\/button>/;
+  for (const html of [reviewHtml('https://clerk.example', 'pk_test'), reviewHtml('https://clerk.example', 'pk_test', { engine: false })]) {
+    assert.doesNotMatch(html, toggle);
+    assert.match(html, /<body>/);
+  }
   const html = reviewHtml('https://clerk.example', 'pk_test', { engine: true });
-  assert.match(html, link);
+  assert.match(html, toggle);
+  assert.match(html, /<body data-assistant>/);
+  assert.doesNotMatch(html, /href="\/review\/engine"/, 'no separate page any more');
   // The sign-in mount point stays where the page script looks for it.
   assert.equal((html.match(/id="user"/g) ?? []).length, 1);
 });

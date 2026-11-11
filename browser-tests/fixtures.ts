@@ -21,8 +21,9 @@ export interface Book {
   git: (...args: string[]) => string;
 }
 
-function start(): Promise<{ child: ChildProcess; info: { base: string; book: string; bookDir: string } }> {
-  const child = spawn(process.execPath, [join(import.meta.dirname, 'server.ts')], { stdio: ['pipe', 'pipe', 'inherit'] });
+function start(engine: boolean): Promise<{ child: ChildProcess; info: { base: string; book: string; bookDir: string } }> {
+  const args = [join(import.meta.dirname, 'server.ts'), ...(engine ? ['--engine'] : [])];
+  const child = spawn(process.execPath, args, { stdio: ['pipe', 'pipe', 'inherit'] });
   return new Promise((resolve, reject) => {
     child.once('exit', (code) => reject(new Error(`test server exited with ${code}`)));
     createInterface({ input: child.stdout! }).on('line', (line) => {
@@ -31,14 +32,16 @@ function start(): Promise<{ child: ChildProcess; info: { base: string; book: str
   });
 }
 
-export const test = base.extend<{ book: Book }>({
+export const test = base.extend<{ book: Book; engine: boolean }>({
+  // A test file sets `test.use({ engine: true })` to get the embedded engine with a stand-in process.
+  engine: [false, { option: true }],
   // Nothing leaves loopback: the page's Clerk scripts come from the fake issuer.
   context: async ({ context }, use) => {
     await context.route((url) => url.hostname !== '127.0.0.1', (route) => route.abort());
     await use(context);
   },
-  book: async ({}, use) => {
-    const { child, info } = await start();
+  book: async ({ engine }, use) => {
+    const { child, info } = await start(engine);
     const home = mkdtempSync(join(tmpdir(), 'rewrite-browser-home-'));
     const env = { PATH: process.env.PATH, HOME: home, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
     const run = (program: string, args: string[]) => {

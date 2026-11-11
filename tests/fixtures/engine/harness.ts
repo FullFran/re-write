@@ -73,8 +73,10 @@ export interface SseEvent { event: string; data: any }
 
 export function parseSse(text: string): SseEvent[] {
   return text.split('\n\n').filter((block) => block.trim()).map((block) => {
-    const event = /^event: (.*)$/m.exec(block)?.[1] ?? '';
-    const data = /^data: (.*)$/m.exec(block)?.[1] ?? 'null';
+    // Lines end only at CR, LF or CRLF (the SSE rule): U+2028 inside JSON is text.
+    const lines = block.split(/\r\n|\r|\n/);
+    const event = lines.find((line) => line.startsWith('event: '))?.slice(7) ?? '';
+    const data = lines.find((line) => line.startsWith('data: '))?.slice(6) ?? 'null';
     return { event, data: JSON.parse(data) };
   });
 }

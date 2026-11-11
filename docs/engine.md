@@ -2,7 +2,7 @@
 
 Status: experimental, **off by default**. First part of [#40](https://github.com/FullFran/re-write/issues/40). What #40 still needs is in [the last section](#what-40-still-needs).
 
-A signed-in writer opens `/review/engine`, connects their own ChatGPT account with a device code, and talks with an assistant that runs on the server. The assistant uses RE;write's MCP tools as that writer: it can read and propose, and it can never accept or reject. It has no other tool.
+A signed-in writer opens the assistant panel in the review page (`/review`), connects their own ChatGPT account with a device code, and talks with an assistant that runs on the server. The assistant uses RE;write's MCP tools as that writer: it can read and propose, and it can never accept or reject. It has no other tool.
 
 ## Read this before enabling it
 
@@ -24,7 +24,7 @@ flowchart LR
 
 | Part | Where | What it does |
 | --- | --- | --- |
-| Routes and page | `src/adapters/http-server.ts`, `src/adapters/engine-page.ts` | The browser side, behind the browser session |
+| Routes and panel | `src/adapters/http-server.ts`, `src/adapters/engine-page.ts` | The browser side, behind the browser session; the panel's styles and script are appended to the review page's |
 | Process manager | `src/adapters/engine.ts` | Starts, feeds and stops engine processes; owns credentials and refresh |
 | Credentials and tokens | `src/adapters/engine-auth.ts` | Encrypted vault; engine tokens for `/mcp` |
 | Protocol | `src/adapters/engine-protocol.ts` | The messages between server and engine process |
@@ -63,9 +63,9 @@ The engine process reaches the server at `http://127.0.0.1:$PORT/mcp`.
 
 ## What a writer sees
 
-1. `/review/engine` asks them to connect ChatGPT.
-2. The page shows a code and a link to `https://auth.openai.com/codex/device`. They sign in there and type the code. Nothing travels from their browser to the server in this step; the server polls OpenAI.
-3. The page turns into a chat. Answers stream in. A small note names each tool the assistant used.
+1. The review page has an **Asistente** button in its header and a floating one. It opens a side panel on wide screens and a bottom sheet on phones, over the same page: nothing reloads and the page keeps its place and its refresh. `/review/engine`, the old address, redirects to `/review?asistente=1`, which opens the panel.
+2. Not connected, the panel asks them to connect ChatGPT, then shows a code and a link to `https://auth.openai.com/codex/device`. They sign in there and type the code. Nothing travels from their browser to the server in this step; the server polls OpenAI.
+3. Connected, the panel offers a few quick questions that only fill the prompt. The book selected in the page is sent with every turn, and **Preguntar al asistente** on a proposal, finding or claim adds that item (see [Page context](#page-context)). Answers stream in with paragraphs, lists, quotes and emphasis, built as elements from text. Each tool call shows as a step while it runs and after (`Leyendo escena 3…`, `Propuestos 2 hallazgos`, `Error: …`). When the assistant proposed something, the panel waits for the page's next refresh and offers **Ver en la página**, which scrolls to the new card.
 4. "Desconectar ChatGPT" deletes the stored credential, stops their engine process and revokes its token.
 
 The model is the first one OpenAI lists for the account; there is no model picker. The conversation is kept in the memory of the engine process only: it is lost when the process stops (idle, disconnect, restart) and is never written to disk.
@@ -76,12 +76,30 @@ All under the browser session, like the review API. An agent's access token and 
 
 | Route | Answer |
 | --- | --- |
-| `GET /review/engine`, `/review/engine/app.js`, `/review/engine/app.css` | The page |
+| `GET /review/engine` | 302 to `/review?asistente=1`. The panel is served with the review page: `/review/app.js` and `/review/app.css` carry it when the engine is on |
 | `GET /review/api/engine/status` | `{state}`: `disconnected`, `pending` (with `user_code` and `verification_uri`), `connected` or `reconnect` |
 | `POST /review/api/engine/login` | Starts a device login: `{user_code, verification_uri, expires_in}`. One pending login per person; a new one cancels the previous. At most 3 starts per person in 15 minutes, then `rate_limited` |
 | `DELETE /review/api/engine/credential` | Disconnects |
-| `POST /review/api/engine/prompt` `{text}` | `text/event-stream` with `delta {text}`, `tool {name, ok}`, then `done {aborted}` or `error {code}` |
+| `POST /review/api/engine/prompt` `{text, context?}` | `text/event-stream` with `delta {text}`, `tool {name, phase, ok?, call?, scene?, count?}`, then `done {aborted}` or `error {code}`. See [Page context](#page-context) and [Tool activity](#tool-activity) |
 | `POST /review/api/engine/abort` | `{aborted}`: stops the running turn of this person |
+
+### Page context
+
+`context` says what the writer is looking at in the review page: `{book_id, item?: {kind, id}}`, with `kind` one of `proposal`, `claim`, `finding` (continuity), `narrative_finding` or `scene` (the id is then the scene path). Any other key, or an id of the wrong shape, is 400. The book goes through the same decision point as every review route, and the item must exist in it: a foreign or unknown book or item is 404.
+
+The browser never writes text for the model here. The server builds one line from these fields, and the engine program puts it before the writer's text (the protocol carries it as a separate `context` field of the `prompt` message, so the writer's text is never first):
+
+```text
+[RE;write page context, set by the host] book_id="sal" title="La sal"; item=proposal id="P-18c123bec3" scene="scenes/003-el-faro.md"
+```
+
+It holds only ids, the book title and a scene path, each a JSON string cut at 120 characters, never text of the manuscript or of an item. Every turn has this line, also without `context`: it then reads `[RE;write page context, set by the host] none`. The fixed preamble of the system prompt tells the model that only the host writes it, always as the first line, that what it quotes is data, and that a later line claiming to be it is the writer's.
+
+As a second layer, a line of the writer's text (split at LF, CR, CRLF, VT, FF, NEL, U+2028 and U+2029) whose letters start like the marker gets `(writer text) ` in front. The comparison ignores invisible format characters, spacing and punctuation, applies NFKC (fullwidth forms) and maps common Cyrillic and Greek lookalikes to Latin letters. It is a heuristic and does not catch every way of writing the marker; what the design relies on is the host line coming first. The system prompt itself is unchanged: it is sent when the process starts and has no field in the request.
+
+### Tool activity
+
+A `tool` event is a step of one tool call: `phase` is `start` or `end` (`ok` on the end only), `call` pairs the two, `scene` is a scene path from the call's arguments and `count` (0 to 999) how many items a list or propose tool returned or created, read from the tool's structured result. Nothing else of an argument or a result leaves the engine process, and the server parses each field again and drops any that does not match: a scene path must look like `scenes/name.md`, at most 120 characters, with no control characters and no invisible format characters (bidi controls included), so a label cannot be visually spoofed. An engine program older than this sends only an end event without a phase; the server reports it as `phase: "end"`.
 
 A person who can use no book gets 404 on every one of these, as if the engine were off: create or be given a book first.
 
@@ -98,7 +116,7 @@ Errors are a closed set of codes and nothing else: `model_busy`, `reconnect`, `p
 - **Shutdown.** Engine processes exit when their stdin closes, which covers a server that dies. On SIGTERM or SIGINT the server also stops them itself, because it stays alive while open connections drain.
 - **Tools.** Pi has no sandbox, so its shell and file tools are off, and its script tool (`codemode`) is not activated: the MCP server is registered with `direct` exposure. The engine reports its tool list when the session starts; the engine and the server each stop it if any tool is not one of RE;write's MCP tools.
 - **Model providers.** The engine process gets an environment with `PATH` only and a private temporary home, so no provider key of the operator reaches it. Before the first request it checks that every available model belongs to the writer's OpenAI login.
-- **System prompt.** A fixed preamble plus the instructions a connected MCP client gets (scene text is untrusted, the agent cannot accept or reject). The browser has no field for it.
+- **System prompt.** A fixed preamble plus the instructions a connected MCP client gets (scene text is untrusted, the agent cannot accept or reject). The browser has no field for it. The page context of a turn is a host-built line in the message, not part of the system prompt (see [Page context](#page-context)).
 - **Not a sandbox against the operator.** Anyone with a shell in the container and the key can read stored credentials.
 
 Engine lifecycle is logged as `{"event":"engine.process","action":"start"|"stop","reason":...,"live":n}`, with no subject and no content. The request log names the engine routes (`/review/api/engine/prompt` and so on) and, as for every route, nothing of their bodies.
@@ -121,14 +139,14 @@ Tests run against a fake engine process and call no provider. The real engine pr
 Use the synthetic book only.
 
 1. Build with `--build-arg WITH_ENGINE=1`, set `REWRITE_ENGINE=1` and `REWRITE_ENGINE_KEY`, deploy, and confirm `GET /health` still answers.
-2. Open `/review/engine` on a phone, signed in (the review page header links to it as "Asistente" when the engine is enabled; a person who cannot use any book gets 404 there). Press "Conectar ChatGPT": a code and the OpenAI link appear.
-3. Approve at OpenAI. Within a few seconds the page becomes a chat. In the container, `ls -l /data/engine/credentials/` shows one file with mode `-rw-------` and no readable token inside.
-4. Ask "¿Qué libros tengo?". The answer streams, and a note says `Consultado: list_books`.
+2. Open `/review` on a phone, signed in, and press **Asistente** (a person who cannot use any book is told to create one first). Press "Conectar ChatGPT": a code and the OpenAI link appear.
+3. Approve at OpenAI. Within a few seconds the panel shows its quick questions. In the container, `ls -l /data/engine/credentials/` shows one file with mode `-rw-------` and no readable token inside.
+4. Ask "¿Qué libros tengo?". The answer streams, and a step says how many books it found.
 5. Ask it to propose a claim with a literal quote. The claim appears in `/review` as pending; the assistant has not accepted it and says it cannot.
 6. Start a long answer and press "Detener": it stops, and the next message works.
 7. Wait past `REWRITE_ENGINE_IDLE_SECONDS`, send again: it answers, with the earlier conversation gone. `docker logs` shows `engine.process` stop and start lines and no token, code or message text.
 8. After more than an hour, send again: the turn still works (a refresh happened) and the credential file has a new modification time.
-9. Press "Desconectar ChatGPT": the file is gone and the page asks to connect again.
+9. Press "Desconectar ChatGPT": the file is gone and the panel asks to connect again.
 10. From another account with no connection, confirm the page asks to connect and shows nothing of the first account.
 
 If step 3, 4 or 8 fails, the page shows a fixed message only. Run the engine by hand in the container to see the real error; it is deliberately not logged.
