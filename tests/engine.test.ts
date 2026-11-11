@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import { connect as connectSocket } from 'node:net';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { CredentialVault } from '../src/adapters/engine-auth.ts';
-import { parseChildMessage } from '../src/adapters/engine-protocol.ts';
+import { parseChildMessage, selectModel } from '../src/adapters/engine-protocol.ts';
 import { ASSISTANT_CSS, ASSISTANT_JS } from '../src/adapters/engine-page.ts';
 import { REVIEW_CSS, REVIEW_JS } from '../src/adapters/review-page.ts';
 import { readConfig } from '../src/adapters/http-server.ts';
@@ -606,16 +607,20 @@ test('the request log names the engine routes and carries nothing else about the
   const token = await connect(eh);
   await turn(eh, token, 'echo secreto del manuscrito');
   await eh.api('POST', '/abort', token);
+  await eh.api('GET', '/settings', token);
+  await eh.api('PUT', '/settings', token, { effort: 'high' });
+  await eh.api('POST', '/reset', token);
   await eh.api('DELETE', '/credential', token);
   await fetch(`${eh.base}/review/engine`);
   await fetch(`${eh.base}/review/engine/app.js`);
   await fetch(`${eh.base}/review/engine/app.css`);
   await eh.api('GET', '/unknown-thing', token);
-  await until(() => lines.filter((line) => line.includes('"http.request"')).length >= 9);
+  await until(() => lines.filter((line) => line.includes('"http.request"')).length >= 12);
   const routes = lines.filter((line) => line.includes('"http.request"')).map((line) => JSON.parse(line)).map((r) => `${r.method} ${r.route} ${r.door}`);
   for (const expected of ['POST /review/api/engine/login review', 'GET /review/api/engine/status review', 'POST /review/api/engine/prompt review',
     'POST /review/api/engine/abort review', 'DELETE /review/api/engine/credential review', 'GET /review/engine review',
-    'GET /review/engine/app.js review', 'GET /review/engine/app.css review', 'GET unmatched review']) {
+    'GET /review/engine/app.js review', 'GET /review/engine/app.css review', 'GET unmatched review',
+    'GET /review/api/engine/settings review', 'PUT /review/api/engine/settings review', 'POST /review/api/engine/reset review']) {
     assert.ok(routes.includes(expected), expected);
   }
   assert.ok(!lines.join('\n').includes('secreto'));
@@ -852,4 +857,43 @@ test('a new conversation with no engine process running has nothing to clear and
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { reset: true });
   assert.equal(eh.engine.liveCount(), 0);
+});
+
+test('the engine program picks a model from the allowlist at the point of use, whatever list it cached', () => {
+  const account = [{ id: 'gpt-a' }, { id: 'gpt-b' }, { id: 'gpt-c' }];
+  assert.equal(selectModel(account, undefined, 'gpt-b')?.id, 'gpt-b');
+  assert.equal(selectModel(account, undefined, 'gpt-gone')?.id, 'gpt-a', 'unset allowlist: the first of the account');
+  assert.equal(selectModel(account, undefined, undefined)?.id, 'gpt-a');
+  assert.equal(selectModel(account, ['gpt-c', 'gpt-b'], 'gpt-a')?.id, 'gpt-b', 'a wanted model outside the allowlist is never used');
+  assert.equal(selectModel(account, ['gpt-c'], undefined)?.id, 'gpt-c');
+  assert.equal(selectModel(account, ['gpt-z'], 'gpt-a'), undefined, 'nothing allowed: no model, never the first of the account');
+  assert.equal(selectModel([], undefined, 'gpt-a'), undefined);
+});
+
+test('a model list over the cap answers at once with a fixed code instead of waiting for the reply timeout', async (t) => {
+  const eh = await startEngineHarness({ models: Array.from({ length: 300 }, (_, i) => ({ id: `m${i}` })) }, { replyTimeoutMs: 30_000 });
+  t.after(eh.close);
+  const fran = await connect(eh);
+  const started = Date.now();
+  const res = await eh.api('GET', '/settings', fran);
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).error, 'engine_unavailable');
+  assert.ok(Date.now() - started < 5_000, 'no wait for the timeout');
+  assert.deepEqual(parseChildMessage({ type: 'models', id: 'm-1', models: 'not a list' }), { type: 'models.failed', id: 'm-1', code: 'engine_unavailable' });
+});
+
+test('settings that cannot be written answer a fixed code, and reading them falls back to the defaults', async (t) => {
+  const eh = await startEngineHarness();
+  t.after(eh.close);
+  const fran = await connect(eh);
+  const hash = createHash('sha256').update('user_fran').digest('hex');
+  mkdirSync(join(eh.h.data, 'engine', 'settings', `${hash}.json`), { recursive: true });
+  const read = await eh.api('GET', '/settings', fran);
+  assert.equal(read.status, 200);
+  assert.equal((await read.json()).effort, 'medium');
+  const res = await eh.api('PUT', '/settings', fran, { effort: 'high' });
+  assert.equal(res.status, 500);
+  const body = await res.json();
+  assert.equal(body.error, 'settings_unavailable');
+  assert.doesNotMatch(JSON.stringify(body), /EISDIR|engine\/settings|internal error/);
 });

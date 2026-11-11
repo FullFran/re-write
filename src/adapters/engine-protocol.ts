@@ -11,6 +11,7 @@
 export const ENGINE_ERROR_CODES = [
   'model_busy', 'reconnect', 'provider_error', 'busy', 'turn_in_progress',
   'not_connected', 'engine_unavailable', 'login_failed', 'rate_limited', 'turn_limit', 'model_unavailable',
+  'settings_unavailable',
 ] as const;
 export type EngineErrorCode = typeof ENGINE_ERROR_CODES[number];
 
@@ -92,6 +93,16 @@ export function parseModelList(value: unknown): ModelInfo[] | null {
     out.push({ id: m.id, name: cleanName(m.name, m.id), reasoning: m.reasoning === true });
   }
   return out;
+}
+
+/**
+ * The model a turn uses: the wanted one if the account offers it and the allowlist allows
+ * it, else the first allowed one; undefined when nothing is allowed. The allowlist is
+ * applied here, at the point of use, whatever list the caller cached before it knew it.
+ */
+export function selectModel<T extends { id: string }>(models: readonly T[], allowed: readonly string[] | undefined, wanted: string | undefined): T | undefined {
+  const usable = allowed ? models.filter((model) => allowed.includes(model.id)) : models;
+  return usable.find((model) => model.id === wanted) ?? usable[0];
 }
 
 export type ParentMessage =
@@ -245,7 +256,8 @@ export function parseChildMessage(value: unknown): ChildMessage | null {
       return { type: 'error', code: toErrorCode(m.code) };
     case 'models': {
       const models = parseModelList(m.models);
-      if (!models) return null;
+      // A list that is not one fails the request it answers at once, rather than at the timeout.
+      if (!models) return id ? { type: 'models.failed', id, code: 'engine_unavailable' } : null;
       return {
         type: 'models', ...(id ? { id } : {}), models,
         ...(typeof m.current === 'string' && MODEL_ID.test(m.current) ? { current: m.current } : {}),

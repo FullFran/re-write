@@ -66,7 +66,7 @@ function routeOf(path: string, resourcePath: string): { route: string; book?: st
     '/.well-known/oauth-protected-resource', `/.well-known/oauth-protected-resource${resourcePath.replace(/\/$/, '')}`];
   if (publicRoutes.includes(path)) return { route: path };
   if (path === '/review/api/books') return { route: path };
-  if (/^\/review\/api\/engine\/(status|login|credential|prompt|abort)$/.test(path)) return { route: path };
+  if (/^\/review\/api\/engine\/(status|login|credential|prompt|abort|settings|reset)$/.test(path)) return { route: path };
   const match = /^\/review\/api\/books\/([^/]+)(.*)$/.exec(path);
   if (!match) return { route: 'unmatched' };
   let book: string;

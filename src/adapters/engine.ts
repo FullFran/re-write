@@ -62,6 +62,7 @@ export const ENGINE_HTTP_STATUS: Record<EngineErrorCode, number> = {
   login_failed: 502,
   turn_limit: 504,
   model_unavailable: 400,
+  settings_unavailable: 500,
 };
 
 export type EngineStatus =
@@ -306,10 +307,15 @@ export class EngineManager {
     const models = await this.catalog(subject);
     if (change.model !== undefined && !models.some((model) => model.id === change.model)) throw new EngineError('model_unavailable');
     const current = this.preferences.read(subject);
-    this.preferences.write(subject, {
-      model: change.model ?? current.model,
-      effort: change.effort ?? current.effort,
-    });
+    try {
+      this.preferences.write(subject, {
+        model: change.model ?? current.model,
+        effort: change.effort ?? current.effort,
+      });
+    } catch {
+      // A full disk, a directory in the way: a fixed code, never the file system's text.
+      throw new EngineError('settings_unavailable');
+    }
     return this.settingsView(subject, models);
   }
 

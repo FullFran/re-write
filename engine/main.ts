@@ -18,7 +18,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import {
   DEVICE_VERIFICATION_URI, encode, LineDecoder, MCP_SERVER_NAME, MCP_TOOL_PREFIX, parseCredential, toolActivity, composePrompt,
-  type ChildMessage, type Effort, type EngineErrorCode, type ModelInfo, type ParentMessage,
+  selectModel, type ChildMessage, type Effort, type EngineErrorCode, type ModelInfo, type ParentMessage,
 } from '../src/adapters/engine-protocol.ts';
 
 const PROVIDER = 'openai-codex';
@@ -282,14 +282,15 @@ async function createSession(start: Extract<ParentMessage, { type: 'start' }>): 
  */
 async function chooseModel(active: AgentSession, wanted: string | undefined, effort: Effort | undefined): Promise<void> {
   const models = catalog ?? await listModels();
-  const pick = models.find((model) => model.id === wanted) ?? models[0];
+  // The allowlist again here: a list cached before `start` arrived was not filtered.
+  const pick = selectModel(models, allowedModels, wanted);
   if (!pick) throw allowedModels ? new NoAllowedModel() : new Reconnect('reconnect');
   if (active.model?.provider !== PROVIDER || active.model.id !== pick.id) await active.setModel(pick);
   // Pi clamps the level to what the model supports.
   if (effort && pick.reasoning) active.setThinkingLevel(effort);
   if (!catalogReported) {
     catalogReported = true;
-    send({ type: 'models', models: models.map(modelInfo), current: pick.id });
+    send({ type: 'models', models: models.filter((model) => !allowedModels || allowedModels.includes(model.id)).map(modelInfo), current: pick.id });
   }
 }
 
@@ -322,7 +323,11 @@ async function prompt(text: string, model?: string, effort?: Effort): Promise<vo
 function handle(message: ParentMessage): void {
   switch (message.type) {
     case 'start':
-      if (!session && Array.isArray(message.allowedModels)) allowedModels = message.allowedModels;
+      if (!session && Array.isArray(message.allowedModels)) {
+        allowedModels = message.allowedModels;
+        // A list asked for before `start` (settings opened first) was not filtered: list again.
+        catalog = undefined;
+      }
       session ??= createSession(message);
       session.catch(() => {});
       return;
