@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { appendFileSync, chmodSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { appendFileSync, chmodSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DECISION_LOG_MAX_BYTES, DECISIONS_FILE, listDecisionLogs, readAllDecisionLogs, readDecisionLog, readDecisionRecords, validateDecisionRecord, writeDecisionRecord } from '../src/hcs/decision-records.ts';
 import { tempDir } from './helpers.ts';
@@ -185,4 +185,59 @@ test('two processes writing and rotating the same directory lose and corrupt no 
     const own = records.filter(r => r.operation!.startsWith(`${name}-`)).map(r => Number(r.operation!.split('-')[1]));
     assert.deepEqual(own, Array.from({ length: perWriter }, (_, i) => i), name);
   }
+});
+
+test('a short write throws instead of returning a torn record, and the next record is still a whole line (HCS-0005-R012)', async () => {
+  const dir = tempDir();
+  const module = join(import.meta.dirname, '../src/hcs/decision-records.ts');
+  // The file size limit makes a write stop part way (then fail with EFBIG), as a full disk would.
+  const script = `
+    process.on('SIGXFSZ', () => {});
+    const { writeDecisionRecord } = await import(${JSON.stringify(module)});
+    const written = [];
+    let error = '';
+    for (let i = 0; i < 100 && !error; i++) {
+      try {
+        written.push(writeDecisionRecord(process.argv[1], { entry: 'dev.example.a', permission: 'dev.example.mail.send', outcome: 'allow',
+          operation: 'call-' + i, decider: { kind: 'grant', id: 'grant-9' }, channel: 'grant-store' }).id);
+      } catch (e) { error = e.code ?? e.message; }
+    }
+    console.log(JSON.stringify({ written, error }));`;
+  const result = await new Promise<{ code: number | null; stdout: string }>((resolve, reject) => {
+    let stdout = '';
+    const child = spawn('sh', ['-c', 'ulimit -f 2 && exec "$0" --input-type=module -e "$1" "$2"', process.execPath, script, dir], { stdio: ['ignore', 'pipe', 'inherit'] });
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.on('error', reject);
+    child.on('exit', code => resolve({ code, stdout }));
+  });
+  assert.equal(result.code, 0);
+  const { written, error } = JSON.parse(result.stdout);
+  assert.equal(error, 'EFBIG', 'the write that does not fit throws');
+  assert.ok(written.length > 0);
+  const size = statSync(join(dir, DECISIONS_FILE)).size;
+  // Every record the writer reported as written is in the file; the one that did not fit is not.
+  const { records, invalid } = readDecisionLog(dir);
+  assert.deepEqual(records.map(r => r.id), written);
+  assert.ok(invalid.length <= 1, 'at most the torn line is invalid');
+  // Without the limit, the next record starts on a line of its own, after the torn one.
+  const next = writeDecisionRecord(dir, fields);
+  const after = readDecisionLog(dir);
+  assert.deepEqual(after.records.map(r => r.id), [...written, next.id]);
+  assert.deepEqual(after.invalid, invalid);
+  assert.ok(statSync(join(dir, DECISIONS_FILE)).size > size);
+});
+
+test('readAllDecisionLogs returns records in the order of their time, whatever file holds them', () => {
+  const dir = tempDir();
+  const at = (id: string, time: string) => JSON.stringify({ ...record, id, time });
+  // A race can leave a later record in a file rotated under an earlier name.
+  writeFileSync(join(dir, 'decisions-20261111T100000.000Z.jsonl'), `${at('r1', '2026-11-11T10:00:02.000Z')}\n${at('t-a', '2026-11-11T10:00:05.000Z')}\n`, { mode: 0o600 });
+  writeFileSync(join(dir, 'decisions-20261111T100001.000Z.jsonl'), `${at('r0', '2026-11-11T10:00:01.000Z')}\n{"torn"\n`, { mode: 0o600 });
+  writeFileSync(join(dir, DECISIONS_FILE), `${at('r2', '2026-11-11T10:00:03.000Z')}\n${at('t-b', '2026-11-11T10:00:05.000Z')}\n${at('t-c', '2026-11-11T10:00:05.000Z')}\n`, { mode: 0o600 });
+  const { records, invalid } = readAllDecisionLogs(dir);
+  // Ties keep file order, then line order.
+  assert.deepEqual(records.map(r => r.id), ['r0', 'r1', 'r2', 't-a', 't-b', 't-c']);
+  assert.deepEqual(invalid, [{ file: 'decisions-20261111T100001.000Z.jsonl', line: 2 }]);
+  // The list of files keeps rotation order.
+  assert.deepEqual(listDecisionLogs(dir), ['decisions-20261111T100000.000Z.jsonl', 'decisions-20261111T100001.000Z.jsonl', DECISIONS_FILE]);
 });

@@ -105,10 +105,20 @@ export function writeDecisionRecord(dir: string, fields: Omit<DecisionRecord, 'i
     const last = Buffer.alloc(1);
     const torn = size > 0 && readSync(fd, last, 0, 1, size - 1) === 1 && last[0] !== 0x0a;
     // One write of one line in append mode: records of concurrent writers do not interleave.
-    writeSync(fd, `${torn ? '\n' : ''}${JSON.stringify(record)}\n`);
+    writeAll(fd, Buffer.from(`${torn ? '\n' : ''}${JSON.stringify(record)}\n`));
     fsyncSync(fd);
   } finally { closeSync(fd); }
   return record;
+}
+
+// A write can stop part way (a file size limit, a full disk). Write the rest or throw, so a record is
+// never reported as written when it is not; the torn part is closed by the next writer.
+function writeAll(fd: number, buffer: Buffer): void {
+  for (let offset = 0; offset < buffer.length;) {
+    const written = writeSync(fd, buffer, offset, buffer.length - offset);
+    if (written <= 0) throw new Error('Short write to the decision log');
+    offset += written;
+  }
 }
 
 function configuredMaxBytes(): number {
@@ -209,8 +219,9 @@ export function listDecisionLogs(dir: string): string[] {
 }
 
 /**
- * Reads every decision log of `<dir>` (see `listDecisionLogs`), oldest first, like `readDecisionLog`
- * reads the current one; an invalid line is reported by file name and 1-based line number.
+ * Reads every decision log of `<dir>` (see `listDecisionLogs`) like `readDecisionLog` reads the
+ * current one: the records sorted by `time` (ties in file order, then line order), and each invalid
+ * line by file name and 1-based line number.
  */
 export function readAllDecisionLogs(dir: string): { records: DecisionRecord[]; invalid: Array<{ file: string; line: number }> } {
   const records: DecisionRecord[] = [];
@@ -220,6 +231,9 @@ export function readAllDecisionLogs(dir: string): { records: DecisionRecord[]; i
     records.push(...log.records);
     invalid.push(...log.invalid.map(line => ({ file, line })));
   }
+  // Concurrent rotation can leave a later record in a file rotated under an earlier name, so file
+  // names do not order records. The sort is stable: equal times keep file order, then line order.
+  records.sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
   return { records, invalid };
 }
 
