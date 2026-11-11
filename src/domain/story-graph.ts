@@ -653,24 +653,44 @@ export function pageRank(graph: StoryGraph, damping = 0.85): Map<string, number>
   const ids = graph.nodes.map((node) => node.id);
   const n = ids.length;
   const index = new Map(ids.map((id, i) => [id, i]));
-  const outSets = ids.map(() => new Set<number>());
+  // Outgoing arcs as one flat list per node (CSR), each distinct (from, to) once.
+  const seen = new Set<number>();
+  const arcFrom: number[] = [];
+  const arcTo: number[] = [];
+  const addArc = (from: number, to: number) => {
+    if (seen.has(from * n + to)) return;
+    seen.add(from * n + to);
+    arcFrom.push(from);
+    arcTo.push(to);
+  };
   for (const edge of graph.edges) {
     const from = index.get(edge.from);
     const to = index.get(edge.to);
     if (from === undefined || to === undefined || from === to) continue;
-    outSets[from].add(to);
-    if (edge.kind === 'cooccurs') outSets[to].add(from);
+    addArc(from, to);
+    if (edge.kind === 'cooccurs') addArc(to, from);
   }
-  const out = outSets.map((set) => [...set]);
+  const degree = new Int32Array(n);
+  for (const from of arcFrom) degree[from] += 1;
+  const first = new Int32Array(n + 1);
+  for (let i = 0; i < n; i += 1) first[i + 1] = first[i] + degree[i];
+  const fill = first.slice(0, n);
+  const targets = new Int32Array(arcFrom.length);
+  for (let k = 0; k < arcFrom.length; k += 1) targets[fill[arcFrom[k]]++] = arcTo[k];
   let rank = new Float64Array(n).fill(1 / n);
+  let next = new Float64Array(n);
   for (let iteration = 0; iteration < 100 && n > 0; iteration += 1) {
     let dangling = 0;
-    for (let i = 0; i < n; i += 1) if (out[i].length === 0) dangling += rank[i];
-    const next = new Float64Array(n).fill((1 - damping) / n + (damping * dangling) / n);
-    for (let i = 0; i < n; i += 1) for (const to of out[i]) next[to] += (damping * rank[i]) / out[i].length;
+    for (let i = 0; i < n; i += 1) if (degree[i] === 0) dangling += rank[i];
+    next.fill((1 - damping) / n + (damping * dangling) / n);
+    for (let i = 0; i < n; i += 1) {
+      if (degree[i] === 0) continue;
+      const share = (damping * rank[i]) / degree[i];
+      for (let k = first[i]; k < first[i + 1]; k += 1) next[targets[k]] += share;
+    }
     let change = 0;
     for (let i = 0; i < n; i += 1) change += Math.abs(next[i] - rank[i]);
-    rank = next;
+    [rank, next] = [next, rank];
     if (change < 1e-12) break;
   }
   return new Map(ids.map((id, i) => [id, round6(rank[i])]));
