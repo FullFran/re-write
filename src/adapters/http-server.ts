@@ -30,6 +30,7 @@ import { inspectNotion, loadNotionChapters, parseNotionMapping, type NotionMappi
 import { chapterFilename, convertToMarkdown, importBook } from '../application/book-import.ts';
 import { SCENE_EDIT } from '../application/decision.ts';
 import { SceneConflictError, SceneEditRefusal, SceneNotFoundError } from '../application/project.ts';
+import { notesSummary, noteView } from '../application/story.ts';
 import { InvalidSceneTextError, MAX_SCENE_BYTES } from '../domain/scene-text.ts';
 
 export interface ServerConfig {
@@ -621,6 +622,47 @@ export function createHandler(
         // Anything else is a failure to write or commit (for example a held git lock): the book is
         // back as it was, and git's own text, which can quote the commit message, stays out.
         return problem(res, 409, 'No se pudo guardar la escena y no se ha cambiado nada. Inténtalo de nuevo.');
+      }
+    }
+
+    // Book notes (notas/): read by members, edited by a person like a scene. Agents propose notes over MCP.
+    if (parts.length === 3 && parts[2] === 'notes' && req.method === 'GET') {
+      return json(res, 200, notesSummary(open(READ)));
+    }
+
+    if (parts.length >= 4 && parts[2] === 'notes' && req.method === 'GET') {
+      const project = open(READ);
+      try {
+        return json(res, 200, noteView(project, parts.slice(3).join('/')));
+      } catch (error) {
+        if (error instanceof HcsFailure) throw error;
+        throw new HttpError(404, 'not found');
+      }
+    }
+
+    if (parts.length >= 4 && parts[2] === 'notes' && req.method === 'POST') {
+      const name = parts.slice(3).join('/');
+      const project = open(SCENE_EDIT);
+      try {
+        if (project.readNote(name) === null) throw new HttpError(404, 'not found');
+      } catch (error) {
+        throw error instanceof HttpError ? error : new HttpError(404, 'not found');
+      }
+      const body = (await readBody(req, 6 * MAX_SCENE_BYTES + 65_536) ?? {}) as { text?: unknown; base_blob?: unknown };
+      if (typeof body.text !== 'string' || typeof body.base_blob !== 'string') {
+        throw new HttpError(400, 'text and base_blob are required');
+      }
+      try {
+        return json(res, 200, project.editNote({ name, base_blob: body.base_blob, text: body.text, by: subject }));
+      } catch (error) {
+        if (error instanceof InvalidSceneTextError) throw new HttpError(400, error.message);
+        if (error instanceof SceneConflictError) {
+          return json(res, 409, { error: error.message, current: { text: error.text, blob: error.blob } });
+        }
+        if (error instanceof SceneNotFoundError) throw new HttpError(404, 'not found');
+        if (error instanceof SceneEditRefusal) return problem(res, 409, library.publicMessage(error));
+        if (error instanceof HttpError || error instanceof HcsFailure) throw error;
+        return problem(res, 409, 'No se pudo guardar la nota y no se ha cambiado nada. Inténtalo de nuevo.');
       }
     }
 

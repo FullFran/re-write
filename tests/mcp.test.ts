@@ -168,8 +168,9 @@ test('the MCP offers reading and proposing, and no way to accept or reject', asy
   const client = await connect(lib, 'user_fran');
   const names = (await client.listTools()).tools.map((t) => t.name).sort();
   assert.deepEqual(names, [
-    'get_analysis_guide', 'get_proposal', 'inspect_continuity', 'list_books', 'list_claims', 'list_findings', 'list_proposals', 'list_scenes',
-    'propose_claims', 'propose_findings', 'propose_revision', 'read_scene',
+    'get_analysis_guide', 'get_proposal', 'graph_central', 'graph_neighbors', 'graph_orphans', 'graph_path', 'inspect_continuity',
+    'list_books', 'list_claims', 'list_findings', 'list_notes', 'list_proposals', 'list_scenes',
+    'propose_claims', 'propose_findings', 'propose_note', 'propose_revision', 'read_note', 'read_scene',
   ]);
   assert.ok(!names.some((name) => /review|accept|reject|apply|verdict/.test(name)));
 });

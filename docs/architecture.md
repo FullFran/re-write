@@ -78,10 +78,11 @@ Capabilities are named by contract, not by package (HCS-0002). Host built-ins ar
 | `com.fullfran.rewrite.book.read@1` | 1 | host | Read books and scenes: `list_books`, `list_scenes`, `read_scene` |
 | `com.fullfran.rewrite.claims.read@1` | 1 | host | Read claims: `list_claims` |
 | `com.fullfran.rewrite.claims.propose@1` | 1 | host | Propose claims: `propose_claims` |
-| `com.fullfran.rewrite.revision.propose@1` | 1 | host | Propose revisions and inspect proposals: `propose_revision`, `list_proposals`, `get_proposal` |
+| `com.fullfran.rewrite.revision.propose@1` | 1 | host | Propose revisions of scenes and notes, propose new notes, and inspect proposals: `propose_revision`, `list_proposals`, `get_proposal`, `propose_note` |
 | `com.fullfran.rewrite.continuity.check@1` | 1 | host, until extraction to `com.fullfran.rewrite.knowledge-order` | Inspect continuity: `inspect_continuity` |
 | `com.fullfran.rewrite.findings.read@1` | 1 | host | Read narrative findings and analysis guide: `list_findings`, `get_analysis_guide` |
 | `com.fullfran.rewrite.findings.propose@1` | 1 | host | Propose narrative findings: `propose_findings` |
+| `com.fullfran.rewrite.notes.read@1` | 1 | host | Read book notes, their links and backlinks, and the story graph ([notes-and-graph.md](notes-and-graph.md)): `list_notes`, `read_note`, `graph_neighbors`, `graph_orphans`, `graph_path`, `graph_central` |
 | `com.fullfran.rewrite.claims.extract@1` | 1 | package (`x-rewrite-extractor`) | Extract claim candidates: none yet (CLI `extract`) |
 | `com.fullfran.rewrite.entities.read@1` | 1 | host (planned, [#12](https://github.com/FullFran/re-write/issues/12)) | Read entities: none yet |
 | `com.fullfran.rewrite.events.read@1` | 1 | host (planned, [#15](https://github.com/FullFran/re-write/issues/15)) | Read events: none yet |

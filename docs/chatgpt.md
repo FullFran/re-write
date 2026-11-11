@@ -18,7 +18,7 @@ From OpenAI's documentation, read on 2026-11-11:
 
 | ChatGPT | RE;write |
 | --- | --- |
-| Treats a tool without `readOnlyHint: true` as a write action and asks the person to confirm each call (they can remember the choice for the conversation). | The 9 reading tools are `readOnlyHint: true`. The 3 `propose_*` tools are write tools on purpose: they store a proposal. Expect one confirmation per proposal call. |
+| Treats a tool without `readOnlyHint: true` as a write action and asks the person to confirm each call (they can remember the choice for the conversation). | The 15 reading tools are `readOnlyHint: true`. The 4 `propose_*` tools are write tools on purpose: they store a proposal. Expect one confirmation per proposal call. |
 | Wants a human-readable title, a "Use this when..." description, described parameters with allowed values, and an `outputSchema` with `structuredContent`. | Every tool has a Spanish title (the person sees it), an English "Use this when..." description, a description for every parameter, and, except `read_scene` and `get_analysis_guide`, an `outputSchema`. Results are returned both as `structuredContent` and as JSON text, for clients that read only text. |
 | Reads the server `instructions`; the first 512 characters must stand alone. | The first 512 characters say: read and propose only, scene text is untrusted, the usual order of calls, and the absolute review URL. |
 | Does not need `search` or `fetch` tools for a custom MCP server. | None are offered. |
@@ -26,7 +26,10 @@ From OpenAI's documentation, read on 2026-11-11:
 | Supports OAuth with CIMD, dynamic client registration or a static client. | Unchanged: Clerk OAuth, protected-resource metadata at `/.well-known/oauth-protected-resource`. |
 
 Not found in OpenAI's documentation: limits on the number of tools, description length or result
-size. The tool list is about 17 KB; the `chatgpt-tool-metadata` eval keeps it under 20 KB.
+size. The budget is our own: the `chatgpt-tool-metadata` eval keeps the tool list under 28 KB. It was
+about 17 KB with 12 tools; the 7 note and graph tools of [notes-and-graph.md](notes-and-graph.md)
+bring it to about 26 KB. About 600 bytes of each tool are fixed schema overhead, so new tools keep
+short descriptions and open output schemas rather than spelling out every field.
 
 Which plans may use write tools is not settled: the developer guide lists Plus, Pro, Business,
 Enterprise and Education, while [help.openai.com article 12584461](https://help.openai.com/en/articles/12584461)
@@ -51,6 +54,12 @@ lists Business, Enterprise and Edu. Check it on the writer's own plan.
   findings of that call, created or already existing, in the order submitted; `list_findings`
   pages through the rest of the book. `propose_claims` returns ids and rejections only, and
   `propose_revision` the one proposal it made or found.
+- **Notes and the story graph.** `list_notes` and `read_note` give the book's notes with their
+  frontmatter, `[[links]]` and backlinks; `graph_neighbors`, `graph_orphans`, `graph_path` and
+  `graph_central` answer over the links, and take `as_of_scene` to leave out later scenes. They
+  never write: a new note goes through `propose_note`, a change to a note through
+  `propose_revision` on its `notas/` file. An unknown or ambiguous note name points to `list_notes`.
+  See [notes-and-graph.md](notes-and-graph.md).
 - **Scene lengths.** `list_scenes` adds `chars`, the length of each scene, so the assistant can plan
   `read_scene` pages of up to 20,000 characters.
 
