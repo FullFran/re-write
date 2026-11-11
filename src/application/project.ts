@@ -10,12 +10,37 @@ import {
 } from '../domain/claim.ts';
 import { verdictFields, CONTINUITY_VERDICTS, InvalidFindingVerdictError, inspectContinuity, type Finding, type Verdict, type VerdictHistoryEntry, type VerdictKind } from '../domain/continuity.ts';
 import { applyChange, inverseChange, proposalId, type Proposal } from '../domain/proposal.ts';
+import { checkSceneText, isExactUtf8 } from '../domain/scene-text.ts';
 import {
   NARRATIVE_VERDICTS, findingId, viewFinding,
   type FindingCandidate, type FindingRecord, type FindingView,
 } from '../domain/finding.ts';
 
 const SCENES_DIR = 'scenes';
+
+/**
+ * A person's edit was based on a version of the scene that is no longer the current one
+ * (another tab saved, or a proposal was accepted meanwhile). Nothing was written; the
+ * current text and its version travel with the refusal so the person can compare.
+ */
+export class SceneConflictError extends Error {
+  readonly text: string;
+  readonly blob: string;
+  constructor(file: string, text: string, blob: string) {
+    super(`${file} changed since you opened it; nothing was saved`);
+    this.name = 'SceneConflictError';
+    this.text = text;
+    this.blob = blob;
+  }
+}
+
+export interface SceneEdit {
+  file: string;
+  /** The version of the scene the person started from: the blob the scene read returned. */
+  base_blob: string;
+  text: string;
+  by: string;
+}
 /** A markdown file directly inside scenes: never the directory itself, which git can also show. */
 const SCENE_FILE = /^scenes\/[^/]+\.md$/;
 
@@ -420,6 +445,35 @@ export class Project {
       (rev, file) => this.git.showAt(rev, file),
     );
     return { ...view, ...verdictFields(this.verdicts.get(f.finding_id)) };
+  }
+
+  /**
+   * A person's own edit of a scene, the only write that does not come from an accepted
+   * proposal. It applies only on top of the version the person started from, so it never
+   * overwrites a change that landed meanwhile, and it goes into one commit that touches
+   * only the scene. Saving the same text makes no commit.
+   */
+  editScene(edit: SceneEdit): { file: string; blob: string; revision: string; changed: boolean } {
+    const file = this.scenePath(edit.file);
+    const path = join(this.dir, file);
+    if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`scene not found: ${file}`);
+    checkSceneText(edit.text);
+    const raw = readFileSync(path);
+    if (!isExactUtf8(raw)) throw new Error(`${file} is not valid UTF-8 text, so it cannot be edited here`);
+    if (this.git.isDirty(file)) throw new Error(`${file} has uncommitted edits; commit them before editing the scene`);
+    const current = raw.toString('utf8');
+    const blob = this.git.blobOf(file);
+    if (blob !== edit.base_blob) throw new SceneConflictError(file, current, blob);
+    if (edit.text === current) return { file, blob, revision: this.git.head(), changed: false };
+    try {
+      writeFileSync(path, edit.text);
+      this.git.commit(`rewrite: edit ${file}\n\nEdited-by: ${edit.by}`, [file]);
+    } catch (error) {
+      writeFileSync(path, raw);
+      this.git.tryRun('reset', '-q', '--', file);
+      throw error;
+    }
+    return { file, blob: this.git.blobOf(file), revision: this.git.head(), changed: true };
   }
 
   /** Stores a change for review. It never writes to the scene. */

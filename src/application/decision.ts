@@ -32,9 +32,16 @@ export type BookDecision =
   | { allow: false; reason: 'permission-denied'; error: HcsError }
   | { allow: false; reason: 'forbidden'; detail: string };
 
+/**
+ * A person editing the text of a scene directly. Like review decisions it is reachable only
+ * through the review door and only by a person: agents and packages propose, they never write.
+ */
+export const SCENE_EDIT = 'com.fullfran.rewrite.scene.edit';
+
 const MCP_PERMISSIONS: readonly string[] = REWRITE_PERMISSIONS;
 const REVIEW_PERMISSIONS: readonly string[] = [
   REVIEW_DECIDE,
+  SCENE_EDIT,
   'com.fullfran.rewrite.book.read',
   'com.fullfran.rewrite.book.import',
   BOOK_CREATE,
