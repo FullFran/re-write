@@ -69,3 +69,13 @@ Target domain: `https://rewrite.fullfran.com`
 - [ ] Submit a 2,000-character note and confirm it is retained in full after reloading.
 - [ ] Enter or paste 2,001 characters. Confirm the text is not cut and submitting reports **La nota supera el límite de 2000 caracteres.** without recording a rating.
 - [ ] Repeat proposal accept/reject inside the scene viewer: the scene stays open and the acted-on card shows its new Spanish state.
+
+## 8. Live Refresh Without a Reload
+
+The page asks for the review queue again every 5 seconds while its tab is visible; an unchanged queue is answered with `304 Not Modified`.
+
+- [ ] Keep the page open and create a proposal for the synthetic book from a connected assistant (or the CLI). Confirm it appears under **Cambios propuestos** within a few seconds, without reloading and without the page scrolling away from what you were reading.
+- [ ] Open a scene with two pending proposals on the same passage. In a second tab, accept one. Confirm that in the first tab, without reloading, the other card shows **No aplicable: la escena ha cambiado**, loses **Aceptar cambio**, and the accepted one appears under **Historial de cambios del manuscrito**.
+- [ ] Type a note on a narrative finding and do not submit it. Change the queue from the second tab. Confirm the note is intact, the queue did not change under you, and the page says **Hay novedades en este libro…**. Submit or clear the note and confirm the news appears.
+- [ ] Open the account menu (top right) and change the queue from the second tab. Confirm the page waits until the menu is closed, then refreshes.
+- [ ] With the browser's network panel open, switch to another tab for a minute. Confirm no request to `/review/api/books/{book}` was made while hidden, and that one is made as soon as you return.
