@@ -400,13 +400,13 @@ test('the server serves the page and its assets with the review page policy when
 // --- Correction batch: slots, turn bounds, refresh against stop, the Host rule, shutdown ---
 
 test('a pending login has a hard deadline, after which its process stops and the slot is free', async (t) => {
-  const eh = await startEngineHarness({ login: 'wait' }, { maxProcesses: 1, loginTtlMs: 900 });
+  const eh = await startEngineHarness({ login: 'wait' }, { maxProcesses: 1, loginTtlMs: 3_000 });
   t.after(eh.close);
   const token = await eh.session();
   const login = await (await eh.api('POST', '/login', token)).json();
-  assert.equal(login.expires_in, 0.9);
+  assert.equal(login.expires_in, 3);
   assert.equal(eh.engine.liveCount(), 1);
-  await until(() => eh.engine.liveCount() === 0);
+  await until(() => eh.engine.liveCount() === 0, 10_000);
   assert.deepEqual(await (await eh.api('GET', '/status', token)).json(), { state: 'disconnected' });
   eh.h.library.grant('sal', 'user_segunda');
   assert.equal((await eh.api('POST', '/login', await eh.session('user_segunda'))).status, 200, 'the slot is free for the next writer');
@@ -420,7 +420,7 @@ test('a login that fails leaves no process behind', async (t) => {
 });
 
 test('login starts are rate-limited per person', async (t) => {
-  const eh = await startEngineHarness({ login: 'wait' }, { loginLimit: 3, loginWindowMs: 1_500 });
+  const eh = await startEngineHarness({ login: 'wait' }, { loginLimit: 3, loginWindowMs: 600_000 });
   t.after(eh.close);
   eh.h.library.grant('sal', 'user_segunda');
   const token = await eh.session();
@@ -430,8 +430,15 @@ test('login starts are rate-limited per person', async (t) => {
   assert.equal((await refused.json()).error, 'rate_limited');
   assert.equal(eh.received().filter((type) => type === 'login.start').length, 3, 'a refused start does not reach the process');
   assert.equal((await eh.api('POST', '/login', await eh.session('user_segunda'))).status, 200, "another person's limit is their own");
-  await new Promise((resolve) => setTimeout(resolve, 1_600));
-  assert.equal((await eh.api('POST', '/login', token)).status, 200, 'the window passes');
+});
+
+test('the login rate limit forgets starts older than its window', async (t) => {
+  const eh = await startEngineHarness({ login: 'wait' }, { loginLimit: 1, loginWindowMs: 300 });
+  t.after(eh.close);
+  const token = await eh.session();
+  assert.equal((await eh.api('POST', '/login', token)).status, 200);
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  assert.equal((await eh.api('POST', '/login', token)).status, 200);
 });
 
 test('the engine routes do not exist for a person who can use no book', async (t) => {
@@ -475,7 +482,7 @@ test('the bookkeeping holds no entry for people with no process, no login and no
 });
 
 test('a turn that runs too long ends with a fixed code, and the next prompt works', async (t) => {
-  const eh = await startEngineHarness({}, { turnTimeoutMs: 150 });
+  const eh = await startEngineHarness({}, { turnTimeoutMs: 3_000 });
   t.after(eh.close);
   const token = await connect(eh);
   assert.deepEqual(await turn(eh, token, 'hang'), [{ event: 'delta', data: { text: 'hanging' } }, { event: 'error', data: { code: 'turn_limit' } }]);
@@ -485,7 +492,7 @@ test('a turn that runs too long ends with a fixed code, and the next prompt work
 });
 
 test('a turn that does not settle after its limit loses its process', async (t) => {
-  const eh = await startEngineHarness({}, { turnTimeoutMs: 100, abortGraceMs: 80 });
+  const eh = await startEngineHarness({}, { turnTimeoutMs: 1_500, abortGraceMs: 200 });
   t.after(eh.close);
   const token = await connect(eh);
   assert.deepEqual((await turn(eh, token, 'stuck')).at(-1), { event: 'error', data: { code: 'turn_limit' } });

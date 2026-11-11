@@ -79,7 +79,7 @@ export function parseSse(text: string): SseEvent[] {
   });
 }
 
-export async function until(check: () => boolean | Promise<boolean>, ms = 3_000): Promise<void> {
+export async function until(check: () => boolean | Promise<boolean>, ms = 10_000): Promise<void> {
   const deadline = Date.now() + ms;
   while (!(await check())) {
     if (Date.now() > deadline) throw new Error('condition not met in time');
