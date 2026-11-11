@@ -548,7 +548,7 @@ function findingCard(book, finding, reload) {
   if (finding.verdict) card.append(el('p', 'Decisión: ' + (VERDICTS[finding.verdict.verdict] || finding.verdict.verdict), 'meta'));
   const actions = el('div', undefined, 'actions');
   for (const [verdict, label] of Object.entries(VERDICTS)) {
-    actions.append(button(label, '', () => api('/books/' + book + '/findings/' + finding.finding_id, { verdict }).then(reload)));
+    actions.append(button(label, '', () => api('/books/' + book + '/findings/' + finding.finding_id, { verdict }).then(() => reload())));
   }
   card.append(actions);
   return card;

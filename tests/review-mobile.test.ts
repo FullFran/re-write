@@ -418,3 +418,15 @@ test('the header links to the assistant page only when the embedded engine is en
   // The sign-in mount point stays where the page script looks for it.
   assert.equal((html.match(/id="user"/g) ?? []).length, 1);
 });
+
+test('rating a possible problem saves the verdict and redraws the book without an error (#104)', async () => {
+  const PROBLEM = { finding_id: 'K-1', explanation: 'Two moments disagree.', classification: 'possible_contradiction', citations: [{ quote: 'scene', source_file: 'scenes/a.md', story_time: null, evidence_status: 'valid' }], alternatives: ['A flashback.'] };
+  const ui = page(PHONE, { ...QUEUE, findings: [PROBLEM] });
+  await ui.renderApp('sal');
+  const section = sectionOf(ui.app, 'Posibles problemas');
+  const mystery = byTag(section, 'button').find((b) => b.textContent === 'Misterio deliberado')!;
+  await mystery.events.click();
+  for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+  assert.doesNotMatch(ui.app.textContent, /is not a function|undefined/);
+  assert.ok(sectionOf(ui.app, 'Posibles problemas'), 'the book is drawn again');
+});
