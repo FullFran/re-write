@@ -243,17 +243,21 @@ test('above the cap of live processes the answer is busy', async (t) => {
 });
 
 test('an idle process is stopped and its token dies with it; the next prompt starts a new one', async (t) => {
-  const eh = await startEngineHarness({}, { idleMs: 150 });
+  // The idle time must be long enough that a slow CI runner never idles the process out between
+  // two steps of this test; 150 ms did (an extra spawn on GitHub's runner, 2026-11-11).
+  const eh = await startEngineHarness({}, { idleMs: 1000 });
   t.after(eh.close);
+  const spawns = () => eh.received().filter((type) => type === 'spawn').length;
   const token = await connect(eh);
   const first = JSON.parse((await turn(eh, token, 'mcp'))[0].data.text);
   assert.equal(first.status, 200);
   const bearer = eh.childToken();
   assert.equal((await mcpCall(eh, bearer)).status, 200);
+  const before = spawns();
   await until(() => eh.engine.liveCount() === 0);
   assert.equal((await mcpCall(eh, bearer)).status, 401);
   assert.equal((await turn(eh, token, 'echo back')).at(-1)?.event, 'done');
-  assert.equal(eh.received().filter((type) => type === 'spawn').length, 2);
+  assert.equal(spawns(), before + 1);
 });
 
 test('abort ends the running turn, and only then is another prompt accepted', async (t) => {
