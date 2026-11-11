@@ -2289,7 +2289,8 @@ function graphList(book, onOpen, current) {
     else {
       renderRows();
       renderDetail();
-      if (st.view) st.view.select(id);
+      // The drawing follows a frame later, so the table answers first on a slow machine.
+      if (st.view) requestAnimationFrame(() => setTimeout(() => st.view && st.view.select(st.selected), 0));
     }
     live.textContent = 'Elegido: ' + graphNodeName(node) + ', ' + graphNodeType(node).toLowerCase() + ', grado ' + node.degree + '.';
     const row = st.rows.get(id);

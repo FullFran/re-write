@@ -313,9 +313,13 @@ test('performance: 2,000 nodes draw and lay out while the table stays responsive
   }
   const events: any[] = JSON.parse(raw).traceEvents ?? JSON.parse(raw);
   const main = new Set(events.filter((e) => e.name === 'thread_name' && e.args?.name === 'CrRendererMain').map((e) => `${e.pid}:${e.tid}`));
-  const byName = new Map<string, number>();
-  for (const e of events) if (e.ph === 'X' && main.has(`${e.pid}:${e.tid}`)) byName.set(e.name, (byName.get(e.name) ?? 0) + (e.dur ?? 0) / 1000);
-  console.log('graph trace ' + JSON.stringify([...byName].sort((a, b) => b[1] - a[1]).slice(0, 30).map(([k, ms]) => `${Math.round(ms)}ms ${k}`)));
+  const byName = new Map<string, [number, number]>();
+  for (const e of events) {
+    if (e.ph !== 'X' || !main.has(`${e.pid}:${e.tid}`)) continue;
+    const [ms, n] = byName.get(e.name) ?? [0, 0];
+    byName.set(e.name, [ms + (e.dur ?? 0) / 1000, n + 1]);
+  }
+  console.log('graph trace ' + JSON.stringify([...byName].sort((a, b) => b[1][0] - a[1][0]).slice(0, 20).map(([k, [ms, n]]) => `${Math.round(ms)}ms x${n} ${k}`)));
   const self = new Map<string, number>();
   const byId = new Map(profile.nodes.map((n: any) => [n.id, n]));
   profile.samples!.forEach((id: number, i: number) => {

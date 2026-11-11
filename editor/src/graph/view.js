@@ -170,6 +170,7 @@ export function createGraphView({ book, onSelect = () => {}, onPath = () => {}, 
           sharedGestureWheelMessage: 'Usa Ctrl + rueda para acercar el grafo',
           sharedGestureAppleWheelMessage: 'Usa ⌘ + rueda para acercar el grafo',
           sharedGestureTouchMessage: 'Usa dos dedos para mover el grafo',
+          hideEdgesOnMove: true,
           allowInvalidContainer: true, labelRenderedSizeThreshold: 9, minCameraRatio: 0.05, maxCameraRatio: 10, stagePadding: 24 },
       });
     } catch {
@@ -212,12 +213,14 @@ export function createGraphView({ book, onSelect = () => {}, onPath = () => {}, 
     };
     const apply = (result) => {
       if (result.seq !== st.seq || !st.graph) return;
-      result.positions.forEach(([x, y], i) => {
-        const id = ids[i];
-        if (!st.graph.hasNode(id)) return;
-        st.graph.mergeNodeAttributes(id, { x, y });
-        positions.set(book + '\n' + id, { x, y });
-      });
+      // One update for every node, so the drawing redraws once.
+      const at = new Map(ids.map((id, i) => [id, result.positions[i]]));
+      st.graph.updateEachNodeAttributes((id, attrs) => {
+        const xy = at.get(id);
+        if (!xy) return attrs;
+        positions.set(book + '\n' + id, { x: xy[0], y: xy[1] });
+        return { ...attrs, x: xy[0], y: xy[1] };
+      }, { attributes: ['x', 'y'] });
       canvas.setAttribute('data-layout', 'done');
     };
     const inPage = () => apply({ seq, positions: runLayout({ ...message, iterations: Math.min(iterations, 40) }) });
@@ -281,13 +284,12 @@ export function createGraphView({ book, onSelect = () => {}, onPath = () => {}, 
     if (!quiet && !ids.length) announce('Camino quitado.');
   }
 
+  // Marks the chosen node. The camera does not move (each frame of a large drawing costs, and
+  // a moving view is harder to follow); Encajar recentres it.
   function selectNode(id) {
     st.selected = id;
     canvas.setAttribute('data-selected', id || '');
-    if (!st.sigma) return;
-    st.sigma.refresh();
-    const shown = id && st.graph.hasNode(id) && st.sigma.getNodeDisplayData(id);
-    if (shown) st.sigma.getCamera().animate({ x: shown.x, y: shown.y }, { duration: 300 });
+    if (st.sigma) st.sigma.scheduleRefresh();
   }
 
   const labelOf = (id) => (st.graph.hasNode(id) ? st.graph.getNodeAttribute(id, 'label') : id);
