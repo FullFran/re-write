@@ -1,6 +1,6 @@
 # Architecture: RE;write as an HCS host
 
-Status: proposed with [ADR-0001](adr/0001-adopt-hcs.md). Work is tracked in [roadmap.md](roadmap.md).
+Status: proposed with [ADR-0001](adr/0001-adopt-hcs.md) and [ADR-0002](adr/0002-engine-model.md). Work is tracked in [roadmap.md](roadmap.md).
 
 RE;write is a host in the sense of the Harness Composition Specification (HCS): it reads a catalog of packages, resolves and activates them, grants them authority, and projects them into the engines its users work with. The writing domain is the host's own core. This page says what is core, what is a package, how a package reaches an engine, and where each planned feature fits.
 
@@ -101,12 +101,16 @@ Extension members are `x-rewrite-*`. Product refusals (quote not literal, stale 
 
 A **generation** is the immutable, prepared set of packages of one desired set (HCS-0008 section 2). A pointer selects the generation for new runs; it is switched as one step after the whole set is prepared.
 
+The engine model is decided in [ADR-0002](adr/0002-engine-model.md) and described in [engines.md](engines.md). In short:
+
 | Engine | Started by RE;write | How a generation reaches it | HCS-0008 |
 | --- | --- | --- | --- |
-| Connected MCP clients (ChatGPT, Claude Code, OpenCode, others) | no | Each MCP session's tools, prompts, instructions and skill resources are built from one generation, fixed for the session's life | by analogy: R001-R007, R017; health = first successful call. This case is a gap in HCS, reported there |
-| Embedded engine for writers without their own agent (Pi first) | yes | A per-run projection that points at the generation directory, with RE;write's MCP server as a host-owned server | applies fully, including R013-R016 |
+| Connected MCP clients (ChatGPT, Claude Code, OpenCode, others) | no | Each MCP session's tools, prompts, instructions and skill resources are built from one generation, fixed for the session's life | by analogy, as a RE;write rule: R001-R009, R013, R015-R018; health = first successful tool call. R014 does not apply. This case is a gap in HCS, reported as [FullFran/hcs#15](https://github.com/FullFran/hcs/issues/15) |
+| Embedded engine for writers without their own agent (Pi first) | yes | A per-run projection that points at the generation directory, with RE;write's MCP server as a host-owned server | applies as written |
 
-MCP sessions currently expose host built-ins from one capability snapshot pinned when the server is built, and check capability state on dispatch. Package projection into sessions awaits M5.
+[engines.md](engines.md) has the full requirement table, including the requirements added up to HCS `0.1.0-draft.6`, what is out of scope, and the open questions.
+
+MCP sessions currently expose host built-ins from one capability snapshot pinned when the server is built, and check capability state on dispatch. The MCP endpoint is stateless (one server per request) and reads no host state directory yet. Package projection into sessions awaits M5.
 
 The model comes from the connected client; only the embedded engine needs one paid by the operator, chosen from a host-owned allowlist ([#5](https://github.com/FullFran/re-write/issues/5)).
 
