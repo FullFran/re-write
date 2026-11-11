@@ -79,3 +79,17 @@ The page asks for the review queue again every 5 seconds while its tab is visibl
 - [ ] Type a note on a narrative finding and do not submit it. Change the queue from the second tab. Confirm the note is intact, the queue did not change under you, and the page says **Hay novedades en este libro…**. Submit or clear the note and confirm the news appears.
 - [ ] Open the account menu (top right) and change the queue from the second tab. Confirm the page waits until the menu is closed, then refreshes.
 - [ ] With the browser's network panel open, switch to another tab for a minute. Confirm no request to `/review/api/books/{book}` was made while hidden, and that one is made as soon as you return.
+
+## 9. Phone Layout
+
+Automated tests pin the stylesheet's tokens and rules (`tests/review-mobile.test.ts`) but cannot see a layout. Check these on a real phone, or in a browser's device mode at 360 px wide, in light and dark. The rules behind them are in `docs/design.md`.
+
+- [ ] Nothing scrolls sideways in any state: empty book, a long diff, a proposal or quote with a very long word or URL, the Notion mapping form, an error, the **Hay novedades en este libro…** notice.
+- [ ] Focusing the note field or **Título del libro** does not zoom the page (iOS Safari).
+- [ ] While reading a long proposal under **Cambios propuestos**, **Aceptar cambio** and **Rechazar** stay at the bottom of the screen, clearly apart, and the text scrolls out from under the bar instead of staying hidden. The bar belongs to the card on screen: it does not appear for the next card until that card's badge and rationale are visible.
+- [ ] On a phone with a home indicator, the bar's buttons are not under it; in landscape, no text sits under the notch.
+- [ ] Removed and added passages are told apart by their labels and by strike-through and underline, not only by colour.
+- [ ] Trigger an error far down the page (for example a note over the limit): the message is visible at the top of the screen without scrolling.
+- [ ] With the keyboard only, every control shows a focus outline, and Enter or Space on a finding's quote opens its scene.
+- [ ] With "reduce motion" enabled in the system, opening a scene jumps instead of scrolling smoothly.
+- [ ] At 1280 px wide the page is one centred column of readable width, not full-width lines.

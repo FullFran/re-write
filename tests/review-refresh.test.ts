@@ -248,6 +248,11 @@ test('the review page refreshes its state without a manual reload', async (t) =>
   const noteInput = () => page.all(page.section('Hallazgos de la trama'), (n) => n.attrs['aria-label'] === NOTE_LABEL)[0];
 
   await t.test('no refresh while a note is being typed: the text survives and a notice says why', async () => {
+    // The notice is a live region: in the page from the start, empty until there is news.
+    const liveRegion = page.all(page.app, (n) => n.className === 'notice')[0];
+    assert.equal(liveRegion.attrs.role, 'status');
+    assert.equal(liveRegion.hidden, true);
+    assert.equal(liveRegion.textContent, '');
     const input = noteInput();
     input.focus();
     input.value = 'Un borrador de nota';
@@ -256,7 +261,7 @@ test('the review page refreshes its state without a manual reload', async (t) =>
     assert.ok(page.attached(input), 'the note field was not replaced');
     assert.equal(input.value, 'Un borrador de nota');
     assert.ok(page.cardWith(pending(), SECOND), 'the queue was not re-rendered');
-    assert.ok(page.notice(), 'a notice says there is news waiting');
+    assert.equal(page.notice(), liveRegion, 'a notice says there is news waiting');
 
     // Leaving the field does not make the unsaved text disposable.
     page.body.focus();
@@ -270,6 +275,7 @@ test('the review page refreshes its state without a manual reload', async (t) =>
     assert.equal(page.cardWith(pending(), SECOND), undefined);
     assert.ok(page.cardWith(page.section('Historial de cambios del manuscrito'), SECOND).textContent.includes('Rechazada'));
     assert.equal(page.notice(), undefined);
+    assert.equal(liveRegion.textContent, '', 'the notice is emptied, so the next news is announced again');
   });
 
   await t.test('no refresh while a dialog is open', async () => {

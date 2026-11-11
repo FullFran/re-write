@@ -14,7 +14,8 @@ export function reviewHtml(issuer: string, publishableKey: string): string {
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
 <title>RE;write · Revisión</title>
 <link rel="stylesheet" href="/review/app.css">
 <script defer crossorigin="anonymous" src="${frontendApi}/npm/@clerk/ui@1/dist/ui.browser.js"></script>
@@ -49,48 +50,142 @@ export function reviewCsp(issuer: string): string {
 }
 
 export const REVIEW_CSS = `
-:root { color-scheme: light dark; --ink: #1c1b19; --paper: #faf8f4; --line: #d9d4ca; --muted: #6b665c; --accept: #1f6b45; --reject: #a32a2a; }
-@media (prefers-color-scheme: dark) { :root { --ink: #ece8df; --paper: #1a1917; --line: #3a372f; --muted: #a39d90; --accept: #5fc08f; --reject: #ef8585; } }
+/* Roles, scales and breakpoints are described in docs/design.md. */
+:root {
+  color-scheme: light dark;
+  --ink: #1c1b19; --paper: #faf8f4; --muted: #625d54; --line: #d9d4ca; --edge: #8a8478;
+  --accept: #1f6b45; --accept-bg: #e0e7df; --reject: #a32a2a; --reject-bg: #f0dfdc;
+  --mark: #ffe066; --pressed: #e4e2de;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px; --space-7: 48px;
+  --text-xs: .8125rem; --text-sm: .875rem; --text-md: 1rem; --text-lg: 1.125rem; --text-xl: 1.375rem;
+  --font-prose: Georgia, 'Times New Roman', serif;
+  --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-code: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --measure: 46rem; --tap: 44px; --radius: 8px;
+  --gutter: max(var(--space-4), env(safe-area-inset-left), env(safe-area-inset-right));
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #ece8df; --paper: #1a1917; --muted: #a39d90; --line: #3a372f; --edge: #7d776b;
+    --accept: #5fc08f; --accept-bg: #222d25; --reject: #ef8585; --reject-bg: #342624;
+    --mark: #6b5600; --pressed: #2f2e2b;
+  }
+}
+
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.5 Georgia, 'Times New Roman', serif; }
-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
-h1 { margin: 0; font-size: 20px; }
-h2 { margin: 32px 0 8px; font-size: 18px; }
-h3 { margin: 20px 0 8px; font-size: 16px; }
-main { max-width: 760px; margin: 0 auto; padding: 16px; }
-article { border-top: 1px solid var(--line); padding: 16px 0; }
-blockquote { margin: 8px 0; padding-left: 12px; border-left: 3px solid var(--line); }
-.meta { color: var(--muted); font: 13px/1.4 system-ui, sans-serif; overflow-wrap: anywhere; }
-pre { overflow-x: auto; padding: 12px; border: 1px solid var(--line); font: 13px/1.5 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
-.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-button { min-height: 44px; padding: 8px 16px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: 15px system-ui, sans-serif; cursor: pointer; }
-button.accept { border-color: var(--accept); color: var(--accept); }
-button.reject { border-color: var(--reject); color: var(--reject); }
-button.active { border-color: var(--ink); background: var(--line); font-weight: bold; }
-button:disabled { opacity: .5; cursor: default; }
-select, input[type=text] { min-height: 44px; max-width: 100%; font: 15px system-ui, sans-serif; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
-input[type=file] { font: 14px system-ui, sans-serif; }
-[role=alert] { color: var(--reject); }
-[role=status] { color: var(--accept); font-weight: 500; }
-.toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
-.card-box { border: 1px solid var(--line); border-radius: 6px; padding: 16px; margin: 16px 0; }
-.form-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
-.scenes-grid { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
-.scene-viewer { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 16px; }
-mark { background: #ffe066; color: inherit; padding: 2px 4px; border-radius: 3px; }
-@media (prefers-color-scheme: dark) { mark { background: #7a6200; color: inherit; } }
-.badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font: 12px/1.2 system-ui, sans-serif; border: 1px solid var(--line); margin-right: 6px; }
-.badge-stale { border-color: var(--reject); color: var(--reject); }
-.state-badge { font-size: 15px; font-weight: bold; padding: 6px 10px; }
-.visual-diff { white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); padding: 12px; }
-.diff-removed, .diff-added { display: block; padding: 4px 8px; border-left: 4px solid; }
-.diff-removed { color: var(--reject); background: color-mix(in srgb, var(--reject) 12%, var(--paper)); }
-.diff-added { color: var(--accept); background: color-mix(in srgb, var(--accept) 12%, var(--paper)); }
-.diff-label { font: bold 13px system-ui, sans-serif; margin-right: 8px; }
-.note-counter { flex-basis: 100%; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+/* overflow-wrap: anywhere lets a long word or URL break instead of widening the page. */
+body { margin: 0; background: var(--paper); color: var(--ink); font: var(--text-md)/1.6 var(--font-prose); overflow-wrap: anywhere; }
+header { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-2) max(var(--gutter), calc((100% - var(--measure)) / 2 + var(--gutter))); padding-top: max(var(--space-2), env(safe-area-inset-top)); border-bottom: 1px solid var(--line); }
+#user { display: flex; align-items: center; justify-content: flex-end; min-width: var(--tap); min-height: var(--tap); }
+main { max-width: var(--measure); margin: 0 auto; padding: var(--space-4) var(--gutter) calc(var(--space-7) + env(safe-area-inset-bottom)); }
+h1 { margin: 0; font-size: var(--text-lg); line-height: 1.25; }
+h2 { margin: var(--space-7) 0 var(--space-2); font-size: var(--text-xl); line-height: 1.25; }
+h3 { margin: var(--space-5) 0 var(--space-2); font-size: var(--text-md); line-height: 1.4; }
+p { margin: var(--space-3) 0; }
+.meta { color: var(--muted); font: var(--text-sm)/1.45 var(--font-ui); }
+ul.meta { padding-left: var(--space-5); }
+.sign-in { display: flex; justify-content: center; padding-top: var(--space-5); }
+
+/* One thing to decide per card: its state, what it says, then the decision. */
+article, .card-box { margin: var(--space-4) 0; padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius); }
+article > :first-child, .card-box > :first-child { margin-top: 0; }
+article > :last-child, .card-box > :last-child { margin-bottom: 0; }
+.card-box h2 { margin: 0 0 var(--space-2); font-size: var(--text-lg); }
+.card-box article { margin: 0; padding: var(--space-4) 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
 article:focus { outline: 2px solid var(--ink); outline-offset: 4px; }
-.clickable-quote { cursor: pointer; text-decoration: underline; text-decoration-style: dotted; }
-.clickable-quote:hover { background: var(--line); }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+blockquote { margin: var(--space-3) 0; padding: var(--space-1) 0 var(--space-1) var(--space-3); border-left: 3px solid var(--edge); }
+.clickable-quote { cursor: pointer; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
+pre { margin: var(--space-3) 0; padding: var(--space-3); overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); font: var(--text-xs)/1.5 var(--font-code); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* A scene is prose to read, not code. */
+.scene-viewer > pre { padding: 0; border: 0; border-radius: 0; font: inherit; }
+mark { padding: 2px 4px; border-radius: 3px; background: var(--mark); color: inherit; }
+
+.badge { display: inline-block; margin-right: var(--space-2); padding: 2px var(--space-2); border: 1px solid var(--edge); border-radius: 4px; font: var(--text-xs)/1.3 var(--font-ui); vertical-align: middle; }
+.state-badge { padding: var(--space-1) var(--space-3); font-size: var(--text-sm); font-weight: 700; }
+.state-proposed { border-color: var(--ink); }
+.state-accepted { border-color: var(--accept); background: var(--accept-bg); color: var(--accept); }
+.state-rejected { border-color: var(--reject); background: var(--reject-bg); color: var(--reject); }
+.badge-stale { border-color: var(--reject); background: none; color: var(--reject); }
+
+/* Controls: 16 px text (iOS zooms the page below that) and a 44 px tap target. */
+button, select, input, textarea { min-height: var(--tap); max-width: 100%; margin: 0; padding: var(--space-2) var(--space-4); border: 1px solid var(--edge); border-radius: var(--radius); background: transparent; color: inherit; font: var(--text-md)/1.3 var(--font-ui); touch-action: manipulation; }
+button { cursor: pointer; transition: background-color .12s, opacity .12s; }
+button.accept { border-color: var(--accept); background: var(--accept); color: var(--paper); font-weight: 600; }
+button.reject { border-color: var(--reject); color: var(--reject); font-weight: 600; }
+button.active, button[aria-pressed=true] { border-color: var(--ink); background: var(--pressed); font-weight: 700; }
+button:disabled { opacity: .5; cursor: default; }
+input[type=text] { flex: 1 1 14rem; min-width: 0; padding: var(--space-2) var(--space-3); }
+input[type=file] { flex: 1 1 14rem; min-width: 0; padding: 0; border: 0; border-radius: 0; }
+input[type=file]::file-selector-button { min-height: var(--tap); margin: 0 var(--space-3) 0 0; padding: var(--space-2) var(--space-4); border: 1px solid var(--edge); border-radius: var(--radius); background: transparent; color: inherit; font: var(--text-md)/1.3 var(--font-ui); cursor: pointer; }
+summary { min-height: var(--tap); padding: var(--space-3) 0; color: var(--muted); font: var(--text-sm)/1.45 var(--font-ui); cursor: pointer; }
+@media (hover: hover) {
+  button:not(:disabled):hover, input[type=file]::file-selector-button:hover, .clickable-quote:hover { background: var(--pressed); }
+  button.accept:not(:disabled):hover { background: var(--accept); opacity: .85; }
+}
+
+.toolbar { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; margin-bottom: var(--space-5); padding-bottom: var(--space-4); border-bottom: 1px solid var(--line); }
+.toolbar > select, .toolbar > h2 { flex: 1 1 12rem; min-width: 0; margin: 0; }
+.form-row { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); align-items: center; margin-top: var(--space-3); }
+.form-row > label { font: var(--text-sm)/1.45 var(--font-ui); }
+.form-row > select { flex: 1 1 12rem; min-width: 0; }
+.note-counter { flex-basis: 100%; }
+.actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-4); }
+/* Accept and reject: far enough apart that one is never hit for the other. */
+.decision { gap: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--line); }
+.scenes-grid { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-3) 0; }
+.scenes-grid > button { text-align: left; }
+.scene-viewer { margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--line); }
+
+/* The diff wraps; a change is marked by its label, its bar and its line, not by colour alone. */
+.visual-diff { margin: var(--space-3) 0; padding: var(--space-2) 0; border: 1px solid var(--line); border-radius: var(--radius); white-space: pre-wrap; overflow-wrap: anywhere; }
+.visual-diff > div { padding: var(--space-1) var(--space-3); }
+.visual-diff > .diff-removed, .visual-diff > .diff-added { margin: var(--space-1) 0; padding-left: var(--space-2); border-left: 4px solid; }
+.diff-removed { border-color: var(--reject); background: var(--reject-bg); }
+.diff-added { border-color: var(--accept); background: var(--accept-bg); }
+.diff-label { display: block; font: 700 var(--text-xs)/1.5 var(--font-ui); }
+.diff-removed > .diff-label { color: var(--reject); }
+.diff-added > .diff-label { color: var(--accept); }
+del { text-decoration-line: line-through; text-decoration-color: var(--reject); text-decoration-thickness: 1px; }
+ins { text-decoration-line: underline; text-decoration-color: var(--accept); text-decoration-thickness: 2px; text-underline-offset: 3px; }
+
+/* The newest error follows the reader: it is added at the top of a long page. */
+[role=alert] { margin: 0 0 var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--reject); border-left-width: 4px; border-radius: var(--radius); background: var(--reject-bg); font: var(--text-sm)/1.45 var(--font-ui); }
+main > [role=alert]:first-child { position: sticky; top: max(var(--space-2), env(safe-area-inset-top)); z-index: 3; }
+[role=status] { color: var(--accept); font-weight: 600; }
+/* The refresh notice floats, so showing or hiding it never moves the text being read. */
+.notice { position: fixed; z-index: 2; top: max(var(--space-2), env(safe-area-inset-top)); left: 0; right: 0; width: min(100% - 2 * var(--gutter), var(--measure) - 2 * var(--space-4)); margin: 0 auto; padding: var(--space-3) var(--space-4); border: 1px solid var(--edge); border-left: 4px solid var(--accept); border-radius: var(--radius); background: var(--paper); box-shadow: 0 2px 10px rgb(0 0 0 / .2); color: var(--ink); font: var(--text-sm)/1.45 var(--font-ui); }
+/* Kept rendered while empty: a live region must exist before its text arrives to be announced. */
+.notice[hidden] { display: block; width: 1px; height: 1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); box-shadow: none; }
+/* With an error showing, the notice goes back into the page: two floating boxes would cover each other or a decision. */
+main:has(> [role=alert]) .notice:not([hidden]) { position: static; width: auto; margin: 0 0 var(--space-4); box-shadow: none; }
+
+/* Phone: one column, full-width controls, decision under the thumb. */
+@media (max-width: 40em) {
+  h2 { margin-top: var(--space-6); font-size: var(--text-lg); }
+  article, .card-box { --peek: 120px; padding: var(--space-3); }
+  .card-box article { padding: var(--space-4) 0; }
+  .toolbar > button, .actions > button { flex: 1 1 auto; }
+  .form-row > label, .form-row > select, .form-row > input { flex: 1 1 100%; }
+  /* The bar stays inside its card. Its top margin is room it must leave above itself,
+     so it only shows once the card it decides is on screen; the element before it
+     takes the same room back, and at rest nothing moves. */
+  .decision { position: sticky; bottom: 0; z-index: 1; flex-wrap: nowrap; margin: calc(var(--peek) + var(--space-4)) calc(-1 * var(--space-3)) calc(-1 * var(--space-3)); padding: var(--space-3) var(--space-3) max(var(--space-3), env(safe-area-inset-bottom)); border-radius: 0 0 var(--radius) var(--radius); background: var(--paper); }
+  article > :has(+ .decision) { margin-bottom: calc(-1 * var(--peek)); }
+  .decision > button { flex: 1 1 0; min-width: 0; padding-left: var(--space-2); padding-right: var(--space-2); }
+  .decision > .accept { flex-grow: 1.4; }
+  .card-box .decision { margin: calc(var(--peek) + var(--space-4)) 0 calc(-1 * var(--space-4)); padding-left: 0; padding-right: 0; border-radius: 0; }
+}
+/* Tablet and desktop: the same column, with more air. */
+@media (min-width: 48em) {
+  main { padding-top: var(--space-6); }
+  article, .card-box { padding: var(--space-5); }
+  .card-box article { padding: var(--space-5) 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}
 `;
 
 export const REVIEW_JS = String.raw`
@@ -113,9 +208,24 @@ let refreshTimer = null;
 let refreshDelay = REFRESH_MS;
 let refreshing = false;
 const STATE_LABELS = { proposed: 'Pendiente', accepted: 'Aceptada', rejected: 'Rechazada' };
+const NEWS_NOTICE = 'Hay novedades en este libro. Se mostrarán cuando termines lo que tienes a medias: una nota, un formulario o un diálogo abierto.';
+
+// A live region is announced when its text changes while it is rendered, so the
+// notice stays in the page, empty, and receives its text when there is news.
+function setNotice(notice, shown) {
+  if (notice.hidden === !shown) return;
+  notice.hidden = !shown;
+  notice.textContent = shown ? NEWS_NOTICE : '';
+}
+
+// Smooth scrolling is motion: people who asked for less get a plain jump.
+function scrollBehavior() {
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  return reduce ? 'auto' : 'smooth';
+}
 
 function stateBadge(state, stale) {
-  return el('span', stale ? 'No aplicable: la escena ha cambiado' : STATE_LABELS[state], 'badge state-badge' + (stale ? ' badge-stale' : ''));
+  return el('span', stale ? 'No aplicable: la escena ha cambiado' : STATE_LABELS[state], 'badge state-badge state-' + state + (stale ? ' badge-stale' : ''));
 }
 
 async function decideCard(path, decision, remembered, key, card, reload) {
@@ -226,7 +336,7 @@ function claimCard(book, claim, reload) {
   card.append(quote(claim.anchor.quote, claim.source_file + ' · ' + claim.epistemic_kind + ' · evidencia: ' + claim.evidence_status + ' · propuesto por: ' + claim.extractor));
   if (claim.uncertainty) card.append(el('p', 'Incertidumbre: ' + claim.uncertainty, 'meta'));
   if (claim.editorial_status === 'proposed') {
-    const actions = el('div', undefined, 'actions');
+    const actions = el('div', undefined, 'actions decision');
     const decide = (decision) => () => decideCard('/books/' + book + '/claims/' + claim.claim_id, decision, decidedClaims, book + '/' + claim.claim_id, card, reload);
     if (claim.evidence_status === 'valid') actions.append(button('Aceptar', 'accept', decide('accept')));
     actions.append(button('Rechazar', 'reject', decide('reject')));
@@ -260,8 +370,14 @@ function narrativeFindingCard(book, finding, reload, openQuote) {
     const quoteEl = el('blockquote', ev.quote, 'clickable-quote');
     quoteEl.title = 'Haz clic para ver y resaltar esta cita en la escena';
     if (openQuote) {
-      quoteEl.addEventListener('click', () => {
-        openQuote(ev.file, ev.quote, ev.anchor, ev.status);
+      const open = () => openQuote(ev.file, ev.quote, ev.anchor, ev.status);
+      quoteEl.addEventListener('click', open);
+      // The same action from the keyboard.
+      quoteEl.tabIndex = 0;
+      quoteEl.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        open();
       });
     }
     const statusText = ev.status === 'valid' ? 'válida' : (ev.status === 'stale' ? 'desactualizada' : (ev.status === 'orphaned' ? 'la cita ya no está en el texto' : ev.status));
@@ -314,6 +430,8 @@ function narrativeFindingCard(book, finding, reload, openQuote) {
   };
   const usefulBtn = button('Me ayuda', finding.verdict?.verdict === 'useful' ? 'active' : '', rate('useful'));
   const noiseBtn = button('Ruido', finding.verdict?.verdict === 'noise' ? 'active' : '', rate('noise'));
+  usefulBtn.setAttribute('aria-pressed', String(finding.verdict?.verdict === 'useful'));
+  noiseBtn.setAttribute('aria-pressed', String(finding.verdict?.verdict === 'noise'));
   ratingRow.append(noteInput, counter, usefulBtn, noiseBtn);
   card.append(ratingRow);
 
@@ -429,7 +547,7 @@ function proposalCard(book, { proposal, diff, applicable }, reload) {
     if (proposal.result_commit) card.append(el('p', 'Cambio aprobado del manuscrito · versión ' + proposal.result_commit.slice(0, 10), 'meta'));
     return card;
   }
-  const actions = el('div', undefined, 'actions');
+  const actions = el('div', undefined, 'actions decision');
   const decide = (decision) => () => decideCard('/books/' + book + '/proposals/' + proposal.proposal_id, decision, decidedProposals, book + '/' + proposal.proposal_id, card, reload);
   if (applicable) actions.append(button('Aceptar cambio', 'accept', decide('accept')));
   else card.append(el('p', 'La escena ha cambiado desde esta propuesta: ya no se puede aplicar.', 'meta'));
@@ -763,10 +881,14 @@ function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
   const loadScene = async (sceneFile, highlight, quiet) => {
     const canonical = sceneFile.startsWith('scenes/') ? sceneFile : 'scenes/' + sceneFile;
     openScene = { file: canonical, highlight };
-    if (activeBtn) activeBtn.classList.remove('active');
+    if (activeBtn) {
+      activeBtn.classList.remove('active');
+      activeBtn.setAttribute('aria-current', 'false');
+    }
     for (const child of grid.children) {
       if (child.textContent === canonical || child.textContent === sceneFile) {
         child.classList.add('active');
+        child.setAttribute('aria-current', 'true');
         activeBtn = child;
         break;
       }
@@ -803,7 +925,7 @@ function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
           const after = data.text.slice(start + q.length);
           const mark = el('mark', matched);
           pre.append(document.createTextNode(before), mark, document.createTextNode(after));
-          if (!quiet) setTimeout(() => mark.scrollIntoView({ block: 'center', behavior: 'smooth' }), 50);
+          if (!quiet) setTimeout(() => mark.scrollIntoView({ block: 'center', behavior: scrollBehavior() }), 50);
         } else {
           pre.textContent = data.text;
         }
@@ -839,7 +961,7 @@ function scenesSection(book, scenes, reloadBook, registerOpenQuote) {
         propBox.append(el('p', 'Sin cambios pendientes para esta escena.', 'meta'));
       }
       viewer.append(propBox);
-      if (!quiet) viewer.scrollIntoView({ behavior: 'smooth' });
+      if (!quiet) viewer.scrollIntoView({ behavior: scrollBehavior() });
     } catch (error) {
       viewer.replaceChildren(el('p', error.message, 'meta'));
     }
@@ -919,7 +1041,7 @@ async function renderApp(selectedBookId, selectedScene, highlight) {
     createBox.style.display = createBox.style.display === 'none' ? 'block' : 'none';
   });
   toolbar.append(toggleBtn);
-  const notice = el('p', 'Hay novedades en este libro. Se mostrarán cuando termines lo que tienes a medias: una nota, un formulario o un diálogo abierto.');
+  const notice = el('p', undefined, 'notice');
   notice.setAttribute('role', 'status');
   notice.hidden = true;
   app.append(toolbar, createBox, notice);
@@ -993,15 +1115,15 @@ async function refreshOnce() {
     refreshDelay = REFRESH_MS;
     if (!current.pending || actionsRunning > 0) return;
     if (hasWorkInProgress()) {
-      current.notice.hidden = false;
+      setNotice(current.notice, true);
       return;
     }
     const data = current.pending;
     if (await showRefreshed(current, data)) {
       if (current.pending === data) current.pending = null;
-      current.notice.hidden = true;
+      setNotice(current.notice, false);
     } else if (current === view) {
-      current.notice.hidden = false;
+      setNotice(current.notice, true);
     }
   } catch {
     // A failed poll is not the person's problem: retry later, and less often.
@@ -1037,7 +1159,7 @@ window.addEventListener('load', async () => {
   try {
     await window.Clerk.load({ ui: { ClerkUI: window.__internal_ClerkUICtor } });
     if (!window.Clerk.isSignedIn) {
-      const box = el('div');
+      const box = el('div', undefined, 'sign-in');
       app.replaceChildren(box);
       window.Clerk.mountSignIn(box);
       return;
