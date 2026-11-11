@@ -669,6 +669,152 @@
         "tests/auth.test.ts"
       ]
     },
+    "HCS-0007-R001": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/canonical-json.ts",
+        "src/hcs/distribution.ts"
+      ],
+      "tests": [
+        "tests/hcs-distribution.test.ts",
+        "tests/hcs-conformance.test.ts"
+      ]
+    },
+    "HCS-0007-R002": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/canonical-json.ts",
+        "src/hcs/distribution.ts"
+      ],
+      "tests": [
+        "tests/hcs-distribution.test.ts",
+        "tests/hcs-conformance.test.ts"
+      ]
+    },
+    "HCS-0007-R003": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/canonical-json.ts",
+        "src/hcs/distribution.ts"
+      ],
+      "tests": [
+        "tests/hcs-canonical-json.test.ts",
+        "tests/hcs-distribution.test.ts",
+        "tests/hcs-conformance.test.ts"
+      ]
+    },
+    "HCS-0007-R004": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/canonical-json.ts",
+        "src/hcs/distribution.ts"
+      ],
+      "tests": [
+        "tests/hcs-canonical-json.test.ts",
+        "tests/hcs-distribution.test.ts",
+        "tests/hcs-conformance.test.ts"
+      ]
+    },
+    "HCS-0007-R005": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/distribution.ts"
+      ],
+      "tests": [
+        "tests/hcs-distribution.test.ts",
+        "tests/hcs-conformance.test.ts"
+      ]
+    },
+    "HCS-0007-R006": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/distribution.ts"
+      ],
+      "tests": [
+        "tests/hcs-distribution.test.ts",
+        "tests/hcs-conformance.test.ts"
+      ]
+    },
+    "HCS-0007-R007": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/distribution.ts"
+      ],
+      "tests": [
+        "tests/hcs-distribution.test.ts",
+        "tests/hcs-conformance.test.ts"
+      ]
+    },
+    "HCS-0007-R008": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/distribution.ts"
+      ],
+      "tests": [
+        "tests/hcs-distribution.test.ts",
+        "tests/hcs-conformance.test.ts"
+      ]
+    },
+    "HCS-0007-R009": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/distribution.ts"
+      ],
+      "tests": [
+        "tests/hcs-distribution.test.ts",
+        "tests/hcs-conformance.test.ts"
+      ]
+    },
+    "HCS-0007-R010": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/distribution.ts"
+      ],
+      "tests": [
+        "tests/hcs-distribution.test.ts",
+        "tests/hcs-conformance.test.ts"
+      ]
+    },
+    "HCS-0007-R011": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/distribution.ts"
+      ],
+      "tests": [
+        "tests/hcs-distribution.test.ts",
+        "tests/hcs-conformance.test.ts"
+      ]
+    },
+    "HCS-0007-R012": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/distribution.ts"
+      ],
+      "tests": [
+        "tests/hcs-distribution.test.ts",
+        "tests/hcs-conformance.test.ts"
+      ]
+    },
+    "HCS-0007-R013": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/distribution.ts"
+      ],
+      "tests": [
+        "tests/hcs-distribution.test.ts",
+        "tests/hcs-conformance.test.ts"
+      ]
+    },
+    "HCS-0007-R014": {
+      "status": "implemented",
+      "code": [
+        "src/hcs/distribution.ts"
+      ],
+      "tests": [
+        "tests/hcs-distribution.test.ts",
+        "tests/hcs-conformance.test.ts"
+      ]
+    },
     "HCS-0007-R015": {
       "status": "planned",
       "issue": 33
@@ -677,9 +823,17 @@
       "status": "planned",
       "issue": 33
     },
+    "HCS-0007-R017": {
+      "status": "planned",
+      "issue": 33
+    },
     "HCS-0007-R018": {
       "status": "planned",
       "issue": 33
+    },
+    "HCS-0007-R019": {
+      "status": "planned",
+      "issue": 34
     },
     "HCS-0007-R020": {
       "status": "planned",

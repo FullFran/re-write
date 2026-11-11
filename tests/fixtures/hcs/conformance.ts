@@ -7,7 +7,8 @@ import { join, resolve } from 'node:path';
 import { evaluate as evaluateAuthority, type Check, type Denial, type Grant } from '../../../src/hcs/authority.ts';
 import { readCatalog, type CatalogManifest } from '../../../src/hcs/catalog.ts';
 import { validateDecisionRecord } from '../../../src/hcs/decision-records.ts';
-import { HcsFailure } from '../../../src/hcs/errors.ts';
+import { readEnvelope, readKeySet, signingInput, verifyEnvelope, verifyKeySet, type AcceptedEnvelope, type AcceptedKeySet, type TrustAnchor } from '../../../src/hcs/distribution.ts';
+import { HcsFailure, type HcsError } from '../../../src/hcs/errors.ts';
 import type { HostProfile } from '../../../src/hcs/host.ts';
 import { validateEntryStatus } from '../../../src/hcs/lifecycle.ts';
 import { verifyPackage, type PackageExpected } from '../../../src/hcs/package.ts';
@@ -28,6 +29,31 @@ export interface Result { status: Status | 'unclassified'; reason: string }
 export interface Baseline { version: string; cases: Record<string, string> }
 
 type ExpectedError = { code: string; entry?: string; capability?: string };
+type Verdict = { ok: true } | { ok: false; errors: HcsError[] };
+
+// A verdict of an HCS-0007 check against the case's outcome and errors (code, and entry when the case names one).
+const assertVerdict = (verdict: Verdict, expect: Record<string, unknown>) => {
+  assert.equal(verdict.ok ? 'valid' : 'invalid', expect.outcome, verdict.ok ? undefined : verdict.errors.map(e => `${e.code}: ${e.message}`).join('; '));
+  if (verdict.ok) return;
+  const expected = (expect.errors ?? []) as ExpectedError[];
+  assert.deepEqual(verdict.errors.map(e => e.code), expected.map(e => e.code));
+  expected.forEach((e, i) => { if (e.entry !== undefined) assert.equal(verdict.errors[i].entry, e.entry); });
+};
+
+// HCS-0007 distribution cases state every host input: clock, trust anchor, assignment and accepted state.
+interface DistributionInput {
+  check: 'signing-input' | 'key-set' | 'envelope'; payloadType: string; document: unknown; now: string; trustAnchor: TrustAnchor;
+  keySet: unknown; lastKeySet?: AcceptedKeySet; envelope: unknown; assignment: Record<string, string>; lastAccepted?: AcceptedEnvelope;
+}
+const distribution = (value: HcsCase) => {
+  const input = value.input as DistributionInput;
+  if (input.check === 'signing-input') { assert.equal(signingInput(input.payloadType, input.document).toString('utf8'), value.expect.signingInput); return; }
+  const now = new Date(input.now);
+  const keySet = verifyKeySet(JSON.stringify(input.keySet), { trustAnchor: input.trustAnchor, lastAccepted: input.lastKeySet, now });
+  if (input.check === 'key-set' || !keySet.ok) { assertVerdict(keySet, value.expect); return; }
+  assert.equal(input.check, 'envelope');
+  assertVerdict(verifyEnvelope(JSON.stringify(input.envelope), { keySet: keySet.keySet, assignment: input.assignment, lastAccepted: input.lastAccepted, now }), value.expect);
+};
 
 // One runner per level and target that re-write implements. Each asserts the case's `expect` against re-write's
 // verdict; an assertion failure is the case's `fail` reason. Levels and targets without a runner are not applicable.
@@ -45,6 +71,9 @@ const runners: Record<string, (value: HcsCase) => void> = {
   'document urn:hcs:schema:hcs-0005:authority:0.1#/$defs/decisionRecord': value => {
     assert.equal(validateDecisionRecord(value.input).length === 0 ? 'valid' : 'invalid', value.expect.outcome);
   },
+  'document urn:hcs:schema:hcs-0007:signed-catalog:0.1#/$defs/envelope': value => assertVerdict(readEnvelope(JSON.stringify(value.input)), value.expect),
+  'document urn:hcs:schema:hcs-0007:signed-catalog:0.1#/$defs/keySet': value => assertVerdict(readKeySet(JSON.stringify(value.input)), value.expect),
+  distribution,
   integrity: value => {
     const { entry, contentBase64, maxUncompressedBytes } = value.input as { entry: PackageExpected; contentBase64: string; maxUncompressedBytes?: number };
     assert.equal(typeof contentBase64, 'string');
