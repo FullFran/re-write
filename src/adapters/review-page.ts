@@ -662,11 +662,25 @@ function narrativeFindingCard(book, finding, reload, openQuote) {
 // pending again and the earlier verdict stays in view, so nothing is lost.
 function findingReconsider(book, finding, reload) {
   const kept = finding.reopened_verdict;
-  if (kept) {
-    return [el('p', 'Valoración reabierta: antes «' + (VERDICTS[kept.verdict] || kept.verdict) + '», por ' + kept.by + ' el ' + when(kept.at) + '. Vuelve a estar pendiente.', 'meta')];
+  const record = finding.verdict || kept;
+  // Earlier verdicts, oldest first, with who took each back: the record only grows.
+  const earlier = record && record.history ? record.history : [];
+  const log = [];
+  if (earlier.length) {
+    const list = el('ol', undefined, 'meta decision-log');
+    list.setAttribute('aria-label', 'Valoraciones anteriores');
+    for (const entry of earlier) {
+      let text = '«' + (VERDICTS[entry.verdict] || entry.verdict) + '» por ' + entry.by + ' · ' + when(entry.at);
+      if (entry.reopened) text += ' · reabierta por ' + entry.reopened.by + ' · ' + when(entry.reopened.at);
+      list.append(el('li', text));
+    }
+    log.push(list);
   }
-  if (!finding.verdict) return [];
-  return [reconsiderRow('', 'Deshacer decisión editorial', async () => {
+  if (kept) {
+    return [...log, el('p', 'Valoración reabierta: antes «' + (VERDICTS[kept.verdict] || kept.verdict) + '», por ' + kept.by + ' el ' + when(kept.at) + '. Vuelve a estar pendiente.', 'meta')];
+  }
+  if (!finding.verdict) return log;
+  return [...log, reconsiderRow('', 'Deshacer decisión editorial', async () => {
     await api('/books/' + book + '/findings/' + finding.finding_id + '/reopen', { expected: finding.verdict.at });
     await reload();
   })];

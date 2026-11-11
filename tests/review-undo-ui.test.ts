@@ -341,4 +341,12 @@ test('a finding verdict can be taken back; the kept verdict is shown and the fin
   assert.ok(reopened.textContent.includes('Valoración reabierta'));
   assert.equal(page.buttons(reopened, 'Deshacer decisión editorial').length, 0);
   assert.equal(page.buttons(reopened, 'Me ayuda').length, 1, 'it can be rated again');
+
+  // The next verdict keeps the reopened one in its history, shown on the card.
+  await page.click(reopened, 'Ruido');
+  const rated = page.cardWith(page.section('Hallazgos de la trama'), 'Elena guarda el puente.');
+  const lines = page.all(rated, (n) => n.tagName === 'LI').map((n) => n.textContent);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^«Me ayuda» por user_fran · .+ · reabierta por user_fran · /);
+  assert.equal(page.buttons(rated, 'Deshacer decisión editorial').length, 1);
 });
