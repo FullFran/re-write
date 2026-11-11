@@ -361,3 +361,41 @@ test('the mode switch sits under the thumb on a phone, and nothing it covers is 
   assert.match(rule(css, '.mode-switch > button'), /min-height:\s*var\(--tap\)/);
   assert.match(rule(css, '.desk'), /display:\s*none/, 'the desk is hidden until a writing mode is chosen');
 });
+
+test('Analizar in Ayuda shows its scope before sending, and without the engine says how to get the assistant', async (t) => {
+  const { h, page } = await quietPage(t);
+  await page.pick('Ayuda RE;write');
+  const desk = page.desk()!;
+  const box = () => all(desk, (n) => n.attrs['aria-label'] === 'Analizar' && n.tagName === 'SECTION')[0];
+  assert.equal(box().hidden, true, 'nothing is shown, let alone sent, before the person asks');
+  await page.click('Analizar', desk);
+  assert.equal(page.button('Analizar', desk).attrs['aria-expanded'], 'true');
+  const words = (read(h.bookDir, SCENE).match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) ?? []).length;
+  const line = () => all(box(), (n) => n.className === 'analyse-scope')[0].textContent;
+  assert.equal(line(), `Se analizará: escena 01 (${new Intl.NumberFormat('es', { useGrouping: 'always' }).format(words)} palabras)`);
+  assert.equal(page.button('Esta escena', box()).attrs['aria-pressed'], 'true', 'the scene is the scope by default');
+
+  // Unsaved text is not what the assistant reads: the scope says so.
+  await page.type(page.editor()!.value + 'Sin guardar.\n');
+  await page.click('Esta escena', box());
+  assert.match(page.texts(box(), 'p').join('|'), /tus cambios sin guardar no entran/);
+
+  await page.click('La selección', box());
+  assert.equal(line(), 'Selecciona un fragmento en el texto para analizarlo.');
+  assert.equal(page.button('Enviar al asistente', box()).disabled, true, 'no selection, nothing to send');
+  const area = page.editor()! as any;
+  const at = area.value.indexOf('Elena llevaba');
+  area.selectionStart = at;
+  area.selectionEnd = at + 'Elena llevaba'.length;
+  await page.click('La selección', box());
+  assert.equal(line(), 'Se analizará: la selección de escena 01 (2 palabras)');
+
+  await page.click('El libro', box());
+  assert.equal(line(), 'Se analizará: el libro «La puerta de Sal» (2 escenas)');
+  assert.equal(page.button('Enviar al asistente', box()).disabled, false);
+
+  await page.click('Enviar al asistente', box());
+  assert.match(page.texts(box(), 'p').join('|'), /El asistente no está activado en este servidor\. Tu cuenta de RE;write basta para escribir y revisar/);
+  assert.equal(page.gets.filter((path) => path.includes('/engine')).length, 0, 'no engine path is asked');
+  assert.equal(page.editor()!.value.endsWith('Sin guardar.\n'), true, 'the text is untouched');
+});

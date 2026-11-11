@@ -134,6 +134,24 @@ the selected rating has `aria-pressed`.
   - **Lectura**: the scene rendered and read-only. It is built as elements from the
     Markdown syntax tree; scene text only becomes text nodes, HTML in a scene stays
     text and links keep their words without becoming links.
+- **Formatting toolbar** (`editor/src/format.js`, a group `aria-label="Formato"`), under
+  **Guardar** and its status: **Negrita** (`**`), **Cursiva** (`*`), **Título 1/2/3** (`#`),
+  **Cita** (`>`), **Lista** (`- `), **Lista numerada** (`1. `), **Separador de escena** (`***`
+  on its own line between blank lines, the marker the imports and the live preview read) and
+  **Enlace a nota** (`[[`, which opens the note completion; a selection becomes `[[selection]]`).
+  Each action edits the Markdown as typing would, in one undo step, and toggles: removed where
+  every touched place already has it, applied otherwise. Emphasis acts on the selection
+  without its outer spaces, line by line, or on the word under the cursor; a cursor between
+  words gets an empty pair. Line actions apply to every non-blank line touched; headings and
+  lists replace another level or kind. Ctrl/Cmd+B and Ctrl/Cmd+I. Buttons keep the focus in the
+  text (their `mousedown` is cancelled), show `aria-pressed` for what is on at the cursor, are
+  `--tap` high, and are disabled while the text is read-only. Hidden in **Lectura**. Below
+  40em it folds behind one **Formato** button (`aria-expanded`); open, its buttons scroll
+  sideways in one row inside the toolbar, never the page.
+- **The editor's head** (`.scene-head`): **Guardar**, **Cerrar editor**, the save status and
+  the toolbar stick together above the text. The editor's scroll margins (`margins()`) leave
+  that head, the phone dock and the part of the window under a phone keyboard out, so the
+  caret is never scrolled behind them.
 - The views are decorations only: the saved bytes are the text in the editor, whatever
   the view. Text is 16 px or more in every view, so iOS does not zoom on focus; the
   browser's spellcheck, autocorrect, capitals, dictation and IME work as in a text field.
@@ -148,7 +166,7 @@ the selected rating has `aria-pressed`.
 - **Guardar** and Ctrl/Cmd+S do nothing while a save is in flight or when nothing
   changed.
 - **Guardar** (or Ctrl/Cmd+S) saves explicitly; there is no autosave. The status line
-  below it (`role="status"`) says **Cambios sin guardar**, **Guardando…**, **Guardado**
+  beside it (`role="status"`) says **Cambios sin guardar**, **Guardando…**, **Guardado**
   or the error, and an error always adds that the text is still there.
 - Unsaved text is kept in the tab's `sessionStorage` only, never `localStorage`: it
   survives a re-render or a reload of the tab and is gone when the tab closes. Leaving
@@ -184,6 +202,12 @@ in the same page and over the same text:
   editor view), and so is the scene open in the desk for each book
   (`rewrite:desk-scene:<hash>:<book>`). Without a choice the page opens in Revisión; without
   a book it is Revisión whatever was chosen.
+- **The phone keyboard.** While the text has the focus and the visual viewport is under 75% of
+  the tallest seen at that width, the body gets `.keyboard-open`: the dock and the floating
+  assistant button give way, `--vv-top` keeps the editor's head at the top of what is visible,
+  and each resize while the keyboard is open scrolls the caret back between the head and the
+  keyboard (`visualViewport`); no other resize or scroll moves the page.
+  What emulation cannot show is listed in `docs/review-checklist.md`, section 14.
 - **The writing desk** (`#desk`, a `section` labelled **Escritura**) is built once and moved
   back into the page by every render: a decision, a refresh or a mode change never rebuilds
   the editor, so the text, the cursor, the selection and the undo history stay. Its head:
@@ -203,6 +227,21 @@ in the same page and over the same text:
   the person already rewrote it, the help says **No se encuentra la cita en el texto del
   editor** instead of selecting something else. Reading view gives way to the live preview to
   show the selection.
+- **Analizar** (Ayuda only; Concentración never analyses): a button in the desk's head
+  (`aria-expanded`) opens a box with **Qué analizar** (**Esta escena**, **La selección**, **El
+  libro**, `aria-pressed`) and the scope said before anything is sent, as a status line:
+  **Se analizará: escena 3 (1.240 palabras)**, **Se analizará: la selección de escena 3 (85
+  palabras)**, **Se analizará: el libro «Título» (12 escenas)**; numbers always grouped. Under
+  it, what the assistant really reads: the saved version of the scene (unsaved changes do not
+  enter, and it says so), the selection exactly as in the editor (inside the prompt; longer
+  than the server's prompt limit is refused with a reason), or the saved scenes of the book,
+  saying which it read. **Enviar al asistente** fills and sends one prompt through the
+  assistant panel with the usual page context (the book, and the scene as the item for a
+  scene or a selection); no new server path. ChatGPT not connected: the panel opens on
+  **Conectar ChatGPT** with the prompt already written, and the box says to connect first.
+  Engine off: the box says the assistant is not enabled here, that the RE;write account is
+  enough to write and review, and that the RE;write connector works from the writer's own
+  ChatGPT.
 - **The assistant**: switching to Concentración closes the panel; its button stays, outlined
   instead of filled. In Ayuda, **Preguntar al asistente por esta escena** opens it with the
   scene as the item.

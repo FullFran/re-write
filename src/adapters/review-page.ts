@@ -183,10 +183,19 @@ body[data-mode=focus] .toolbar, body[data-mode=help] .toolbar { margin-bottom: v
 .desk-banner { margin: var(--space-3) 0; padding: var(--space-3) var(--space-4); border: 1px solid var(--edge); border-left: 4px solid var(--accept); border-radius: var(--radius); font: var(--text-sm)/1.45 var(--font-ui); }
 .desk-banner[hidden], .desk-panes { display: none; }
 .desk-banner > p { margin: 0 0 var(--space-2); color: var(--ink); font-weight: 400; }
-/* In the desk the editor's save row sits above the text and stays in reach while writing. */
-.desk .scene-editor { display: flex; flex-direction: column; }
-.desk .scene-editor > .actions { position: sticky; top: 0; z-index: 2; order: -2; margin: 0; padding: var(--space-2) 0; background: var(--paper); }
-.desk .save-status { order: -1; margin: 0; }
+/* Guardar, the save state and the formatting toolbar sit above the text and stay in reach while
+   writing; with a phone keyboard open they follow the visible part of the screen (--vv-top). */
+.scene-head { position: sticky; top: var(--vv-top, 0px); z-index: 2; background: var(--paper); }
+.scene-head > .actions { flex-wrap: nowrap; align-items: center; margin: 0; padding: var(--space-2) 0; }
+.scene-head > .actions > button { flex: none; }
+.scene-head .save-status { flex: 1 1 auto; min-width: 0; margin: 0; }
+.scene-format { display: flex; align-items: center; gap: var(--space-1); padding: 0 0 var(--space-2); }
+.scene-format[hidden] { display: none; }
+.format-toggle { display: none; }
+.format-buttons { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.format-buttons > button { padding: var(--space-1) var(--space-2); font-size: var(--text-sm); }
+.format-buttons > [data-format=bold] { font-weight: 700; }
+.format-buttons > [data-format=italic] { font-style: italic; }
 .desk-help h2 { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-lg); }
 .desk-help h3 { margin-top: var(--space-5); }
 .desk-help .ask-scene { width: 100%; }
@@ -195,6 +204,17 @@ body[data-mode=focus] .toolbar, body[data-mode=help] .toolbar { margin-bottom: v
 .desk-tools > button { min-height: var(--tap); padding: 0 var(--space-4); }
 .desk-tools > button[aria-expanded=true] { background: var(--pressed); }
 .desk-status { flex: 1 1 100%; margin: 0; }
+/* Analizar: Ayuda only, its scope said before sending (docs/design.md, "Modes"). */
+.analyse-toggle, .desk-analyse { display: none; }
+body[data-mode=help] .analyse-toggle { display: inline-flex; align-items: center; }
+.analyse-toggle[aria-expanded=true] { background: var(--pressed); }
+body[data-mode=help] .desk-analyse:not([hidden]) { display: block; margin: var(--space-3) 0; padding: var(--space-3) var(--space-4); border: 1px solid var(--line); border-left: 4px solid var(--accept); border-radius: var(--radius); }
+.desk-analyse h2 { margin: 0 0 var(--space-2); font-size: var(--text-lg); }
+.analyse-scopes { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.analyse-scopes > button { flex: 1 1 auto; }
+.analyse-scope { margin: var(--space-3) 0 var(--space-1); font-weight: 600; }
+.analyse-hint { margin: 0 0 var(--space-3); }
+.analyse-status:empty { display: none; }
 .desk-status:empty { display: none; }
 body[data-mode] .desk[data-panel] .desk-body, body[data-mode] .desk[data-panel] .desk-panes { display: none; }
 .desk-panel { margin: var(--space-3) 0 var(--space-6); }
@@ -311,6 +331,15 @@ main:has(> [role=alert]) .notice:not([hidden]) { position: static; width: auto; 
   body[data-mode] .assistant-fab { margin-bottom: var(--dock-h); }
   body[data-mode]::after { content: ''; display: block; height: var(--dock-h); }
   .desk-scenes > button { width: var(--tap); padding: 0; font-size: var(--text-lg); }
+  /* Formatting folds behind one button; open, its buttons scroll sideways in one row. */
+  .format-toggle { display: inline-flex; align-items: center; flex: none; }
+  .scene-format { flex-wrap: nowrap; }
+  .scene-format:not([data-open=true]) > .format-buttons { display: none; }
+  .format-buttons { flex: 1 1 auto; flex-wrap: nowrap; min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; }
+  .format-buttons > button { flex: none; }
+  /* With the keyboard open the dock and the floating button give the room to the text. */
+  body.keyboard-open .mode-switch, body.keyboard-open .assistant-fab { display: none; }
+  body.keyboard-open::after { height: 0; }
   .desk-scenes > button > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
 /* Phones and tablets in Ayuda: the text and the help are two panes, one tap apart. */
@@ -1557,6 +1586,11 @@ function plainSurface({ text, label, onChange, onSave }) {
     setEditable(editable) { area.readOnly = !editable; },
     isEditable: () => !area.readOnly,
     focus: () => area.focus(),
+    getSelection() {
+      const from = Math.min(area.selectionStart || 0, area.selectionEnd || 0);
+      const to = Math.max(area.selectionStart || 0, area.selectionEnd || 0);
+      return { from, to, text: area.value.slice(from, to) };
+    },
     select(from, to) {
       area.focus();
       area.setSelectionRange(from, to);
@@ -1634,10 +1668,12 @@ function sceneEditor(book, scene, close, editorLib, onText, links) {
   let saving = false;
   const stored = (value) => endings === 'crlf' ? value.replace(/\n/g, '\r\n') : value;
   const box = el('div', undefined, 'scene-editor');
+  // The sticky head above the text (Guardar, the save state, the toolbar), set below.
+  let head = null;
   const surfaceOptions = { text: '', label: (isNote ? 'Texto de la nota ' + noteName(file) : 'Texto de la escena ' + file), onChange: () => remember(), onSave: () => save() };
   const linkOptions = links ? { notes: links.notes || [], onOpenNote: links.onOpenNote } : {};
   const area = editorLib
-    ? editorLib.createSceneEditor({ ...surfaceOptions, ...linkOptions, view: readView(), onViewChange: writeView })
+    ? editorLib.createSceneEditor({ ...surfaceOptions, ...linkOptions, view: readView(), onViewChange: writeView, margins: () => editorMargins(head) })
     : plainSurface(surfaceOptions);
   box.focusEditor = () => area.focus();
   const mixedNote = el('p', 'Esta escena mezcla finales de línea (de Windows y de otros sistemas). Para no cambiarlos sin querer, solo se puede leer aquí.', 'meta');
@@ -1763,13 +1799,23 @@ function sceneEditor(book, scene, close, editorLib, onText, links) {
     await close();
   });
   const row = el('div', undefined, 'form-row actions');
-  row.append(saveButton, closeEditor);
-  box.append(mixedNote, normalise, area.dom, row, status, conflict);
+  row.append(saveButton, closeEditor, status);
+  // Guardar, the save state and the formatting toolbar stay together above the text, so the
+  // desk can keep them in sight while the person writes (docs/design.md, "Scene editor").
+  head = el('div', undefined, 'scene-head');
+  head.append(row);
+  if (area.toolbar) head.append(area.toolbar);
+  box.append(mixedNote, normalise, head, area.dom, conflict);
   // What the writing desk needs from the editor; saving stays inside this function.
   box.editor = {
     file,
     dom: area.dom,
     getValue: () => area.getValue(),
+    // The selected text, for Analizar; the plain field has one too.
+    getSelection: () => (area.getSelection ? area.getSelection() : { from: 0, to: 0, text: '' }),
+    // Where the caret is on screen ({ top, bottom }), or null, to keep it above the keyboard.
+    caretRect: () => (area.caretRect ? area.caretRect() : null),
+    head,
     select: (from, to) => area.select(from, to),
     setNotes: (notes) => { if (area.setNotes) area.setNotes(notes); },
     base: () => base,
@@ -1869,6 +1915,7 @@ function ensureDesk() {
   if (!desk) {
     desk = createDesk();
     app.append(desk.node);
+    watchKeyboard();
   }
   return desk;
 }
@@ -2368,6 +2415,87 @@ function graphList(book, onOpen, current) {
   };
 }
 
+// Analizar (issue #101): what the assistant is asked, by scope. The scene is read by the
+// assistant from the saved version; a selection travels inside the prompt, as typed.
+const ANALYSE_FOCUS = 'Fíjate en las motivaciones, las consecuencias y lo que sabe cada personaje. Distingue hechos, interpretaciones e ideas alternativas, y cita el texto.';
+const ANALYSE_PROMPTS = {
+  scene: 'Analiza esta escena. ' + ANALYSE_FOCUS,
+  selection: 'Analiza este fragmento. ' + ANALYSE_FOCUS,
+  book: 'Analiza el libro entero. ' + ANALYSE_FOCUS + ' Di qué escenas has leído: un análisis parcial no representa el libro.',
+};
+// The server refuses a prompt longer than this (MAX_PROMPT in http-server.ts).
+const ANALYSE_MAX = 8000;
+const SCOPES = [['scene', 'Esta escena'], ['selection', 'La selección'], ['book', 'El libro']];
+// "1.240 palabras", grouped as the scope line of the issue shows it.
+const groupedCount = (n, one, many) => new Intl.NumberFormat('es', { useGrouping: 'always' }).format(n) + ' ' + (n === 1 ? one : many);
+// "scenes/003-el-faro.md" reads "escena 3", as the assistant panel names scenes.
+function sceneLabel(file) {
+  const name = deskSceneName(file);
+  const numbered = /^(\d{1,4})(?:[-_ ]|$)/.exec(name);
+  return numbered ? 'escena ' + Number(numbered[1]) : name.replace(/[-_]+/g, ' ');
+}
+
+// Sends an analysis through the assistant panel of src/adapters/engine-page.ts (the same
+// script, so its functions are in scope): the item becomes the panel's reference and the turn
+// carries the usual page context. Returns 'sent', 'connect' (ChatGPT is not connected: the
+// panel shows how, with the prompt already written) or 'busy'.
+async function analyseWithAssistant(item, prompt, opener) {
+  setAssistantItem(item);
+  openAssistant(opener);
+  await refreshAssistantStatus().catch(() => {});
+  if (assistantState.status.state !== 'connected') {
+    panel.input.value = prompt;
+    fitInput();
+    return 'connect';
+  }
+  if (assistantState.running) return 'busy';
+  // The answer streams into the panel; the desk only says it went.
+  sendAssistant(prompt).catch(() => {});
+  return 'sent';
+}
+
+// What covers the window above and below the editor's text: the sticky head of the editor and,
+// with a phone keyboard open, the part of the window the visual viewport no longer shows; below,
+// also the bottom dock while it is shown. In px, from the window's edges.
+function editorMargins(head) {
+  const vv = window.visualViewport;
+  const offset = vv ? vv.offsetTop : 0;
+  let top = offset + (head && head.getBoundingClientRect ? head.getBoundingClientRect().height : 0);
+  let bottom = vv ? Math.max(0, window.innerHeight - offset - vv.height) : 0;
+  const dock = modeSwitch && modeSwitch.node;
+  if (dock && dock.getBoundingClientRect && window.getComputedStyle) {
+    const style = window.getComputedStyle(dock);
+    if (style.position === 'fixed' && style.display !== 'none') bottom += dock.getBoundingClientRect().height;
+  }
+  return { top, bottom };
+}
+
+// Phones (docs/design.md, "Modes"): with the on-screen keyboard open the visual viewport is
+// shorter than the window. The body gets .keyboard-open (the dock and the floating button give
+// way), --vv-top keeps the editor's sticky head at the top of what is visible, and the caret is
+// scrolled back above the keyboard. A keyboard is a visual viewport under 75% of the tallest
+// seen at that width while the text has the focus.
+function watchKeyboard() {
+  const vv = window.visualViewport;
+  if (!vv || !vv.addEventListener || !document.documentElement) return;
+  let tallest = { width: 0, height: 0 };
+  const update = (event) => {
+    if (vv.width !== tallest.width) tallest = { width: vv.width, height: 0 };
+    tallest.height = Math.max(tallest.height, vv.height);
+    const typing = Boolean(desk && desk.owns(document.activeElement));
+    const open = typing && vv.height < tallest.height * 0.75;
+    document.body.classList.toggle('keyboard-open', open);
+    document.documentElement.style.setProperty('--vv-top', open ? Math.max(0, vv.offsetTop) + 'px' : '0px');
+    // Only the keyboard resizing the screen moves the page: following its own scroll, or any
+    // other resize (a scrollbar appearing on a desktop), would fight the person.
+    if (open && event && event.type === 'resize') desk.keepCaretVisible();
+  };
+  vv.addEventListener('resize', update);
+  vv.addEventListener('scroll', update);
+  document.addEventListener('focusin', () => update());
+  document.addEventListener('focusout', () => setTimeout(() => update(), 0));
+}
+
 function createDesk() {
   const node = el('section', undefined, 'desk');
   node.id = 'desk';
@@ -2402,9 +2530,43 @@ function createDesk() {
     tool.setAttribute('aria-controls', 'desk-panel');
   }
   tools.append(notesTool, graphTool);
+  // Analizar, in Ayuda only: the scope is chosen and shown before anything is sent.
+  const analyseTool = el('button', 'Analizar', 'analyse-toggle');
+  analyseTool.type = 'button';
+  analyseTool.setAttribute('aria-expanded', 'false');
+  analyseTool.setAttribute('aria-controls', 'desk-analyse');
   const deskStatus = el('p', '', 'meta desk-status');
   deskStatus.setAttribute('role', 'status');
-  head.append(scenes, tools, title, words, deskStatus);
+  head.append(scenes, tools, analyseTool, title, words, deskStatus);
+  const analyse = el('section', undefined, 'desk-analyse');
+  analyse.id = 'desk-analyse';
+  analyse.setAttribute('aria-label', 'Analizar');
+  analyse.hidden = true;
+  const scopeGroup = el('div', undefined, 'analyse-scopes');
+  scopeGroup.setAttribute('role', 'group');
+  scopeGroup.setAttribute('aria-label', 'Qué analizar');
+  const scopeButtons = SCOPES.map(([id, label]) => {
+    const choice = el('button', label);
+    choice.type = 'button';
+    choice.scope = id;
+    // The selection it may analyse stays in the text while the person picks.
+    choice.addEventListener('mousedown', (event) => event.preventDefault());
+    choice.addEventListener('click', () => {
+      state.scope = id;
+      renderAnalyse();
+    });
+    return choice;
+  });
+  scopeGroup.append(...scopeButtons);
+  const scopeLine = el('p', '', 'analyse-scope');
+  scopeLine.setAttribute('role', 'status');
+  const scopeNote = el('p', '', 'meta analyse-hint');
+  const sendAnalyse = el('button', 'Enviar al asistente', 'accept');
+  sendAnalyse.type = 'button';
+  sendAnalyse.addEventListener('mousedown', (event) => event.preventDefault());
+  const analyseStatus = el('p', '', 'meta analyse-status');
+  analyseStatus.setAttribute('role', 'status');
+  analyse.append(el('h2', 'Analizar'), scopeGroup, scopeLine, scopeNote, sendAnalyse, analyseStatus);
   const panel = el('section', undefined, 'desk-panel');
   panel.id = 'desk-panel';
   panel.hidden = true;
@@ -2430,9 +2592,75 @@ function createDesk() {
   const help = el('aside', undefined, 'desk-help');
   help.setAttribute('aria-label', 'Ayuda para esta escena');
   bodyBox.append(slot, help);
-  node.append(head, banner, panes, panel, bodyBox);
+  node.append(head, analyse, banner, panes, panel, bodyBox);
 
-  const state = { book: null, file: null, scenes: [], editor: null, saved: null, pane: 'text', opening: 0, statsQueued: false, notes: null, lib: null, panel: null };
+  const state = { book: null, file: null, scenes: [], editor: null, saved: null, pane: 'text', opening: 0, statsQueued: false, notes: null, lib: null, panel: null, scope: 'scene' };
+
+  // What Analizar would send for a scope: the line that names it, the panel's item and the
+  // prompt; or the reason it cannot (why). Never anything the assistant cannot really do.
+  function analysisPlan(scope) {
+    const file = state.file;
+    const editor = state.editor;
+    const isNote = Boolean(file) && isNoteFile(file);
+    const where = isNote ? 'la nota ' + noteName(file) : file ? sceneLabel(file) : '';
+    const item = file && !isNote ? { kind: 'scene', id: file, label: 'Escena: ' + deskSceneName(file) } : null;
+    if (scope === 'book') {
+      const title = currentBookTitle ? ' «' + currentBookTitle + '»' : '';
+      return { line: 'Se analizará: el libro' + title + ' (' + groupedCount(state.scenes.length, 'escena', 'escenas') + ')', item: null, prompt: ANALYSE_PROMPTS.book,
+        hint: 'El asistente lee las escenas guardadas y dirá cuáles ha leído: un análisis parcial no representa el libro entero.' };
+    }
+    if (!editor) return { why: 'Abre una escena para analizarla.' };
+    if (scope === 'scene') {
+      if (isNote) return { why: 'Una nota no es una escena: analiza la selección o el libro.' };
+      return { line: 'Se analizará: ' + where + ' (' + groupedCount(wordCount(editor.getValue()), 'palabra', 'palabras') + ')', item, prompt: ANALYSE_PROMPTS.scene,
+        hint: editor.dirty() ? 'El asistente lee la versión guardada: tus cambios sin guardar no entran. Guarda antes si quieres que los lea.' : 'El asistente lee la versión guardada de la escena.' };
+    }
+    const selected = editor.getSelection();
+    if (!selected.text.trim()) return { why: 'Selecciona un fragmento en el texto para analizarlo.' };
+    const quoted = selected.text.split('\n').map((line) => '> ' + line).join('\n');
+    const prompt = ANALYSE_PROMPTS.selection + (where ? ' Es de ' + where + '.' : '') + '\n\n' + quoted;
+    if (prompt.length > ANALYSE_MAX) return { why: 'La selección es demasiado larga para enviarla. Selecciona menos texto o analiza la escena entera.' };
+    return { line: 'Se analizará: la selección de ' + where + ' (' + groupedCount(wordCount(selected.text), 'palabra', 'palabras') + ')', item, prompt,
+      hint: 'El fragmento se envía tal como está en el editor, aunque no lo hayas guardado.' };
+  }
+
+  function renderAnalyse() {
+    const shown = mode === 'help' && !analyse.hidden;
+    analyseTool.setAttribute('aria-expanded', String(shown));
+    if (!shown) return;
+    for (const choice of scopeButtons) choice.setAttribute('aria-pressed', String(choice.scope === state.scope));
+    const plan = analysisPlan(state.scope);
+    scopeLine.textContent = plan.line || plan.why;
+    scopeNote.textContent = plan.hint || '';
+    sendAnalyse.disabled = !plan.prompt;
+  }
+
+  function setAnalyseOpen(open) {
+    analyse.hidden = !open;
+    analyseStatus.textContent = '';
+    renderAnalyse();
+  }
+  analyseTool.addEventListener('mousedown', (event) => event.preventDefault());
+  analyseTool.addEventListener('click', () => setAnalyseOpen(analyse.hidden));
+  // The selection can change while the box is open: it is read again when the person comes back.
+  analyse.addEventListener('focusin', () => renderAnalyse());
+  analyse.addEventListener('pointerenter', () => renderAnalyse());
+
+  sendAnalyse.addEventListener('click', async () => {
+    const plan = analysisPlan(state.scope);
+    renderAnalyse();
+    if (!plan.prompt) return;
+    if (!assistant || typeof analyseWithAssistant !== 'function' || typeof sendAssistant !== 'function') {
+      analyseStatus.textContent = 'El asistente no está activado en este servidor. Tu cuenta de RE;write basta para escribir y revisar; también puedes analizar el libro desde tu propio ChatGPT con el conector de RE;write.';
+      return;
+    }
+    const outcome = await analyseWithAssistant(plan.item, plan.prompt, sendAnalyse);
+    analyseStatus.textContent = outcome === 'sent'
+      ? 'Enviado al asistente. La respuesta aparece en su panel.'
+      : outcome === 'busy'
+        ? 'Ya hay una respuesta en curso. Espera a que termine o detenla.'
+        : 'Para analizar, conecta tu propia cuenta de ChatGPT en el panel del asistente; el mensaje queda escrito para enviarlo después. Nunca escribas tu contraseña en RE;write.';
+  });
 
   const sceneKey = (book) => 'rewrite:desk-scene:' + (personKey || '') + ':' + book;
   function rememberScene(book, file) {
@@ -2494,6 +2722,7 @@ function createDesk() {
     const count = wordCount(text);
     words.textContent = count.toLocaleString('es') + (count === 1 ? ' palabra' : ' palabras');
     showBanner();
+    renderAnalyse();
   }
   // Counting reads the whole text: at most once per pause in the typing.
   function queueStats() {
@@ -2802,9 +3031,20 @@ function createDesk() {
     focusEditor() {
       if (state.editor && state.box) state.box.focusEditor();
     },
+    // Scrolls the window so the caret is between the sticky head and what covers the bottom.
+    keepCaretVisible() {
+      const rect = state.editor && state.editor.caretRect();
+      if (!rect) return;
+      const margins = editorMargins(state.editor.head);
+      const top = margins.top + 8;
+      const bottom = window.innerHeight - margins.bottom - 8;
+      if (rect.bottom > bottom) window.scrollBy(0, rect.bottom - bottom);
+      else if (rect.top < top) window.scrollBy(0, rect.top - top);
+    },
     sync() {
       setPane(state.pane);
       renderHelp();
+      renderAnalyse();
     },
     // Called by every render and refresh with the book's data: only the help column and
     // the scene list follow it. Another book closes the desk (its drafts stay in the tab).
