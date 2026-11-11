@@ -342,17 +342,24 @@ test('the review page refreshes its state without a manual reload', async (t) =>
     assert.equal(page.polls().length, 1);
   });
 
-  await t.test('polling only reads, and each poll is one metadata-only log line', async () => {
+  await t.test('polling only reads, and unchanged polls are counted into one metadata-only summary line', async () => {
     const polled = page.calls.filter((call) => call.path === QUEUE_ROUTE);
     assert.ok(polled.length >= 8);
     assert.ok(page.calls.every((call) => call.method === 'GET'), 'the page never wrote on its own');
-    const records = lines.map((line) => JSON.parse(line)).filter((r) => r.event === 'http.request' && r.status === 304);
-    assert.equal(records.length, polled.filter((call) => call.status === 304).length);
-    for (const record of records) {
-      assert.deepEqual(Object.keys(record).sort(), ['book', 'door', 'duration_ms', 'event', 'method', 'request_id', 'route', 'status', 'subject', 'timestamp']);
-      assert.equal(record.route, '/review/api/books/:book');
-      assert.equal(record.method, 'GET');
-    }
+    const unchanged = polled.filter((call) => call.status === 304).length;
+    assert.ok(unchanged > 0);
+    const records = () => lines.map((line) => JSON.parse(line));
+    assert.deepEqual(records().filter((r) => r.event === 'http.request' && r.status === 304), [], 'no line per unchanged poll');
+    // Closing the server writes the pending summary. The previous test's server may close while this
+    // one runs, so only a summary counted since this test's first line is this server's.
+    const started = Date.parse(records()[0].timestamp);
+    const summaries = () => records().filter((r) => r.event === 'http.poll_summary' && Date.parse(r.since) >= started);
+    h.close();
+    for (let i = 0; i < 200 && summaries().length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(summaries().length, 1);
+    const [summary] = summaries();
+    assert.deepEqual(Object.keys(summary), ['event', 'timestamp', 'since', 'door', 'method', 'route', 'status', 'count'], 'no subject, book, request id or ETag');
+    assert.deepEqual({ ...summary, timestamp: 0, since: 0 }, { event: 'http.poll_summary', timestamp: 0, since: 0, door: 'review', method: 'GET', route: '/review/api/books/:book', status: 304, count: unchanged });
     const output = lines.join('\n');
     for (const etag of new Set(polled.map((call) => call.etag))) assert.ok(etag && !output.includes(etag.replaceAll('"', '')), 'validators stay out of the log');
     for (const text of [QUOTE, FIRST, SECOND, 'Un borrador de nota', session]) assert.ok(!output.includes(text));

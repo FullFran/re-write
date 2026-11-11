@@ -80,9 +80,38 @@ function routeOf(path: string, resourcePath: string): { route: string; book?: st
   return { route: 'unmatched', book };
 }
 
-/** One logger per server startup. Missing salt never falls back to an unkeyed hash. */
-export function withRequestLog(resource: string, handler: RequestListener, salt = process.env.REWRITE_LOG_SALT): RequestListener {
+// The review page polls this route every 5 s with the ETag it holds; while nothing changes, the
+// answer is a bodiless 304.
+const POLL_ROUTE = '/review/api/books/:book';
+
+/**
+ * One logger per server startup. Missing salt never falls back to an unkeyed hash.
+ *
+ * A `304` answer to a `GET` of the review poll route writes no line of its own: such answers are
+ * counted, and one `http.poll_summary` line with the count is written per `pollSummaryMs` interval
+ * that had any, and when the server closes. Every other request is logged one by one.
+ */
+export function withRequestLog(resource: string, handler: RequestListener, salt = process.env.REWRITE_LOG_SALT,
+  { pollSummaryMs = 60_000 }: { pollSummaryMs?: number } = {}): RequestListener {
   if (!salt) console.warn('REWRITE_LOG_SALT is unset; authenticated subject and book hashes are unset');
+  let polls = 0;
+  let since = '';
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const flush = () => {
+    clearTimeout(timer);
+    timer = undefined;
+    if (polls === 0) return;
+    // Counts only: no request id, subject or book, so the line says nothing about who polled what.
+    console.log(JSON.stringify({ event: 'http.poll_summary', timestamp: new Date().toISOString(), since, door: 'review',
+      method: 'GET', route: POLL_ROUTE, status: 304, count: polls }));
+    polls = 0;
+  };
+  const countPoll = () => {
+    if (polls++ === 0) since = new Date().toISOString();
+    // unref: a pending summary never keeps the process alive; closing the server flushes it.
+    if (!timer) timer = setTimeout(flush, pollSummaryMs).unref();
+  };
+  const watched = new WeakSet<object>();
   const hash = (value: string) => salt ? createHmac('sha256', salt).update(value).digest('hex').slice(0, 16) : 'unset';
   const resourcePath = new URL(resource).pathname;
   return (req, res) => {
@@ -91,6 +120,8 @@ export function withRequestLog(resource: string, handler: RequestListener, salt 
     const { route, book } = routeOf(path, resourcePath);
     const context: Context = { request_id: randomUUID(), door: path === resourcePath ? 'mcp' : path.startsWith('/review') ? 'review' : 'public', subject: 'anon', hash };
     const start = performance.now();
+    const server = (req.socket as { server?: { once(event: 'close', listener: () => void): unknown } }).server;
+    if (server && !watched.has(server)) { watched.add(server); server.once('close', flush); }
     res.setHeader('x-request-id', context.request_id);
     let error: string | undefined;
     const end = res.end;
@@ -106,6 +137,7 @@ export function withRequestLog(resource: string, handler: RequestListener, salt 
       if (emitted) return;
       emitted = true;
       const status = res.writableFinished ? res.statusCode : 499;
+      if (status === 304 && route === POLL_ROUTE && req.method === 'GET') return countPoll();
       write(context, 'http.request', start, { method: methods.has(req.method ?? '') ? req.method : 'unknown', route, status,
         ...(book !== undefined ? { book: hash(book) } : {}), ...(status >= 400 ? { error: error ?? 'error' } : {}),
         ...(context.reason ? { reason: context.reason } : {}), ...(context.error_name ? { error_name: context.error_name } : {}) });
