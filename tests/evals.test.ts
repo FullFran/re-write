@@ -52,14 +52,14 @@ test('the shipped journeys cover the first set and all pass against this build, 
   const first = await runJourneys();
   assert.deepEqual(first.journeys.map((item) => item.id), [
     'agent-cannot-approve', 'chatgpt-chapter-analysis', 'chatgpt-error-recovery', 'chatgpt-tool-metadata',
-    'fabricated-quote', 'literal-quote-claim', 'onboarding', 'retried-proposal', 'rumor-not-canon', 'stale-evidence',
+    'fabricated-quote', 'literal-quote-claim', 'notes-and-graph', 'onboarding', 'retried-proposal', 'rumor-not-canon', 'stale-evidence',
   ]);
   assert.deepEqual(resultRows(first).filter((row) => row.status !== 'PASS'), []);
   assert.equal(first.schema, RESULTS_SCHEMA);
   assert.equal(first.version, JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.json'), 'utf8')).version);
   assert.match(first.commit, /^([0-9a-f]{40}|unknown)$/);
   assert.equal(first.build, 'in-memory');
-  assert.deepEqual(first.summary.journeys, { pass: 10, fail: 0 });
+  assert.deepEqual(first.summary.journeys, { pass: 11, fail: 0 });
   assert.equal(first.summary.checks.pass, resultRows(first).length);
   for (const item of first.journeys) {
     assert.ok(item.guarantee, item.id);
@@ -96,9 +96,9 @@ test('runner self-test: a build that allows approval over MCP fails the approval
   assert.match(approval.checks[1].note, /accept_claim/);
   const metadata = broken.journeys.find((item) => item.id === 'chatgpt-tool-metadata')!;
   assert.deepEqual(metadata.checks.filter((check) => check.status === 'FAIL').map((check) => check.check), [
-    'every tool has a title', 'every description starts with Use this', 'only the three proposal tools are write tools',
+    'every tool has a title', 'every description starts with Use this', 'only the four proposal tools are write tools',
   ]);
-  assert.deepEqual(broken.summary.journeys, { pass: 7, fail: 3 });
+  assert.deepEqual(broken.summary.journeys, { pass: 8, fail: 3 });
 });
 
 test('runner self-test: a tool list that grows past its budget fails the metadata journey', async () => {
@@ -117,7 +117,7 @@ test('runner self-test: a tool list that grows past its budget fails the metadat
   assert.deepEqual(failing(outcome), ['chatgpt-tool-metadata', 'onboarding']);
   const metadata = outcome.journeys.find((item) => item.id === 'chatgpt-tool-metadata')!;
   assert.deepEqual(metadata.checks.filter((check) => check.status === 'FAIL').map((check) => `${check.check}: ${check.note}`), [
-    'the tool list stays under 20 KB: expected at most 20000',
+    'the tool list stays under 28 KB: expected at most 28000',
   ]);
 });
 
@@ -125,9 +125,51 @@ test('runner self-test: onboarding text that names a tool the harness does not o
   const misleading: Build = {
     ...inMemoryBuild,
     name: 'misleading-onboarding',
-    llms: (resource) => inMemoryBuild.llms(resource).replace('`list_findings`.', '`list_findings`, `accept_claim`.'),
+    llms: (resource) => inMemoryBuild.llms(resource).replace('`graph_central`.', '`graph_central`, `accept_claim`.'),
   };
   assert.deepEqual(failing(await runJourneys({ build: misleading })), ['onboarding']);
+});
+
+test('runner self-test: a build that writes a proposed note without a person fails the notes journey', async () => {
+  const eager: Build = {
+    ...inMemoryBuild,
+    name: 'note-without-review',
+    server(library, subject) {
+      const open = library.open.bind(library);
+      const shortcut = Object.create(library, {
+        open: {
+          value: (book: string, who: string) => {
+            const project = open(book, who);
+            const propose = project.proposeNote.bind(project);
+            project.proposeNote = (input) => {
+              const result = propose(input);
+              project.reviewProposal(result.proposal.proposal_id, 'accept', who);
+              return result;
+            };
+            return project;
+          },
+        },
+      });
+      return inMemoryBuild.server(shortcut, subject);
+    },
+  };
+  const outcome = await runJourneys({ build: eager });
+  assert.deepEqual(failing(outcome), ['notes-and-graph']);
+  const notes = outcome.journeys.find((item) => item.id === 'notes-and-graph')!;
+  assert.ok(notes.checks.some((check) => check.status === 'FAIL' && check.check === 'no note exists before a person accepts'));
+});
+
+test('runner self-test: a person review of a proposal must say accept or reject', async () => {
+  const dir = journeyDir({
+    'no-decision': journey('no-decision', [
+      { id: 'books', do: 'call', tool: 'list_books', checks: [{ name: 'lists a book', path: 'books.is_error', equals: false }] },
+      { id: 'review', do: 'person_reviews_proposal', proposal_id: 'P-0000000000', checks: [{ name: 'reviewed', path: 'review.status', equals: 'accepted' }] },
+    ]),
+  });
+  const outcome = await runJourneys({ dir });
+  assert.deepEqual(failing(outcome), ['no-decision']);
+  const checks = outcome.journeys[0].checks.map((check) => `${check.status} ${check.check}: ${check.note}`);
+  assert.ok(checks.some((line) => /^FAIL step review runs: decision must be "accept" or "reject"/.test(line)), checks.join('\n'));
 });
 
 test('the runner fails closed: a journey that cannot load, cannot run or checks nothing real is FAIL, never SKIP', async () => {
@@ -199,11 +241,11 @@ test('npm run eval writes results.json, prints the table, and exits 1 only when 
   assert.equal(passing.code, 0, passing.stderr);
   assert.match(passing.stdout, /^\| journey +\| check +\| status \| note \|$/m);
   assert.match(passing.stdout, /^\| agent-cannot-approve +\| accept_claim is refused +\| PASS +\|/m);
-  assert.ok(passing.stdout.includes('journeys: 10 passed, 0 failed; checks: '));
+  assert.ok(passing.stdout.includes('journeys: 11 passed, 0 failed; checks: '));
   assert.ok(passing.stdout.includes(`results: ${out}`));
   const written = JSON.parse(readFileSync(out, 'utf8'));
   assert.equal(written.schema, RESULTS_SCHEMA);
-  assert.deepEqual(written.summary.journeys, { pass: 10, fail: 0 });
+  assert.deepEqual(written.summary.journeys, { pass: 11, fail: 0 });
   assert.equal(JSON.parse(readFileSync(resolve(import.meta.dirname, '..', 'package.json'), 'utf8')).scripts.eval, 'node scripts/eval.ts');
 
   const dir = journeyDir({ broken: journey('broken', [{ id: 'books', do: 'call', tool: 'list_books', checks: [{ name: 'no book is listed', path: 'books.data.books', equals: [] }] }]) });

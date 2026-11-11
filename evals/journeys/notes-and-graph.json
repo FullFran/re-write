@@ -1,0 +1,193 @@
+{
+  "id": "notes-and-graph",
+  "title": "Build notes from [[links]] and explore the story graph",
+  "guarantee": "Links in scenes become notes only when a person accepts the assistant's proposal; backlinks and graph answers follow the links, cut at a scene without spoilers, and reading the graph writes nothing.",
+  "book": {
+    "id": "grafo",
+    "title": "El puente de Sal",
+    "scenes": ["evals/journeys/books/grafo/001-el-puente.md", "evals/journeys/books/grafo/002-la-posada.md", "evals/journeys/books/grafo/003-el-alba.md"]
+  },
+  "steps": [
+    {
+      "id": "empty",
+      "do": "call",
+      "tool": "list_notes",
+      "args": { "book": "grafo" },
+      "checks": [
+        { "name": "the book has no notes yet", "path": "empty.data.notes", "equals": [] },
+        { "name": "links in the scenes are listed as unresolved, in reading order", "path": "empty.data.unresolved.*.target", "equals": ["Elena", "Puente de Sal", "Tomás"] }
+      ]
+    },
+    {
+      "id": "elena",
+      "do": "call",
+      "tool": "propose_note",
+      "args": { "book": "grafo", "name": "Elena", "text": "---\ntype: personaje\naliases: [la capitana]\n---\nCapitana del puente de Sal.\n", "rationale": "Ficha del personaje enlazado en las escenas" },
+      "checks": [
+        { "name": "the note is proposed, not written", "path": "elena.data.created", "equals": true },
+        { "name": "the proposal creates notas/Elena.md", "path": "elena.data.proposal.file", "equals": "notas/Elena.md" },
+        { "name": "the assistant is told it cannot accept", "path": "elena.data.next_step", "contains": "You cannot accept or reject anything" }
+      ]
+    },
+    {
+      "id": "before",
+      "do": "book_state",
+      "checks": [
+        { "name": "no note exists before a person accepts", "path": "before.notes", "equals": {} }
+      ]
+    },
+    {
+      "id": "accept_elena",
+      "do": "person_reviews_proposal",
+      "proposal_id": { "ref": "elena.data.proposal.proposal_id" },
+      "decision": "accept",
+      "checks": [
+        { "name": "the person accepts the note", "path": "accept_elena.status", "equals": "accepted" }
+      ]
+    },
+    {
+      "id": "puente",
+      "do": "call",
+      "tool": "propose_note",
+      "args": { "book": "grafo", "name": "Puente de Sal", "text": "---\ntype: lugar\n---\nLo guarda [[Elena]].\n", "rationale": "Lugar enlazado en las escenas" },
+      "checks": [
+        { "name": "the second note is proposed", "path": "puente.data.created", "equals": true }
+      ]
+    },
+    {
+      "id": "accept_puente",
+      "do": "person_reviews_proposal",
+      "proposal_id": { "ref": "puente.data.proposal.proposal_id" },
+      "decision": "accept",
+      "checks": [
+        { "name": "the person accepts it", "path": "accept_puente.status", "equals": "accepted" }
+      ]
+    },
+    {
+      "id": "faro",
+      "do": "call",
+      "tool": "propose_note",
+      "args": { "book": "grafo", "name": "Faro", "text": "---\ntype: lugar\n---\nUn faro apagado.\n", "rationale": "Un hilo pendiente" },
+      "checks": [
+        { "name": "a third note is proposed", "path": "faro.is_error", "equals": false }
+      ]
+    },
+    {
+      "id": "accept_faro",
+      "do": "person_reviews_proposal",
+      "proposal_id": { "ref": "faro.data.proposal.proposal_id" },
+      "decision": "accept",
+      "checks": [
+        { "name": "the person accepts it", "path": "accept_faro.status", "equals": "accepted" }
+      ]
+    },
+    {
+      "id": "notes",
+      "do": "call",
+      "tool": "list_notes",
+      "args": { "book": "grafo" },
+      "checks": [
+        { "name": "the accepted notes are listed by name", "path": "notes.data.notes.*.name", "equals": ["Elena", "Faro", "Puente de Sal"] },
+        { "name": "types come from the frontmatter", "path": "notes.data.notes.*.type", "equals": ["personaje", "lugar", "lugar"] },
+        { "name": "only the link without a note stays unresolved", "path": "notes.data.unresolved.*.target", "equals": ["Tomás"] }
+      ]
+    },
+    {
+      "id": "read",
+      "do": "call",
+      "tool": "read_note",
+      "args": { "book": "grafo", "name": "la capitana" },
+      "checks": [
+        { "name": "an alias finds the note", "path": "read.data.name", "equals": "Elena" },
+        { "name": "linked mentions come from the note and the scenes that link it", "path": "read.data.backlinks.linked.*.source", "equals": ["Puente de Sal", "scenes/001-el-puente.md", "scenes/002-la-posada.md"] },
+        { "name": "unlinked mentions are the name or alias as plain text", "path": "read.data.backlinks.unlinked.*.text", "equals": ["La capitana", "elena"] },
+        { "name": "each mention carries its sentence", "path": "read.data.backlinks.unlinked.0.context", "equals": "La capitana miró el río." }
+      ]
+    },
+    {
+      "id": "near",
+      "do": "call",
+      "tool": "graph_neighbors",
+      "args": { "book": "grafo", "node": "Elena" },
+      "checks": [
+        { "name": "neighbours are the linking note and scenes, nearest first", "path": "near.data.nodes.*.id", "equals": ["note:Elena", "note:Puente de Sal", "scene:scenes/001-el-puente.md", "scene:scenes/002-la-posada.md"] }
+      ]
+    },
+    {
+      "id": "early",
+      "do": "call",
+      "tool": "graph_neighbors",
+      "args": { "book": "grafo", "node": "Elena", "as_of_scene": "scenes/001-el-puente.md" },
+      "checks": [
+        { "name": "as_of_scene leaves out later scenes", "path": "early.data.nodes.*.id", "equals": ["note:Elena", "note:Puente de Sal", "scene:scenes/001-el-puente.md"] }
+      ]
+    },
+    {
+      "id": "orphans",
+      "do": "call",
+      "tool": "graph_orphans",
+      "args": { "book": "grafo" },
+      "checks": [
+        { "name": "the note nothing links is an orphan", "path": "orphans.data.orphans.*.id", "equals": ["note:Faro"] }
+      ]
+    },
+    {
+      "id": "path",
+      "do": "call",
+      "tool": "graph_path",
+      "args": { "book": "grafo", "from": "scenes/003-el-alba.md", "to": "Elena" },
+      "checks": [
+        { "name": "the shortest path goes through the place", "path": "path.data.path.*.id", "equals": ["scene:scenes/003-el-alba.md", "note:Puente de Sal", "note:Elena"] }
+      ]
+    },
+    {
+      "id": "central",
+      "do": "call",
+      "tool": "graph_central",
+      "args": { "book": "grafo", "metric": "degree" },
+      "checks": [
+        { "name": "notes rank by degree, ties by name", "path": "central.data.ranking.*.id", "equals": ["note:Elena", "note:Puente de Sal", "note:Faro"] },
+        { "name": "degrees are the distinct neighbours", "path": "central.data.ranking.*.degree", "equals": [3, 3, 0] }
+      ]
+    },
+    {
+      "id": "graph_reads",
+      "do": "book_state",
+      "checks": [
+        { "name": "reading the graph proposes nothing", "path": "graph_reads.proposals", "equals": 3 }
+      ]
+    },
+    {
+      "id": "change_faro",
+      "do": "call",
+      "tool": "propose_revision",
+      "args": { "book": "grafo", "file": "notas/Faro.md", "find": "Un faro apagado.", "replace": "Un faro apagado desde la tormenta.", "rationale": "Precisar el hilo" },
+      "checks": [
+        { "name": "a note changes through a proposal too", "path": "change_faro.data.created", "equals": true }
+      ]
+    },
+    {
+      "id": "unchanged",
+      "do": "book_state",
+      "checks": [
+        { "name": "the note keeps its text until a person accepts", "path": "unchanged.notes.Faro", "equals": "---\ntype: lugar\n---\nUn faro apagado.\n" }
+      ]
+    },
+    {
+      "id": "accept_change",
+      "do": "person_reviews_proposal",
+      "proposal_id": { "ref": "change_faro.data.proposal.proposal_id" },
+      "decision": "accept",
+      "checks": [
+        { "name": "the person accepts the change", "path": "accept_change.file", "equals": "notas/Faro.md" }
+      ]
+    },
+    {
+      "id": "after",
+      "do": "book_state",
+      "checks": [
+        { "name": "the accepted change is in the note", "path": "after.notes.Faro", "equals": "---\ntype: lugar\n---\nUn faro apagado desde la tormenta.\n" }
+      ]
+    }
+  ]
+}

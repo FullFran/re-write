@@ -63,7 +63,8 @@ browser import names them (`evals/journeys/books/capitulos/003-la-carta.md`). Se
 | --- | --- |
 | `chatgpt-chapter-analysis` | "Analiza el capítulo 3" takes the documented calls, reads a long scene page by page, stores only a proposal, and hands the person the review URL. |
 | `chatgpt-error-recovery` | Every refusal names the tool to call next, an ambiguous or absent passage asks for a longer or present one from read_scene, a refused proposal stores nothing, and following the hint works. |
-| `chatgpt-tool-metadata` | Every tool has a title and says when to use it, only proposals are write tools, the tool list stays under 20 KB, and the first 512 characters of the instructions give the order of calls and the review URL. |
+| `notes-and-graph` | Links in scenes become notes only when a person accepts the proposal; backlinks and the graph tools follow the links, `as_of_scene` leaves out later scenes, and reading the graph writes nothing. Its book is `evals/journeys/books/grafo/`. |
+| `chatgpt-tool-metadata` | Every tool has a title and says when to use it, only proposals are write tools, the tool list stays under 28 KB, and the first 512 characters of the instructions give the order of calls and the review URL. |
 
 The in-memory build gives the server the review URL `https://rewrite.invalid/review`, built from the
 journey resource the same way the HTTP server builds it from its configured origin.
@@ -120,7 +121,8 @@ scripted agent connects as the one person who can open the book.
 | `call` | agent | `tool`, `args` | `is_error`, `data` (the parsed JSON reply, or `null`), `text`, `problem` (the `structuredContent`: a problem with its `next_step` on a refusal, the structured result on success), `rpc_error` |
 | `person_edits_scene` | person | `file`, `find` (must appear once), `replace` | `file` |
 | `person_reviews_claim` | person | `claim_id`, `decision` (`accept` or `reject`) | `changed`, `editorial_status` |
-| `book_state` | observer | none | `commits`, `claims`, `canon` (claim ids), `findings` and `proposals` (counts), `scenes` (file to text) |
+| `person_reviews_proposal` | person | `proposal_id`, `decision` (`accept` or `reject`, required: no default) | `changed`, `status`, `file` |
+| `book_state` | observer | none | `commits`, `claims`, `canon` (claim ids), `findings` and `proposals` (counts), `scenes` (file to text), `notes` (note name to text) |
 
 The person's actions happen outside the MCP connection, as they do in `/review` and in the
 person's own editor. `book_state` reads the book directly, so a check can prove what was stored and

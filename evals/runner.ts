@@ -68,7 +68,7 @@ export interface RunResults {
 
 const MATCHERS = ['equals', 'not_equals', 'matches', 'none_match', 'contains', 'not_contains', 'at_most'] as const;
 type Matcher = (typeof MATCHERS)[number];
-const ACTIONS = ['read_onboarding', 'list_tools', 'call', 'person_edits_scene', 'person_reviews_claim', 'book_state'] as const;
+const ACTIONS = ['read_onboarding', 'list_tools', 'call', 'person_edits_scene', 'person_reviews_claim', 'person_reviews_proposal', 'book_state'] as const;
 type Action = (typeof ACTIONS)[number];
 
 interface Check {
@@ -285,6 +285,13 @@ async function perform(step: Step, world: World, context: Record<string, unknown
       const { claim, changed } = project().reviewClaim(text(fields.claim_id, 'claim_id'), fields.decision === 'reject' ? 'reject' : 'accept', PERSON);
       return { changed, editorial_status: claim.editorial_status };
     }
+    case 'person_reviews_proposal': {
+      // Review happens outside the MCP connection, as it does in /review. No default decision: a
+      // journey that does not say accept or reject fails instead of deciding for the person.
+      if (fields.decision !== 'accept' && fields.decision !== 'reject') throw new Error('decision must be "accept" or "reject"');
+      const { proposal, changed } = project().reviewProposal(text(fields.proposal_id, 'proposal_id'), fields.decision, PERSON);
+      return { changed, status: proposal.status, file: proposal.file };
+    }
     case 'book_state': {
       const book = project();
       return {
@@ -301,6 +308,7 @@ async function perform(step: Step, world: World, context: Record<string, unknown
         findings: book.findings.all().length,
         proposals: book.proposals.all().length,
         scenes: Object.fromEntries(book.scenes().map((file) => [file, book.readScene(file)])),
+        notes: Object.fromEntries(book.notes().map((name) => [name, book.readNote(name)])),
       };
     }
   }
