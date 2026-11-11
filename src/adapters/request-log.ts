@@ -72,9 +72,10 @@ function routeOf(path: string, resourcePath: string): { route: string; book?: st
   let book: string;
   try { book = decodeURIComponent(match[1]); } catch { return { route: 'unmatched' }; }
   const suffix = match[2];
-  const fixed = ['', '/findings', '/export', '/findings/export', '/scenes', '/import', '/notion-inspect', '/notion-import', '/notion/inspect', '/notion/import', '/notion/preview'];
+  const fixed = ['', '/findings', '/export', '/findings/export', '/scenes', '/notes', '/import', '/notion-inspect', '/notion-import', '/notion/inspect', '/notion/import', '/notion/preview'];
   if (fixed.includes(suffix)) return { route: `/review/api/books/:book${suffix}`, book };
   if (/^\/scenes\/.+/.test(suffix)) return { route: '/review/api/books/:book/scenes/:file', book };
+  if (/^\/notes\/.+/.test(suffix)) return { route: '/review/api/books/:book/notes/:name', book };
   const review = /^\/(claims|proposals|findings)\/[^/]+$/.exec(suffix);
   if (review) return { route: `/review/api/books/:book/${review[1]}/:id`, book };
   const action = /^\/(claims|proposals|findings)\/[^/]+\/(reopen|revert|repropose)$/.exec(suffix);
