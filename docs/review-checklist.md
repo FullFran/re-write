@@ -18,6 +18,8 @@ Items marked *(automated)* are checked on every pull request by the browser test
 ## 2. Inspect a Pending Proposal and Diff
 
 - [ ] Select the synthetic book from the book dropdown selector.
+- [ ] With two books, select the one that is not first. Accept or reject a change, import a scene, wait for a refresh, reload, and open `/review/engine`: the same book stays selected each time and the address shows `?book=<id>`. *(automated)*
+- [ ] Open `/review?book=<an id you cannot open>`: one line says the book is not available before another one shows.
 - [ ] Under the **Cambios propuestos** (Proposed changes) section, locate an active proposal card.
 - [ ] Confirm the card displays:
   - The editorial rationale explaining why the change was proposed.
@@ -88,7 +90,7 @@ With `REWRITE_ENGINE=1` the review page carries the assistant panel. Rules: `doc
 
 - [ ] On a phone, scroll to a pending proposal until its **Aceptar cambio** bar sticks to the bottom. Confirm the round **Asistente** button floats above the bar and never covers it, and that it shows its label again at the top of the page.
 - [ ] Open the panel, type a question and close it without sending. Confirm the page did not move, and that reopening shows the text still there.
-- [ ] Not connected: the panel shows **Conectar ChatGPT**; after pressing it, a code, **Abrir OpenAI** and **Esperando a que confirmes en OpenAI…**. After approving at OpenAI, the panel switches to the quick actions by itself.
+- [ ] Not connected: before any code the panel shows **RE;write: sesión iniciada**, **ChatGPT: sin conectar** and **Qué necesitas** (the RE;write account is enough for books, imports and review; the assistant also needs your own ChatGPT, connected with a code at OpenAI; the connector is another way in), then **Conectar ChatGPT**; after pressing it, a code, **Abrir OpenAI** and **Esperando a que confirmes en OpenAI…**. After approving at OpenAI, the panel switches to the quick actions by itself and shows **ChatGPT: conectado**. *(automated)*
 - [ ] Ask **Busca incoherencias en el libro**. While it works, steps such as **Leyendo escena 3…** appear and turn into **Leída: escena 3**; the answer streams with paragraphs and lists. Text with `<b>` or `<img>` from a manuscript shows as text.
 - [ ] Ask it to propose a finding. Confirm the panel says the result will appear, then shows **1 hallazgo nuevo** with **Ver en la página**, which scrolls to the new card and outlines it.
 - [ ] On a proposal, press **Preguntar al asistente**. The panel opens with a draft question and a **Cambio propuesto · …** reference that can be removed with ✕. The answer is about that proposal without naming it.

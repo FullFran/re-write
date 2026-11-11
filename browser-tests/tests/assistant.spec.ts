@@ -110,7 +110,32 @@ test('on a phone the floating button opens a bottom sheet, and asking about a pr
 test('the old assistant address opens the panel in the review page', async ({ page, book }) => {
   await page.setViewportSize(DESKTOP);
   await page.goto(`${book.base}/review/engine`);
-  await expect(page).toHaveURL(`${book.base}/review`);
+  // The panel flag leaves the address; the chosen book (issue #103) is recorded in it.
+  await expect(page).toHaveURL(`${book.base}/review?book=${book.book}`);
   await expect(page.getByRole('complementary', { name: 'Asistente' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Conectar ChatGPT' })).toBeVisible();
 });
+
+// Issue #99: before any code, the panel says which account does what, and both states.
+for (const [name, size] of [['phone', PHONE], ['desktop', DESKTOP]] as const) {
+  test(`on a ${name}, a writer who is not connected sees what each account is for before the code`, async ({ page, book }) => {
+    await page.setViewportSize(size);
+    await open(page, book);
+    await (name === 'phone' ? page.locator('.assistant-fab') : page.locator('#assistant-toggle')).click();
+    const panel = page.getByRole('complementary', { name: 'Asistente' });
+    await expect(panel.getByText('RE;write: sesión iniciada')).toBeVisible();
+    await expect(panel.getByText('ChatGPT: sin conectar')).toBeVisible();
+    await expect(panel.getByRole('heading', { name: 'Qué necesitas' })).toBeVisible();
+    await expect(panel).toContainText('Tu cuenta de RE;write basta para crear libros, importar capítulos y revisar sugerencias.');
+    await expect(panel).toContainText('Para hablar con el asistente aquí también necesitas tu propia cuenta de ChatGPT.');
+    await expect(panel).toContainText('Nunca escribas tu contraseña en RE;write.');
+    await expect(panel).toContainText('También puedes usar RE;write desde tu propio ChatGPT con el conector de RE;write.');
+    await expect(panel.getByRole('button', { name: 'Conectar ChatGPT' })).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath(`not-connected-${name}.png`) });
+
+    await connect(page);
+    await expect(panel.getByText('RE;write: sesión iniciada')).toBeVisible();
+    await expect(panel.getByText('ChatGPT: conectado')).toBeVisible();
+    await expect(panel.getByRole('heading', { name: 'Qué necesitas' })).toHaveCount(0);
+  });
+}

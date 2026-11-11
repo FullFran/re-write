@@ -34,6 +34,7 @@ export const ASSISTANT_CSS = `
 .assistant-state.fail::before { border-color: var(--reject); background: var(--reject); }
 .assistant-head .close { width: var(--tap); padding: 0; }
 .assistant-context { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--line); color: var(--muted); font: var(--text-sm)/1.4 var(--font-ui); }
+.assistant-accounts { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--line); color: var(--muted); font: var(--text-sm)/1.4 var(--font-ui); }
 .context-chip { display: inline-flex; align-items: center; max-width: 100%; min-height: var(--space-6); padding: 0 var(--space-2); border: 1px solid var(--edge); border-radius: var(--radius); color: var(--ink); }
 .context-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .context-chip > button { flex: none; width: var(--tap); min-height: var(--space-6); margin-right: calc(-1 * var(--space-2)); padding: 0; border: 0; }
@@ -428,7 +429,7 @@ function connectView() {
   if (status.state === 'pending') {
     box.append(
       el('h3', 'Escribe este código en OpenAI'),
-      el('p', 'Abre la página de OpenAI, inicia sesión con tu cuenta de ChatGPT y escribe el código. El panel se actualizará solo.'),
+      el('p', 'Abre la página de OpenAI, inicia sesión con tu cuenta de ChatGPT y escribe el código. Después vuelve a esta pestaña: el panel se actualizará solo.'),
       el('strong', status.user_code || '…', 'code'),
     );
     const link = el('a', 'Abrir OpenAI', 'link-button');
@@ -443,11 +444,15 @@ function connectView() {
     box.append(el('p', 'Conectando…', 'assistant-note'));
     return box;
   }
+  // Two accounts, said before any code (issue #99): RE;write is enough for the page,
+  // the assistant also needs the writer's own ChatGPT, connected at OpenAI.
   box.append(
-    el('h3', status.state === 'reconnect' ? 'Vuelve a conectar ChatGPT' : 'Conecta tu cuenta de ChatGPT'),
-    el('p', 'El asistente usa tu propia suscripción de ChatGPT. Puede leer tus libros y proponer cambios; aceptar o rechazar sigue siendo cosa tuya.'),
-    el('p', 'El texto que el asistente lea de tus libros se envía a OpenAI con tu cuenta.', 'assistant-note'),
+    el('h3', status.state === 'reconnect' ? 'Vuelve a conectar ChatGPT' : 'Qué necesitas'),
+    el('p', 'Tu cuenta de RE;write basta para crear libros, importar capítulos y revisar sugerencias.'),
+    el('p', 'Para hablar con el asistente aquí también necesitas tu propia cuenta de ChatGPT. Se conecta con un código en la página de OpenAI. Nunca escribas tu contraseña en RE;write.'),
     assistantButton('Conectar ChatGPT', 'accept', connectAssistant),
+    el('p', 'El asistente usa tu suscripción de ChatGPT: puede leer tus libros y proponer cambios; aceptar o rechazar sigue siendo cosa tuya. El texto que lea de tus libros se envía a OpenAI con tu cuenta.', 'assistant-note'),
+    el('p', 'También puedes usar RE;write desde tu propio ChatGPT con el conector de RE;write.', 'assistant-note'),
   );
   if (status.state === 'reconnect') box.append(assistantButton('Desconectar', 'reject', disconnectAssistant));
   return box;
@@ -535,6 +540,10 @@ function renderAssistant() {
     chips.push(chip);
   }
   panel.context.replaceChildren(...chips);
+  panel.accounts.replaceChildren(
+    el('span', 'RE;write: sesión iniciada'),
+    el('span', 'ChatGPT: ' + (assistantState.status.state === 'connected' ? 'conectado' : 'sin conectar')),
+  );
 
   const connected = assistantState.status.state === 'connected';
   const nodes = [];
@@ -631,6 +640,8 @@ function buildAssistant() {
   head.append(title, state, close);
   const context = el('div', undefined, 'assistant-context');
   context.setAttribute('aria-label', 'Sobre qué preguntas');
+  const accounts = el('div', undefined, 'assistant-accounts');
+  accounts.setAttribute('aria-label', 'Tus cuentas');
   const log = el('div', undefined, 'assistant-log');
   log.setAttribute('role', 'log');
   log.setAttribute('aria-label', 'Conversación');
@@ -663,11 +674,11 @@ function buildAssistant() {
   form.append(input, submit);
   const foot = el('div', undefined, 'assistant-foot');
   foot.append(assistantButton('Desconectar ChatGPT', '', disconnectAssistant), el('span', 'La conversación no se guarda: se pierde al cerrar la página o tras un rato sin usarla.'));
-  root.append(head, context, log, form, foot);
+  root.append(head, context, accounts, log, form, foot);
   root.addEventListener('keydown', (event) => { if (event.key === 'Escape') setAssistantOpen(false); });
   document.body.append(scrim, root, fab);
   if (toggle) toggle.addEventListener('click', () => (root.hidden ? openAssistant(toggle) : setAssistantOpen(false)));
-  Object.assign(panel, { root, scrim, fab, toggle, title, state, context, log, form, input, submit, foot });
+  Object.assign(panel, { root, scrim, fab, toggle, title, state, context, accounts, log, form, input, submit, foot });
   // The floating button shrinks to its icon once the reader scrolls down, and moves up
   // over any accept/reject bar that passes under it, stuck or not.
   let placing = false;
