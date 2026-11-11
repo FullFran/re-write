@@ -37,3 +37,11 @@ test('a malformed supported key is reported, never guessed', () => {
   assert.deepEqual(problems('aliases: [a, "", b]'), ['aliases cannot hold an empty name']);
   assert.deepEqual(parseFrontmatter('---\ntype: villano\naliases: [a]\n---\n').aliases, ['a'], 'one bad key does not hide the others');
 });
+
+test('a note name is refused when it holds invisible characters or dots that a revision could not follow', () => {
+  const invisible = ['Elena​', 'E‍lena', '‮anelE', 'Ele⁦na', 'Ele﻿na', 'Ele­na', 'Ele͏na', 'Ele️na',
+    'Eleㅤna', 'Ele na', 'Ele na', 'Ele　na', 'Elena'];
+  for (const name of invisible) assert.match(checkNoteName(name) ?? 'accepted', /invisible|space/, JSON.stringify(name));
+  for (const name of ['Elena.', 'Sr..Pérez', 'a..b', 'Fin...']) assert.match(checkNoteName(name) ?? 'accepted', /dot/, name);
+  for (const name of ['Sr. Pérez', 'v1.2', 'Ángel Peña', 'Café con leche']) assert.equal(checkNoteName(name), null, name);
+});

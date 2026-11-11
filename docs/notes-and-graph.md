@@ -13,8 +13,10 @@ link rendering and autocomplete come in later slices.
   directly inside a real `notas/` directory count: a symlinked file or a symlinked `notas/` is never
   read, so a note cannot point outside the book.
 - **Name.** A note's name is its file name without `.md`, and it is what a wikilink names. A name
-  cannot be empty or padded with spaces, start with a dot, hold control characters, `/`, `\`, `:`,
-  or the characters that end or split a wikilink (`[`, `]`, `|`, `#`, `^`), and the file name is at
+  cannot be empty or padded with spaces, start or end with a dot, hold two dots in a row, hold
+  control characters, invisible characters (zero-width, direction marks, soft hyphen, private-use
+  and unassigned code points, and similar), whitespace other than a plain space, `/`, `\`, `:`, or
+  the characters that end or split a wikilink (`[`, `]`, `|`, `#`, `^`), and the file name is at
   most 255 bytes. A new note is refused when its name differs from an existing note only by case
   or accents (`Elena` and `elena` would collide on case-insensitive file systems and in links).
 - **Frontmatter.** An optional leading block between `---` lines. RE;write reads two keys with a
@@ -34,8 +36,8 @@ Notes change only in the two ways scenes do:
    text) or a change to an existing note with `propose_revision` on its `notas/<name>.md` file. The
    proposal shows in the review page like any other, as a diff (a new note diffs against an empty
    file). Accepting a new note writes the file and the proposal record in one commit, and only if no
-   file with that name exists by then and no note differs from it only by case or accents: it never
-   overwrites. A note creation cannot be reverted or proposed again automatically yet; change it
+   file with that name exists by then, no note differs from it only by case or accents, and the file has no uncommitted change
+   (such as a committed note deleted in the working tree): it never overwrites. A note creation cannot be reverted or proposed again automatically yet; change it
    with a new proposal.
 2. **A person's own edit**, through the review door, with the same rules as a scene edit: it applies
    only on top of the version the person opened (`blob`), refuses uncommitted local edits, and goes

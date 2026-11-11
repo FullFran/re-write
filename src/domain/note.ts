@@ -8,18 +8,31 @@ export const NOTE_TYPES = ['personaje', 'lugar', 'objeto', 'trama', 'otra'] as c
 export type NoteType = (typeof NOTE_TYPES)[number];
 
 /**
+ * Characters a reader cannot see, which would make two names look the same: format characters
+ * (zero-width, direction overrides, soft hyphen, BOM), private-use and unassigned code points,
+ * line and paragraph separators, and other default-ignorable characters (grapheme joiner, Hangul
+ * fillers, variation selectors).
+ */
+const INVISIBLE = /[\p{Cf}\p{Co}\p{Cn}\p{Zl}\p{Zp}͏ᅟᅠ឴឵᠋-᠏ㅤ︀-️ﾠ\u{E0100}-\u{E01EF}]/u;
+
+/**
  * Why a name cannot be a note, or null when it can. Refused: empty or padded names, a leading dot
- * (hidden files), path separators and ':' (not portable), control characters, the characters that
- * end or split a wikilink (`[ ] | # ^`), and names whose file would exceed 255 bytes.
+ * (hidden files), a final dot or two dots in a row, path separators and ':' (not portable), control
+ * and invisible characters, whitespace other than a plain space, the characters that end or split a
+ * wikilink (`[ ] | # ^`), and names whose file would exceed 255 bytes.
  */
 export function checkNoteName(name: string): string | null {
   if (!name.trim()) return 'a note name cannot be empty';
   if (name !== name.trim()) return 'a note name cannot start or end with spaces';
   if (name.startsWith('.')) return 'a note name cannot start with a dot';
   if (/\p{Cc}/u.test(name)) return 'a note name cannot contain control characters';
+  if (INVISIBLE.test(name)) return 'a note name cannot contain invisible characters (zero-width, direction marks and similar)';
+  if (/(?! )\s/u.test(name)) return 'a note name cannot contain spaces other than a plain space';
   for (const char of ['/', '\\', ':', '[', ']', '|', '#', '^']) {
     if (name.includes(char)) return `a note name cannot contain "${char}"`;
   }
+  // A file name with ".." or a final "." does not survive the path checks a revision makes.
+  if (name.includes('..') || name.endsWith('.')) return 'a note name cannot end with a dot or contain two dots in a row';
   if (!name.isWellFormed()) return 'a note name is not valid Unicode';
   if (Buffer.byteLength(`${name}.md`, 'utf8') > 255) return 'a note file name cannot exceed 255 bytes';
   return null;
