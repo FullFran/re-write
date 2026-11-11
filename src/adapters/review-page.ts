@@ -8,7 +8,8 @@ function escapeAttribute(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
-// `engine`: the embedded engine is enabled, so the header links to its page (/review/engine).
+// `engine`: the embedded engine is enabled, so the page carries the assistant panel
+// (its styles and script are appended to /review/app.css and /review/app.js).
 export function reviewHtml(issuer: string, publishableKey: string, options: { engine?: boolean } = {}): string {
   const frontendApi = escapeAttribute(issuer.replace(/\/$/, ''));
   return `<!doctype html>
@@ -23,8 +24,8 @@ export function reviewHtml(issuer: string, publishableKey: string, options: { en
 <script defer crossorigin="anonymous" data-clerk-publishable-key="${escapeAttribute(publishableKey)}" src="${frontendApi}/npm/@clerk/clerk-js@6/dist/clerk.browser.js"></script>
 <script defer src="/review/app.js"></script>
 </head>
-<body>
-<header><h1>RE;write</h1>${options.engine ? '<nav class="header-nav" aria-label="Páginas"><a href="/review/engine">Asistente</a><div id="user"></div></nav>' : '<div id="user"></div>'}</header>
+<body${options.engine ? ' data-assistant' : ''}>
+<header><h1>RE;write</h1>${options.engine ? '<div class="header-nav"><button type="button" id="assistant-toggle" class="header-toggle" aria-controls="assistant" aria-expanded="false">Asistente</button><div id="user"></div></div>' : '<div id="user"></div>'}</header>
 <main id="app"><p>Cargando…</p></main>
 </body>
 </html>
@@ -234,6 +235,11 @@ const REFRESH_MS = 5000;
 const REFRESH_MAX_MS = 60000;
 let view = null;
 let openScene = null;
+// The newest book data the page shows, and the title of its book, for the assistant panel.
+let latestQueue = null;
+let currentBookTitle = '';
+// The assistant panel, when the engine is enabled (src/adapters/engine-page.ts sets it).
+let assistant = null;
 let renderSeq = 0;
 let actionsRunning = 0;
 let refreshTimer = null;
@@ -369,6 +375,23 @@ function button(label, className, run) {
   return node;
 }
 
+// "Preguntar al asistente" on a card, only when the panel exists. The label stays in the
+// browser; the server is told the kind and id of the item and nothing else.
+function askButton(card, item, draft) {
+  card.setAttribute('data-item', item.kind + ':' + item.id);
+  if (!assistant) return;
+  const ask = el('button', 'Preguntar al asistente', 'ask-assistant');
+  ask.type = 'button';
+  ask.setAttribute('aria-label', 'Preguntar al asistente sobre: ' + item.label);
+  ask.addEventListener('click', () => assistant.ask(item, draft, ask));
+  card.prepend(ask);
+}
+
+const shortText = (value) => {
+  const text = String(value || '');
+  return text.length > 60 ? text.slice(0, 57) + '…' : text;
+};
+
 function quote(text, detail) {
   const box = el('div');
   box.append(el('blockquote', text), el('p', detail, 'meta'));
@@ -384,6 +407,8 @@ function claimCard(book, claim, reload) {
   if (reason) card.append(el('p', 'Fuera del Canon: ' + reason, 'meta'));
   card.append(quote(claim.anchor.quote, claim.source_file + ' · ' + claim.epistemic_kind + ' · evidencia: ' + claim.evidence_status + ' · propuesto por: ' + claim.extractor));
   if (claim.uncertainty) card.append(el('p', 'Incertidumbre: ' + claim.uncertainty, 'meta'));
+  askButton(card, { kind: 'claim', id: claim.claim_id, label: 'Afirmación: ' + shortText(claim.statement) },
+    '¿Esta afirmación está bien apoyada por el texto? ¿Contradice algo del libro?');
   if (claim.editorial_status === 'proposed') {
     const actions = el('div', undefined, 'actions decision');
     const decide = (decision) => () => decideCard('/books/' + book + '/claims/' + claim.claim_id, decision, decidedClaims, book + '/' + claim.claim_id, card, reload);
@@ -408,6 +433,8 @@ function narrativeFindingCard(book, finding, reload, openQuote) {
   const statement = el('p');
   statement.append(kindBadge, document.createTextNode(finding.statement));
   card.append(statement);
+  askButton(card, { kind: 'narrative_finding', id: finding.finding_id, label: 'Hallazgo: ' + shortText(finding.statement) },
+    '¿En qué te basas para este hallazgo? ¿Qué escenas lo apoyan o lo contradicen?');
 
   if (finding.characters && finding.characters.length) {
     card.append(el('p', 'Personajes: ' + finding.characters.join(', '), 'meta'));
@@ -541,6 +568,8 @@ function findingCard(book, finding, reload) {
   const card = el('article');
   card.append(el('p', finding.explanation));
   card.append(el('p', 'Posible problema, no un veredicto · ' + finding.classification, 'meta'));
+  askButton(card, { kind: 'finding', id: finding.finding_id, label: 'Posible problema: ' + shortText(finding.explanation) },
+    '¿Es un error real o puede ser intencionado? Explícamelo con las citas.');
   for (const c of finding.citations) card.append(quote(c.quote, c.source_file + ' · momento de la historia: ' + (c.story_time ?? 'desconocido') + ' · evidencia: ' + c.evidence_status));
   const others = el('ul', undefined, 'meta');
   for (const alternative of finding.alternatives) others.append(el('li', alternative));
@@ -592,6 +621,8 @@ function proposalCard(book, { proposal, diff, applicable }, reload) {
   card.tabIndex = -1;
   card.append(stateBadge(proposal.status, proposal.status === 'proposed' && !applicable));
   card.append(el('p', proposal.rationale), visualDiff(diff));
+  askButton(card, { kind: 'proposal', id: proposal.proposal_id, label: 'Cambio propuesto · ' + String(proposal.file || '').replace(/^scenes\//, '') },
+    '¿Qué gana la escena con este cambio? ¿Hay algo que deba revisar antes de aceptarlo?');
   if (proposal.status !== 'proposed') {
     if (proposal.result_commit) card.append(el('p', 'Cambio aprobado del manuscrito · versión ' + proposal.result_commit.slice(0, 10), 'meta'));
     return card;
@@ -1222,6 +1253,7 @@ async function renderApp(selectedBookId, selectedScene, highlight) {
   }
 
   const currentBook = books.some((b) => b.book_id === selectedBookId) ? selectedBookId : books[0].book_id;
+  currentBookTitle = books.find((b) => b.book_id === currentBook).title;
   const toolbar = el('div', undefined, 'toolbar');
   const picker = el('select');
   picker.setAttribute('aria-label', 'Libro');
@@ -1255,6 +1287,8 @@ async function renderApp(selectedBookId, selectedScene, highlight) {
   nav.setCounts(built.counts);
   if (seq === renderSeq) {
     view = { book: currentBook, tag: state.tag, pending: null, sections: built.nodes, notice, nav };
+    latestQueue = state.data;
+    if (assistant) assistant.pageChanged();
     syncNav();
   }
   if (selectedScene) {
@@ -1263,10 +1297,12 @@ async function renderApp(selectedBookId, selectedScene, highlight) {
 }
 
 // Unfinished work a re-render would destroy: a focused field, text or files not
-// yet sent, or an open dialog (the account menu included).
+// yet sent, or an open dialog (the account menu included). The assistant panel is
+// never re-rendered by a refresh, so its field does not count.
 function hasWorkInProgress() {
   const active = document.activeElement;
-  if (active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return true;
+  const inPanel = active && active.closest && active.closest('#assistant');
+  if (active && !inPanel && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return true;
   if (document.querySelector('dialog[open], [role="dialog"], [aria-modal="true"]')) return true;
   for (const input of app.getElementsByTagName('input')) {
     if (input.type === 'file' ? input.files && input.files.length > 0 : input.value !== input.defaultValue) return true;
@@ -1309,6 +1345,8 @@ async function showRefreshed(current, data) {
   if (refocus) refocus.focus({ preventScroll: true });
   const refold = focusedFold && document.getElementById(focusedFold.id);
   if (refold && refold.fold) refold.fold.toggle.focus({ preventScroll: true });
+  latestQueue = data;
+  if (assistant) assistant.pageChanged();
   syncNav();
   return true;
 }
@@ -1382,6 +1420,7 @@ window.addEventListener('load', async () => {
       return;
     }
     window.Clerk.mountUserButton(document.getElementById('user'));
+    if (assistant) assistant.start();
     startRefresh();
     await renderApp();
   } catch (error) {

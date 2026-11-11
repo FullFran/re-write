@@ -52,9 +52,73 @@ export type ParentMessage =
   | { type: 'login.cancel' }
   | { type: 'refresh'; id: string; credential: StoredCredential }
   | { type: 'token'; id: string; access?: string; accountId?: string; expires?: number; error?: EngineErrorCode }
-  | { type: 'prompt'; text: string }
+  /** `context` is the host's first line for this turn; the writer's text never comes before it. */
+  | { type: 'prompt'; text: string; context?: string }
   | { type: 'abort' }
   | { type: 'shutdown' };
+
+/**
+ * One step of a tool call, for the page to show what the assistant is doing. Besides the
+ * tool name it carries only a call number (to pair start and end), a scene path and a
+ * count: never an argument or a result as text.
+ */
+export interface ToolMessage {
+  type: 'tool';
+  name: string;
+  /** An older engine program sends only the end of a call, without a phase. */
+  phase: 'start' | 'end';
+  ok: boolean;
+  call?: number;
+  scene?: string;
+  count?: number;
+}
+
+/**
+ * A scene path as the MCP tools name it (`scenes/003-el-faro.md`), short enough to label
+ * a step. Stricter than the import rule: no control or invisible format characters (bidi controls included) and at most 120 characters.
+ */
+export const ACTIVITY_SCENE = /^scenes\/(?![.])[^/\p{Cc}\p{Cf}\u2028\u2029]{1,110}\.md$/u;
+export const MAX_ACTIVITY_COUNT = 999;
+const MAX_CALL = 100_000;
+
+/** Which array of a structured result counts what a tool listed or created. */
+const COUNTED: Record<string, string> = {
+  list_books: 'books', list_scenes: 'scenes', list_claims: 'claims', list_proposals: 'proposals',
+  list_findings: 'findings', inspect_continuity: 'findings', propose_claims: 'created', propose_findings: 'created',
+};
+
+const activityScene = (value: unknown): string | undefined => typeof value === 'string' && ACTIVITY_SCENE.test(value) ? value : undefined;
+const activityCount = (value: unknown): number | undefined => Number.isInteger(value) && (value as number) >= 0 ? Math.min(value as number, MAX_ACTIVITY_COUNT) : undefined;
+
+/**
+ * What the engine program may report about a tool call, from its arguments and its result
+ * as Pi hands them over (the MCP result sits in `result.structuredContent`). Only a valid
+ * scene path and a count leave; text is never parsed.
+ */
+export function toolActivity(name: string, args: unknown, result?: unknown): { scene?: string; count?: number } {
+  const out: { scene?: string; count?: number } = {};
+  const scene = activityScene((args as { file?: unknown } | null)?.file);
+  if (scene) out.scene = scene;
+  const call = (result as { structuredContent?: { structuredContent?: unknown } } | null)?.structuredContent;
+  const data = (call as { structuredContent?: unknown } | undefined)?.structuredContent as Record<string, unknown> | undefined;
+  if (typeof data !== 'object' || data === null) return out;
+  const tool = name.replace(MCP_TOOL_PREFIX, '');
+  if (tool === 'propose_revision') {
+    if (typeof data.created === 'boolean') out.count = data.created ? 1 : 0;
+    return out;
+  }
+  const list = Object.hasOwn(COUNTED, tool) ? data[COUNTED[tool]] : undefined;
+  if (Array.isArray(list)) out.count = Math.min(list.length, MAX_ACTIVITY_COUNT);
+  return out;
+}
+
+/**
+ * The message the engine program gives the model: the host's line first, then the writer's
+ * text. Kept here so the engine program and the tests compose it the same way.
+ */
+export function composePrompt(context: string | undefined, text: string): string {
+  return context === undefined ? text : `${context}\n${text}`;
+}
 
 export type ChildMessage =
   | { type: 'ready'; piVersion: string }
@@ -66,7 +130,7 @@ export type ChildMessage =
   | { type: 'token.get'; id: string }
   | { type: 'session'; tools: string[] }
   | { type: 'delta'; text: string }
-  | { type: 'tool'; name: string; ok: boolean }
+  | ToolMessage
   | { type: 'done'; aborted: boolean }
   | { type: 'error'; code: EngineErrorCode };
 
@@ -108,8 +172,16 @@ export function parseChildMessage(value: unknown): ChildMessage | null {
         ? { type: 'session', tools: m.tools as string[] } : null;
     case 'delta':
       return typeof m.text === 'string' && m.text.length <= MAX_DELTA_CHARS ? { type: 'delta', text: m.text } : null;
-    case 'tool':
-      return typeof m.name === 'string' && TOOL_NAME.test(m.name) ? { type: 'tool', name: m.name, ok: m.ok === true } : null;
+    case 'tool': {
+      if (typeof m.name !== 'string' || !TOOL_NAME.test(m.name)) return null;
+      const phase = m.phase === 'start' ? 'start' : 'end';
+      const tool: ToolMessage = { type: 'tool', phase, ...(Number.isInteger(m.call) && (m.call as number) > 0 && (m.call as number) <= MAX_CALL ? { call: m.call as number } : {}), name: m.name, ok: phase === 'start' || m.ok === true };
+      const scene = activityScene(m.scene);
+      if (scene) tool.scene = scene;
+      const count = phase === 'end' ? activityCount(m.count) : undefined;
+      if (count !== undefined) tool.count = count;
+      return tool;
+    }
     case 'done':
       return { type: 'done', aborted: m.aborted === true };
     case 'error':

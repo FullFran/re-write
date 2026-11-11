@@ -118,7 +118,21 @@ the selected rating has `aria-pressed`.
   readers announce it. Do not add a permanent `role="dialog"` or `aria-modal`
   element: the review page pauses its refresh while one exists.
 
+## Assistant panel
+
+With the embedded engine on, the review page carries the assistant (`src/adapters/engine-page.ts`, appended to the page's own styles and script). It is part of the page, not a page of its own.
+
+- **One landmark, never a dialog.** The panel is an `aside` (`#assistant`, `aria-label="Asistente"`) outside `main`. It has no `role="dialog"` or `aria-modal`: the page pauses its refresh while one exists. The background refresh never re-renders the panel, so a focused or filled panel field does not hold the refresh back (`hasWorkInProgress` ignores it); a field in the page still does.
+- **Where it sits.** From 75em it is a fixed column of 26rem on the right; the body gets the same right padding, so the page column re-centres in the room left and stays usable. The section list moves back to the top row while the panel is open (there is no room beside the column) and `--nav-h` follows. Below 75em it is a bottom sheet up to 88% of the screen, with a scrim that closes it on a tap; the page keeps its scroll behind it. Opening and closing keep the card being read where it was (`viewportAnchor`).
+- **How to open it.** An **Asistente** button in the header and a floating one at the bottom right. On a phone the floating button sits above the height of a stuck decision bar (`--tap`, its padding and the bottom safe area), so it can never cover accept or reject; `main` gets the matching bottom padding. After the first scroll down it shrinks to a round 44 px icon; its accessible name stays **Asistente** and focus shows the label again. Escape, the ✕ and the scrim close the panel and return focus to the button that opened it.
+- **Order inside.** Header (title, a state word, close), the context chips (the book selected in the page, and the item being asked about, removable), the conversation (`role="log"`), the prompt (`--text-md`, Enter sends, Shift+Enter breaks the line; **Detener** replaces **Enviar** while a turn runs), then a small footer with **Desconectar ChatGPT**.
+- **States** have a word, and a dot only repeats it: *Sin conectar*, *Esperando el código*, *Conectando…*, *Conectado*, *Pensando…*, *Escribiendo…*, *Detenida*, *Error*. The device login, its code and the OpenAI link are shown inside the conversation area. Errors are `role="alert"` with the fixed Spanish message of their code.
+- **Answers** are prose (`--font-prose`): paragraphs, lists, quotes, `strong`, `em` and inline `code`, built as elements from the text. Nothing from the model becomes markup.
+- **Tool steps** are chips above the answer, muted, with a spinner while they run (`Leyendo escena 3…`), a tick when done (`Leída: escena 3`, `Propuestos 2 hallazgos`) and `--reject` with a "!" and the word *Error* when they fail. What the assistant created is a `--accept-bg` line with **Ver en la página**, which unfolds the section, scrolls the card to the centre, focuses it and outlines it (`.flash`) for two seconds.
+- **Empty state.** One sentence on what the assistant may do, and a few quick questions as full-width rounded buttons. They only fill the prompt; **Analiza esta escena** appears only while a scene is open and sets it as the item.
+- **Preguntar al asistente** is a quiet text button at the top right of each proposal, finding and claim card, never inside the sticky decision bar.
+
 ## Motion
 
-Only short state transitions (120 ms) on controls and on the fold chevron. `prefers-reduced-motion` removes
-them and turns smooth scrolling into a jump (`scrollBehavior()` in the script).
+Only short state transitions (120 ms) on controls and on the fold chevron, and the spinner of a running
+assistant step. `prefers-reduced-motion` removes them and turns smooth scrolling into a jump (`scrollBehavior()` in the script).
