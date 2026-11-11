@@ -9,6 +9,11 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY src ./src
+# The embedded engine (docs/engine.md) is optional and heavy, so it is not installed unless asked
+# for: build with --build-arg WITH_ENGINE=1. Without it the image is the same as before.
+ARG WITH_ENGINE=0
+COPY engine ./engine
+RUN if [ "$WITH_ENGINE" = "1" ]; then cd engine && npm ci --omit=dev --ignore-scripts && npm cache clean --force; fi
 COPY fixtures ./fixtures
 # COPY keeps the build context's file modes; a checkout made under a strict umask would leave
 # files the node user cannot read.

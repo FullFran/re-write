@@ -21,14 +21,14 @@ This page is a design. Nothing in it is implemented unless section 2 says so. De
 | Only the CLI reads and writes a host state directory | `src/cli/main.ts` |
 | The state directory holds `active`, `status.json`, `lock` and `generations/<n>/`. It has no record of a pending, confirmed or failed generation | [hcs.md](hcs.md#lifecycle-and-generations) |
 | Activation runs no package code; it only makes an entry's capabilities callable | [hcs.md](hcs.md#try-it) |
-| There is no embedded engine | |
+| An embedded engine exists behind a flag, off by default: one Pi process per writer, with RE;write's MCP server as its only tools. It projects no generation yet | [engine.md](engine.md), `src/adapters/engine.ts`, `engine/` |
 
 ## 3. The two engines
 
 | Engine | Who starts it | Who supplies the model | How a generation reaches it | Unit that sees one generation |
 | --- | --- | --- | --- | --- |
 | Connected MCP client (ChatGPT, Claude Code, OpenCode, others) | the person, on their own machine or account | the client | RE;write builds what the MCP session sees from one generation: tools, prompts, instructions, and skills as resources | one MCP session |
-| Embedded engine for writers without their own agent (Pi first) | RE;write | the operator, from a host-owned allowlist ([#5](https://github.com/FullFran/re-write/issues/5)) | A per-run projection that points at the generation directory, with RE;write's own MCP server as a host-owned server | one engine run |
+| Embedded engine for writers without their own agent (Pi first) | RE;write | the writer, by signing in with their own ChatGPT account (see 3.2) | A per-run projection that points at the generation directory, with RE;write's own MCP server as a host-owned server | one engine run |
 
 ```mermaid
 flowchart LR
@@ -67,7 +67,11 @@ RE;write does not start these clients, cannot see their configuration and never 
 
 ### 3.2 Embedded engine
 
-RE;write starts this engine, so HCS-0008 applies as written. Each run gets a projection that names the generation directory (`generations/<n>/...`), never the `active` pointer. The run reads skills, MCP servers, instructions and the model allowlist from that projection. RE;write's own MCP server is in it as a host-owned server, so the engine has the same read-and-propose door as a connected client. Supported engine versions are pinned (#40). This is the only case where the operator pays for a model.
+RE;write starts this engine, so HCS-0008 applies as written. Each run gets a projection that names the generation directory (`generations/<n>/...`), never the `active` pointer. The run reads skills, MCP servers, instructions and the model allowlist from that projection. RE;write's own MCP server is in it as a host-owned server, so the engine has the same read-and-propose door as a connected client. Supported engine versions are pinned (#40).
+
+**Who supplies the model (changed 2026-11-11).** This page used to say the operator supplies the model and that this is the only case where the operator pays for one. The first implementation ([engine.md](engine.md)) does the opposite: the writer signs in with their own ChatGPT account through a device code, and the operator pays for no model. The reason is cost and scope: a pilot operator should not carry a model bill per writer, and a writer who already pays for ChatGPT can use it here as they do with a connected client. The price is a per-person credential the host must store (encrypted, [engine.md](engine.md#security-boundaries)) and a dependency on OpenAI's terms for this use, which is not verified. A host-owned model allowlist (#5) therefore has nothing to restrict yet: the engine uses the first model the account lists. An operator-supplied model stays possible later and is not built.
+
+What exists is the engine process and the sign-in. The projection described above (generation directory, skills, instructions from packages) is not built; [engine.md](engine.md#what-40-still-needs) lists what #40 still needs.
 
 ## 4. Which HCS-0008 requirements apply where
 
@@ -148,10 +152,10 @@ Not decided by #35 or by the issues it cites. Each needs a decision before the i
 
 **Q7. Embedded engine details #40 does not state.**
 
-- Whether Pi is driven through files and flags (HCS-0008 appendix A) or over ACP. R026 to R029 apply only in the second case.
+- Whether Pi is driven through files and flags (HCS-0008 appendix A) or over ACP. R026 to R029 apply only in the second case. *First implementation: neither. RE;write embeds the Pi SDK in a child process and configures it in code, over its own stdin/stdout protocol ([engine.md](engine.md)). How a generation maps onto that is still open.*
 - Whether RE;write declares a guard on model requests. If it does, R019 and R020 require network confinement of the run.
-- How the host-owned untrusted-text instruction reaches Pi. Appendix A marks instructions and permissions as "not observed" for Pi; by its own note an adapter then reports `x-rewrite-instructions` entries as `unsupported_contribution`. That covers packages. It does not say how the host's own instruction is delivered.
-- Which surface a writer uses to talk to the embedded engine, and where the engine process runs.
+- How the host-owned untrusted-text instruction reaches Pi. Appendix A marks instructions and permissions as "not observed" for Pi; by its own note an adapter then reports `x-rewrite-instructions` entries as `unsupported_contribution`. That covers packages. It does not say how the host's own instruction is delivered. *First implementation: as the engine's system prompt, built by the host from the MCP instructions and not changeable from the browser.*
+- Which surface a writer uses to talk to the embedded engine, and where the engine process runs. *First implementation: a chat page at `/review/engine` behind the browser session; one process per writer inside the server's container.*
 
 **Q8. Confirm the rows marked "reading" in section 4.** They follow from the draft.6 text. No issue has accepted them yet.
 
