@@ -465,14 +465,7 @@ export class Project {
     const blob = this.git.blobOf(file);
     if (blob !== edit.base_blob) throw new SceneConflictError(file, current, blob);
     if (edit.text === current) return { file, blob, revision: this.git.head(), changed: false };
-    try {
-      writeFileSync(path, edit.text);
-      this.git.commit(`rewrite: edit ${file}\n\nEdited-by: ${edit.by}`, [file]);
-    } catch (error) {
-      writeFileSync(path, raw);
-      this.git.tryRun('reset', '-q', '--', file);
-      throw error;
-    }
+    this.commitWrites(`rewrite: edit ${file}\n\nEdited-by: ${edit.by}`, [file], () => writeFileSync(path, edit.text));
     return { file, blob: this.git.blobOf(file), revision: this.git.head(), changed: true };
   }
 
