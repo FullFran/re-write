@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, normalize, resolve } from 'node:path';
 import { Git } from '../adapters/git.ts';
 import { JsonStore, STATE_DIR } from '../adapters/json-store.ts';
@@ -10,12 +10,53 @@ import {
 } from '../domain/claim.ts';
 import { verdictFields, CONTINUITY_VERDICTS, InvalidFindingVerdictError, inspectContinuity, type Finding, type Verdict, type VerdictHistoryEntry, type VerdictKind } from '../domain/continuity.ts';
 import { applyChange, inverseChange, proposalId, type Proposal } from '../domain/proposal.ts';
+import { checkSceneText, isExactUtf8 } from '../domain/scene-text.ts';
 import {
   NARRATIVE_VERDICTS, findingId, viewFinding,
   type FindingCandidate, type FindingRecord, type FindingView,
 } from '../domain/finding.ts';
 
 const SCENES_DIR = 'scenes';
+
+/**
+ * A person's edit was based on a version of the scene that is no longer the current one
+ * (another tab saved, or a proposal was accepted meanwhile). Nothing was written; the
+ * current text and its version travel with the refusal so the person can compare.
+ */
+export class SceneConflictError extends Error {
+  readonly text: string;
+  readonly blob: string;
+  constructor(file: string, text: string, blob: string) {
+    super(`${file} changed since you opened it; nothing was saved`);
+    this.name = 'SceneConflictError';
+    this.text = text;
+    this.blob = blob;
+  }
+}
+
+/** The scene does not exist as a regular file inside scenes/ (missing, or a symlink). */
+export class SceneNotFoundError extends Error {
+  constructor(file: string) {
+    super(`scene not found: ${file}`);
+    this.name = 'SceneNotFoundError';
+  }
+}
+
+/** An expected refusal of an edit whose reason can be shown to the person. */
+export class SceneEditRefusal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SceneEditRefusal';
+  }
+}
+
+export interface SceneEdit {
+  file: string;
+  /** The version of the scene the person started from: the blob the scene read returned. */
+  base_blob: string;
+  text: string;
+  by: string;
+}
 /** A markdown file directly inside scenes: never the directory itself, which git can also show. */
 const SCENE_FILE = /^scenes\/[^/]+\.md$/;
 
@@ -65,8 +106,28 @@ export class Project {
 
   scenes(): string[] {
     const dir = join(this.dir, SCENES_DIR);
-    if (!existsSync(dir)) return [];
-    return readdirSync(dir).filter((name) => name.endsWith('.md')).sort().map((name) => `${SCENES_DIR}/${name}`);
+    if (!this.isRegular(dir, 'directory')) return [];
+    // A symlink is not a scene: it could point outside the book.
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+      .map((entry) => `${SCENES_DIR}/${entry.name}`)
+      .sort();
+  }
+
+  /** True only for a real file or directory: never a symlink, which could lead outside the book. */
+  private isRegular(path: string, kind: 'file' | 'directory'): boolean {
+    try {
+      const stat = lstatSync(path);
+      return kind === 'file' ? stat.isFile() : stat.isDirectory();
+    } catch {
+      return false;
+    }
+  }
+
+  /** The absolute path of a scene that is a regular file inside a real scenes/ directory, or null. */
+  private sceneFile(file: string): string | null {
+    const path = join(this.dir, this.scenePath(file));
+    return this.isRegular(join(this.dir, SCENES_DIR), 'directory') && this.isRegular(path, 'file') ? path : null;
   }
 
   /** Copies scenes in and commits them. It never overwrites a scene with different text. */
@@ -126,8 +187,8 @@ export class Project {
 
   /** Reads the current text of a scene, or null when it no longer exists. */
   readScene(file: string): string | null {
-    const path = join(this.dir, this.scenePath(file));
-    return existsSync(path) && statSync(path).isFile() ? readFileSync(path, 'utf8') : null;
+    const path = this.sceneFile(file);
+    return path === null ? null : readFileSync(path, 'utf8');
   }
 
   /** Validates candidates against the committed text and stores them as proposed. */
@@ -420,6 +481,28 @@ export class Project {
       (rev, file) => this.git.showAt(rev, file),
     );
     return { ...view, ...verdictFields(this.verdicts.get(f.finding_id)) };
+  }
+
+  /**
+   * A person's own edit of a scene, the only write that does not come from an accepted
+   * proposal. It applies only on top of the version the person started from, so it never
+   * overwrites a change that landed meanwhile, and it goes into one commit that touches
+   * only the scene. Saving the same text makes no commit.
+   */
+  editScene(edit: SceneEdit): { file: string; blob: string; revision: string; changed: boolean } {
+    const file = this.scenePath(edit.file);
+    const path = this.sceneFile(file);
+    if (path === null) throw new SceneNotFoundError(file);
+    checkSceneText(edit.text);
+    const raw = readFileSync(path);
+    if (!isExactUtf8(raw)) throw new SceneEditRefusal(`${file} is not valid UTF-8 text, so it cannot be edited here`);
+    if (this.git.isDirty(file)) throw new SceneEditRefusal(`${file} has uncommitted edits; commit them before editing the scene`);
+    const current = raw.toString('utf8');
+    const blob = this.git.blobOf(file);
+    if (blob !== edit.base_blob) throw new SceneConflictError(file, current, blob);
+    if (edit.text === current) return { file, blob, revision: this.git.head(), changed: false };
+    this.commitWrites(`rewrite: edit ${file}\n\nEdited-by: ${edit.by}`, [file], () => writeFileSync(path, edit.text));
+    return { file, blob: this.git.blobOf(file), revision: this.git.head(), changed: true };
   }
 
   /** Stores a change for review. It never writes to the scene. */

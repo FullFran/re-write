@@ -52,6 +52,7 @@ The rule: **what defines truth or decides is host core; what analyses, suggests 
 | Scenes, revisions, anchors and evidence status | core | Evidence status is derived on every read and must never depend on optional code |
 | Claims, editorial and evidence states, canon query | core | Canon is a query over core state, not something a package can set |
 | Proposals and review (accept, reject, verdicts) | core, review door only | Human approval is a host-owned boundary (section 5) |
+| A person's own scene edits | core, review door only | Only people write text directly; agents and packages propose (section 5) |
 | Manuscript versions, narrative entities, events, timeline | core | Shared model every package reads; one definition |
 | Access: people to books | core | Composed with package grants in one decision point (section 5) |
 | Claim extractors (fixture annotations today, agent-driven later) | package, kind `x-rewrite-extractor` | Several can exist; output goes through the same literal-quote check |
@@ -94,6 +95,7 @@ Capabilities are named by contract, not by package (HCS-0002). Host built-ins ar
 | `com.fullfran.rewrite.findings.propose` | Propose findings | yes |
 | `com.fullfran.rewrite.revision.propose` | Propose revisions | yes |
 | `com.fullfran.rewrite.review.decide` | Accept or reject through the review door only | no |
+| `com.fullfran.rewrite.scene.edit` | Save a person's own edit of a scene through the review door only | no |
 
 Extension members are `x-rewrite-*`. Product refusals (quote not literal, stale evidence, unknown book) are not HCS errors; they are RFC 9457 problem types under a URI RE;write owns (HCS-0006 section 3).
 
@@ -135,7 +137,8 @@ Routes available on the review door (`/review`):
 - `GET /review/api/books/{book}/findings`: reads narrative findings with current evidence status (`com.fullfran.rewrite.book.read`).
 - `GET /review/api/books/{book}/export`: downloads findings with ratings and notes as JSON (`com.fullfran.rewrite.book.read`).
 - `GET /review/api/books/{book}/scenes`: lists scene files in the book (`com.fullfran.rewrite.book.read`).
-- `GET /review/api/books/{book}/scenes/{file}`: reads a scene text and lists its pending proposals and citing findings (`com.fullfran.rewrite.book.read`).
+- `GET /review/api/books/{book}/scenes/{file}`: reads a scene text, its `blob` (the version an edit starts from) and lists its pending proposals and citing findings (`com.fullfran.rewrite.book.read`).
+- `POST /review/api/books/{book}/scenes/{file}` with `{ base_blob, text }`: saves a person's own edit of the scene (`com.fullfran.rewrite.scene.edit`). See [Direct scene edits](#direct-scene-edits).
 - `POST /review/api/books/{book}/import`: uploads and commits Markdown scenes (`com.fullfran.rewrite.book.import`).
 - `POST /review/api/books/{book}/claims/{id}`, `/proposals/{id}`, `/findings/{id}`: reviews claims, proposals, and findings (`com.fullfran.rewrite.review.decide`).
 - `POST /review/api/books/{book}/proposals/{id}/revert`: starts undoing an accepted text change by creating its inverse proposal; the body carries `expected`, the history length the person saw (`com.fullfran.rewrite.review.decide`).
@@ -150,13 +153,24 @@ Concurrent tabs: history only grows, so `expected` identifies the state a tab ac
 
 The embedded engine ([engine.md](engine.md), off by default) adds no door. A writer reaches it at `/review/api/engine/*` with their browser session, and those routes change no book: they start a login, send a prompt, abort a turn or disconnect. A prompt may name the book and item the writer is looking at; the server checks that book with the same `com.fullfran.rewrite.book.read` decision as the review door and writes the context line itself, from ids and titles only ([engine.md](engine.md#page-context)). The engine process itself reaches book data only through the MCP door, with a host-issued token that resolves to that writer and is honoured on loopback only. So what the engine can do to a book is exactly what the writer's own connected MCP client can do: read and propose.
 
-Review decisions (`com.fullfran.rewrite.review.decide`) and book creation (`com.fullfran.rewrite.book.create`) are never grantable to a package, and the MCP door refuses them whatever is granted. That is a host-owned setting: generation content cannot add an approve tool, remove the untrusted-text instruction or widen it (HCS-0008-R007). Per-person credentials for projected MCP servers follow [#4](https://github.com/FullFran/re-write/issues/4).
+Review decisions (`com.fullfran.rewrite.review.decide`), direct scene edits (`com.fullfran.rewrite.scene.edit`) and book creation (`com.fullfran.rewrite.book.create`) are never grantable to a package, and the MCP door refuses them whatever is granted. That is a host-owned setting: generation content cannot add an approve tool, remove the untrusted-text instruction or widen it (HCS-0008-R007). Per-person credentials for projected MCP servers follow [#4](https://github.com/FullFran/re-write/issues/4).
 
 Book creation retains one accepted existence signal: an occupied name returns
 HTTP 409, identically for members and non-members, with only
 “Ese nombre de libro no está disponible; elige otro título.” The response never
 echoes the slug or identifies the owner. A refusal is unavoidable because book
 slugs are globally unique; it does not grant access to the existing book.
+
+### Direct scene edits
+
+A writer can type into a scene from the review page ([#101](https://github.com/FullFran/re-write/issues/101)). Apart from accepting a proposal, this is the only write to scene text, and it keeps the same guarantees (`Project.editScene` in `src/application/project.ts`):
+
+- **Human only.** The permission is reachable only on the review door with no package entry, so the MCP door, the embedded engine and packages cannot use it; they keep proposing.
+- **No lost updates.** The edit carries the blob the writer started from. When the scene changed meanwhile (another tab saved, or a proposal was accepted), nothing is written and the answer is `409` with the current text and blob, so the page can show both versions. Every book write runs synchronously in the server process, so the check, the write and the commit cannot interleave with another write.
+- **Exact text.** The text is stored byte for byte as sent: no Markdown normalisation, no conversion. A NUL character, a lone UTF-16 surrogate or more than 1 MiB of UTF-8 is refused with `400` (the request body may be up to 6 MiB plus 64 KiB, the worst case of JSON escaping, so the size check always answers before the body limit); a scene file that is not valid UTF-8 cannot be edited (`409`), so saving never rewrites bytes the server could not read.
+- **Only real files.** A scene is read, listed or written only when it is a regular file inside a real `scenes/` directory; a symlink answers like a missing scene (`404`), so neither reading nor writing can follow it out of the book.
+- **One commit per save.** `rewrite: edit scenes/<file>` touches only the scene and records the person in an `Edited-by:` trailer; saving unchanged text makes no commit. A failed write or commit restores the file (shared `commitWrites`) and answers `409` with a fixed message, never git's own output.
+- **Staleness is unchanged.** Pending proposals compare the whole scene blob, so any saved edit makes every pending proposal of that scene not applicable (shown as **No aplicable: la escena ha cambiado**). Claims and findings keep their anchor rules: a quote that survives with its context stays valid, otherwise it becomes stale or orphaned. Re-anchoring is [#11](https://github.com/FullFran/re-write/issues/11).
 
 ## 6. Where the planned features fit
 
