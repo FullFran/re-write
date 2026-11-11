@@ -1,4 +1,4 @@
-import { closeSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, writeSync } from 'node:fs';
+import { closeSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, unlinkSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isDottedId, isExtensionName } from './ids.ts';
@@ -24,8 +24,13 @@ export interface DecisionRecord {
 }
 
 // Records are appended to `<dir>/decisions.jsonl`, one JSON object per line, next to the `grants.json`
-// that decided. The file is never rewritten; retention is the operator's (HCS-0005 OQ-0005-6).
+// that decided. The file is never rewritten. When it reaches the bound, the writer renames it to
+// `decisions-<UTC timestamp>.jsonl` and starts a new one; re-write never deletes a record, retention
+// is the operator's (HCS-0005 OQ-0005-6).
 export const DECISIONS_FILE = 'decisions.jsonl';
+/** Size at which the current log is rotated, unless `REWRITE_DECISIONS_MAX_BYTES` or `maxBytes` says otherwise. */
+export const DECISION_LOG_MAX_BYTES = 16 * 1024 * 1024;
+const ROTATED = /^decisions-(\d{8}T\d{6}\.\d{3}Z)(?:-(\d+))?\.jsonl$/;
 
 const MEMBERS = ['id', 'time', 'entry', 'permission', 'outcome', 'operation', 'session', 'decider', 'channel', 'answer'];
 // RFC 3339 UTC, the pattern of the HCS-0005 `decisionRecord` schema.
@@ -72,9 +77,10 @@ export function validateDecisionRecord(value: unknown): string[] {
  * Appends one decision record to `<dir>/decisions.jsonl` and returns it (HCS-0005-R010). The host
  * sets `id` and `time`. Only the members named here are copied from `fields`, so nothing else a
  * caller holds (arguments, results, content) can reach the file (R011). Throws when the record does
- * not validate or the file cannot be read, written and synced; the caller then denies the operation (R012).
+ * not validate or the file cannot be read, rotated, written and synced; the caller then denies the
+ * operation (R012). A file of `maxBytes` or more is rotated first (see `openCurrent`).
  */
-export function writeDecisionRecord(dir: string, fields: Omit<DecisionRecord, 'id' | 'time'>): DecisionRecord {
+export function writeDecisionRecord(dir: string, fields: Omit<DecisionRecord, 'id' | 'time'>, options: { maxBytes?: number } = {}): DecisionRecord {
   const record: DecisionRecord = {
     id: randomUUID(),
     time: new Date().toISOString(),
@@ -89,30 +95,93 @@ export function writeDecisionRecord(dir: string, fields: Omit<DecisionRecord, 'i
   };
   const violations = validateDecisionRecord(record);
   if (violations.length > 0) throw new Error(`Invalid decision record: ${violations.join(', ')}`);
+  const maxBytes = options.maxBytes ?? configuredMaxBytes();
   mkdirSync(dir, { recursive: true });
-  // One write of one line in append mode: records of concurrent writers do not interleave.
-  const fd = openSync(join(dir, DECISIONS_FILE), 'a+', 0o600);
+  const fd = openCurrent(dir, maxBytes);
   try {
     // A crash in the middle of an earlier write leaves a last line without its newline. End that
     // line first, so this record is a whole line of its own and only the torn one is lost.
     const { size } = fstatSync(fd);
     const last = Buffer.alloc(1);
     const torn = size > 0 && readSync(fd, last, 0, 1, size - 1) === 1 && last[0] !== 0x0a;
+    // One write of one line in append mode: records of concurrent writers do not interleave.
     writeSync(fd, `${torn ? '\n' : ''}${JSON.stringify(record)}\n`);
     fsyncSync(fd);
   } finally { closeSync(fd); }
   return record;
 }
 
+function configuredMaxBytes(): number {
+  const value = process.env.REWRITE_DECISIONS_MAX_BYTES;
+  if (value === undefined || value === '') return DECISION_LOG_MAX_BYTES;
+  if (!/^[1-9][0-9]*$/.test(value)) throw new Error(`REWRITE_DECISIONS_MAX_BYTES must be a positive whole number of bytes, got ${JSON.stringify(value)}`);
+  return Number(value);
+}
+
+// 2026-11-11T15:54:00.123Z -> 20261111T155400.123Z: fixed width, so names sort by time.
+const stamp = (date: Date) => date.toISOString().replace(/[-:]/g, '');
+
 /**
- * Reads `<dir>/decisions.jsonl`: the valid records, oldest first, and the 1-based numbers of the
+ * Opens `<dir>/decisions.jsonl` for appending, rotating it first when it holds `maxBytes` or more.
+ * Several processes may write the same directory (the CLI and the server), so rotation takes no lock
+ * and relies on two properties instead. A rotated name is reserved with an exclusive create before
+ * the rename replaces that empty reservation, so a rename never overwrites another file. And every
+ * writer appends through a descriptor: a record written to a file another process has just renamed
+ * lands in that rotated file, which is kept. A lost race can at worst rotate a newer file early;
+ * it never drops or corrupts a record.
+ */
+function openCurrent(dir: string, maxBytes: number): number {
+  const current = join(dir, DECISIONS_FILE);
+  for (let attempt = 0; ; attempt++) {
+    const fd = openSync(current, 'a+', 0o600);
+    try {
+      const held = fstatSync(fd);
+      if (held.size < maxBytes || attempt >= 8) return fd;
+      let named;
+      try { named = statSync(current); } catch (error: any) { if (error.code !== 'ENOENT') throw error; }
+      // When another writer already rotated the file this descriptor holds, just open the new one.
+      if (named?.ino === held.ino && named.dev === held.dev) rotateCurrent(dir, held);
+    } catch (error) { closeSync(fd); throw error; }
+    closeSync(fd);
+  }
+}
+
+function rotateCurrent(dir: string, held: { ino: number; dev: number }): void {
+  const current = join(dir, DECISIONS_FILE);
+  const base = `decisions-${stamp(new Date())}`;
+  let target = '';
+  for (let n = 0; ; n++) {
+    target = join(dir, `${base}${n === 0 ? '' : `-${n}`}.jsonl`);
+    try { closeSync(openSync(target, 'wx', 0o600)); break; } catch (error: any) { if (error.code !== 'EEXIST') throw error; }
+  }
+  try { renameSync(current, target); } catch (error: any) {
+    unlinkSync(target);
+    // Another writer renamed it between the check and here; the caller opens the new file.
+    if (error.code !== 'ENOENT') throw error;
+    return;
+  }
+  const renamed = statSync(target);
+  if (renamed.ino === held.ino && renamed.dev === held.dev) return;
+  // Another writer rotated the full file first and this rename took the new one, under a name that may
+  // sort before it. Give it its name back; `link` never replaces a file, so when yet another writer
+  // has already started a new one, keep the early rotation (records are kept, only file order differs).
+  try { linkSync(target, current); } catch (error: any) { if (error.code === 'EEXIST') return; throw error; }
+  unlinkSync(target);
+}
+
+/**
+ * Reads the current `<dir>/decisions.jsonl` (not the rotated files, see `readAllDecisionLogs`): the valid records, oldest first, and the 1-based numbers of the
  * lines that are not one (a line torn by a crash, or anything that does not validate). An invalid
  * line never hides the records around it, and its content is not returned. Both are empty when the
  * file does not exist.
  */
 export function readDecisionLog(dir: string): { records: DecisionRecord[]; invalid: number[] } {
+  return readLogFile(join(dir, DECISIONS_FILE));
+}
+
+function readLogFile(path: string): { records: DecisionRecord[]; invalid: number[] } {
   let text: string;
-  try { text = readFileSync(join(dir, DECISIONS_FILE), 'utf8'); } catch (error: any) { if (error.code === 'ENOENT') return { records: [], invalid: [] }; throw error; }
+  try { text = readFileSync(path, 'utf8'); } catch (error: any) { if (error.code === 'ENOENT') return { records: [], invalid: [] }; throw error; }
   const records: DecisionRecord[] = [];
   const invalid: number[] = [];
   text.split('\n').forEach((line, index) => {
@@ -122,6 +191,35 @@ export function readDecisionLog(dir: string): { records: DecisionRecord[]; inval
     if (validateDecisionRecord(value).length > 0) invalid.push(index + 1);
     else records.push(value as DecisionRecord);
   });
+  return { records, invalid };
+}
+
+/**
+ * The decision logs of `<dir>`, oldest first: the rotated `decisions-<UTC timestamp>.jsonl` files in
+ * the order they were rotated, then `decisions.jsonl` when it exists. Empty when `dir` does not exist.
+ */
+export function listDecisionLogs(dir: string): string[] {
+  let names: string[];
+  try { names = readdirSync(dir); } catch (error: any) { if (error.code === 'ENOENT') return []; throw error; }
+  const rotated = names.flatMap(name => {
+    const match = ROTATED.exec(name);
+    return match ? [{ name, time: match[1], n: Number(match[2] ?? 0) }] : [];
+  }).sort((a, b) => a.time < b.time ? -1 : a.time > b.time ? 1 : a.n - b.n).map(({ name }) => name);
+  return names.includes(DECISIONS_FILE) ? [...rotated, DECISIONS_FILE] : rotated;
+}
+
+/**
+ * Reads every decision log of `<dir>` (see `listDecisionLogs`), oldest first, like `readDecisionLog`
+ * reads the current one; an invalid line is reported by file name and 1-based line number.
+ */
+export function readAllDecisionLogs(dir: string): { records: DecisionRecord[]; invalid: Array<{ file: string; line: number }> } {
+  const records: DecisionRecord[] = [];
+  const invalid: Array<{ file: string; line: number }> = [];
+  for (const file of listDecisionLogs(dir)) {
+    const log = readLogFile(join(dir, file));
+    records.push(...log.records);
+    invalid.push(...log.invalid.map(line => ({ file, line })));
+  }
   return { records, invalid };
 }
 
