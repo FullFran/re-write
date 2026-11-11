@@ -23,6 +23,7 @@ Sign-in does not call Clerk. The page loads Clerk's two scripts from the issuer,
 | A stale proposal | [§4](review-checklist.md#4-accept-a-proposal), [§6](review-checklist.md#6-verify-stale-proposal-handling), part of [§5](review-checklist.md#5-confirm-history-and-audit-trail) |
 | Unreviewed claims and Canon | part of [§5](review-checklist.md#5-confirm-history-and-audit-trail) |
 | Phone layout at 390 × 844 | part of [§9](review-checklist.md#9-phone-layout) and [§10](review-checklist.md#10-section-navigation-and-folding) |
+| Wikilinks, notes, backlinks and the graph list (`notes-graph.spec.ts`) | part of [§13](review-checklist.md#13-notes-wikilinks-and-the-graph-list) |
 
 Run them locally with Node 24:
 
@@ -34,7 +35,7 @@ npx playwright install chromium
 npx playwright test
 ```
 
-The scene editor module is a third package, `editor/` (CodeMirror 6 bundled by esbuild into `editor/dist/editor.js`, not committed). Its own unit tests (`cd editor && npm ci && npm test`) cover the live preview decorations and the reading view without a browser. The browser tests need the built module, so build it first (`npm run build` in `editor/`); without it the page falls back to the plain text field, which `scene-editor.spec.ts` also covers by failing the module's request. That spec saves screenshots of the three views on desktop and on an emulated Pixel 7 into `browser-tests/test-results/`; CI uploads them as the `editor-screenshots` artifact. Phone coverage is Chromium's mobile emulation, including an IME composition sent through the DevTools protocol; real iOS Safari and Android keyboards (autocorrect, dictation) are checked by hand (docs/review-checklist.md).
+The scene editor module is a third package, `editor/` (CodeMirror 6 bundled by esbuild into `editor/dist/editor.js`, not committed). Its own unit tests (`cd editor && npm ci && npm test`) cover the live preview decorations and the reading view without a browser. The browser tests need the built module, so build it first (`npm run build` in `editor/`); without it the page falls back to the plain text field, which `scene-editor.spec.ts` also covers by failing the module's request. That spec saves screenshots of the three views on desktop and on an emulated Pixel 7 into `browser-tests/test-results/`, and `notes-graph.spec.ts` saves the editor with links, the completion list, a note with its backlinks and the graph list, light and dark; CI uploads them as the `editor-screenshots` artifact. Phone coverage is Chromium's mobile emulation, including an IME composition sent through the DevTools protocol; real iOS Safari and Android keyboards (autocorrect, dictation) are checked by hand (docs/review-checklist.md).
 
 On a failure, `browser-tests/test-results/` holds a screenshot and a trace for each failed test (`npx playwright show-trace <trace.zip>`); in CI the `browser` job uploads them as the `browser-results` artifact.
 

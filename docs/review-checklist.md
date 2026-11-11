@@ -170,3 +170,14 @@ Tests pin the remembered mode, the kept editor, the scene's items, quote selecti
 - [ ] **‹** and **›** and the scene list open the neighbouring scenes; unsaved text of the scene left is offered again when coming back.
 - [ ] On a phone the switch sits at the bottom above the home indicator, each button is a full thumb target, and the accept and reject bar and the assistant button stop above it. Nothing scrolls sideways.
 - [ ] With the keyboard only: Tab reaches the switch, Enter or Space changes the mode, and a screen reader announces the group **Modo** and which mode is pressed.
+
+## 13. Notes, Wikilinks and the Graph List
+
+Tests pin link rendering, completion, following a link, backlinks, the note save and the graph table (`editor/test/wikilinks.test.mjs`, `tests/book-graph-http.test.ts`, `browser-tests/tests/notes-graph.spec.ts`, which also saves screenshots on desktop and on a phone). Real keyboards and screen readers are checked here.
+
+- [ ] In **Vista previa en vivo**, a line with `[[Elena|la capitana]]` reads **la capitana**, underlined; moving the cursor onto the line shows the brackets. A link to a note that does not exist is grey and dashed. *(automated)*
+- [ ] Type `[[` and a few letters of a note or an alias, without accents or capitals, on a phone keyboard: the list offers it; choosing it closes the link. Dictation and autocorrect after the link still work.
+- [ ] Tap a link shown as text on a phone: its note opens in the editor. With a keyboard, Enter with the cursor inside a link does the same. *(automated)*
+- [ ] **Notas** in **Concentración** and in **Ayuda RE;write** lists the notes by type; a note opens, saves with **Guardar** and shows **Menciones enlazadas** and **Menciones sin enlazar**; a mention opens its scene with the words selected. *(automated)*
+- [ ] **Grafo** shows the table; with a screen reader, sorting by a header announces the order, the arrows move between nodes, and choosing one reads **Elegido: …**.
+- [ ] **Hasta** a scene removes the later scenes from the table and lowers the counts. *(automated)*
