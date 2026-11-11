@@ -122,6 +122,7 @@ Automated tests pin the stylesheet's tokens and rules (`tests/review-mobile.test
 - [ ] Trigger an error far down the page (for example a note over the limit): the message is visible at the top of the screen without scrolling.
 - [ ] With the keyboard only, every control shows a focus outline, and Enter or Space on a finding's quote opens its scene.
 - [ ] With "reduce motion" enabled in the system, opening a scene jumps instead of scrolling smoothly.
+- [ ] Scene editor on a real iPhone (Safari) and a real Android phone (Chrome, Gboard): open **Editar escena** and in **Vista previa en vivo** type with autocorrect, an accented letter held down, and dictation; the page does not zoom, the cursor stays where the text goes, and **Guardar** saves exactly what is shown (compare in **Markdown**). *(Chromium mobile emulation and an IME composition are automated in `browser-tests/tests/scene-editor.spec.ts`; real devices are not)*
 - [ ] At 1280 px wide the page is one centred column of readable width, not full-width lines.
 
 ## 10. Section Navigation and Folding
