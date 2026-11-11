@@ -1,0 +1,145 @@
+{
+  "id": "chatgpt-graph-suggestions",
+  "title": "Ask who knows what, find the bridges, and turn a link suggestion into a proposal",
+  "guarantee": "Who-knows-what edges come from claims and respect as_of_scene, names that match no note are reported instead of guessed, link suggestions leave out existing links and carry a literal anchor, and a suggested link reaches the text only as a proposal a person accepts.",
+  "book": {
+    "id": "grafo",
+    "title": "El puente de Sal",
+    "scenes": ["evals/journeys/books/grafo/001-el-puente.md", "evals/journeys/books/grafo/002-la-posada.md", "evals/journeys/books/grafo/003-el-alba.md"]
+  },
+  "steps": [
+    {
+      "id": "elena",
+      "do": "call",
+      "tool": "propose_note",
+      "args": { "book": "grafo", "name": "Elena", "text": "---\ntype: personaje\naliases: [la capitana]\n---\nCapitana del puente. Desconfía de Tomás.\n", "rationale": "Ficha del personaje" },
+      "checks": [{ "name": "the note is proposed", "path": "elena.data.created", "equals": true }]
+    },
+    {
+      "id": "accept_elena",
+      "do": "person_reviews_proposal",
+      "proposal_id": { "ref": "elena.data.proposal.proposal_id" },
+      "decision": "accept",
+      "checks": [{ "name": "the person accepts it", "path": "accept_elena.status", "equals": "accepted" }]
+    },
+    {
+      "id": "puente",
+      "do": "call",
+      "tool": "propose_note",
+      "args": { "book": "grafo", "name": "Puente de Sal", "text": "---\ntype: lugar\n---\nLo guarda [[Elena]].\n", "rationale": "Lugar enlazado" },
+      "checks": [{ "name": "the note is proposed", "path": "puente.data.created", "equals": true }]
+    },
+    {
+      "id": "accept_puente",
+      "do": "person_reviews_proposal",
+      "proposal_id": { "ref": "puente.data.proposal.proposal_id" },
+      "decision": "accept",
+      "checks": [{ "name": "the person accepts it", "path": "accept_puente.status", "equals": "accepted" }]
+    },
+    {
+      "id": "tomas",
+      "do": "call",
+      "tool": "propose_note",
+      "args": { "book": "grafo", "name": "Tomás", "text": "---\ntype: personaje\n---\nUn viajero.\n", "rationale": "Personaje enlazado" },
+      "checks": [{ "name": "the note is proposed", "path": "tomas.data.created", "equals": true }]
+    },
+    {
+      "id": "accept_tomas",
+      "do": "person_reviews_proposal",
+      "proposal_id": { "ref": "tomas.data.proposal.proposal_id" },
+      "decision": "accept",
+      "checks": [{ "name": "the person accepts it", "path": "accept_tomas.status", "equals": "accepted" }]
+    },
+    {
+      "id": "claims",
+      "do": "call",
+      "tool": "propose_claims",
+      "args": {
+        "book": "grafo",
+        "extractor": "chatgpt",
+        "candidates": [
+          { "statement": "Elena conoce el puente", "subject": "Puente de Sal", "source_file": "scenes/001-el-puente.md", "quote": "[[Elena]] cruzó el [[Puente de Sal|puente]] sin mirar atrás.", "scope": "book", "epistemic_kind": "narrated_fact", "knowledge": { "holder": "la capitana", "fact": "camino-del-puente", "mode": "displays" } },
+          { "statement": "Elena ve el río crecido", "subject": "el río", "source_file": "scenes/001-el-puente.md", "quote": "La capitana miró el río.", "scope": "book", "epistemic_kind": "narrated_fact", "knowledge": { "holder": "Elena", "fact": "rio-crecido", "mode": "acquires" } },
+          { "statement": "Tomás oye hablar de Elena en la posada", "subject": "Elena", "source_file": "scenes/002-la-posada.md", "quote": "Tomás habló con [[Elena]] en la posada", "scope": "book", "epistemic_kind": "belief", "knowledge": { "holder": "Tomás", "fact": "elena-en-la-posada", "mode": "hears" } }
+        ]
+      },
+      "checks": [
+        { "name": "the three claims are proposed", "path": "claims.data.created.length", "equals": 3 },
+        { "name": "no claim is rejected", "path": "claims.data.rejected", "equals": [] }
+      ]
+    },
+    {
+      "id": "knows",
+      "do": "call",
+      "tool": "graph_neighbors",
+      "args": { "book": "grafo", "node": "Elena", "knows": true },
+      "checks": [
+        { "name": "knows edges go from the holder's note", "path": "knows.data.knows.edges.*.from", "equals": ["note:Elena", "note:Tomás"] },
+        { "name": "to the subject's note", "path": "knows.data.knows.edges.*.to", "equals": ["note:Puente de Sal", "note:Elena"] },
+        { "name": "each edge keeps its mode", "path": "knows.data.knows.edges.*.mode", "equals": ["displays", "hears"] },
+        { "name": "a subject that names no note is reported, not guessed", "path": "knows.data.knows.unresolved.*.name", "equals": ["el río"] }
+      ]
+    },
+    {
+      "id": "knows_early",
+      "do": "call",
+      "tool": "graph_neighbors",
+      "args": { "book": "grafo", "node": "Elena", "knows": true, "as_of_scene": "scenes/001-el-puente.md" },
+      "checks": [
+        { "name": "only knowledge established by that scene", "path": "knows_early.data.knows.edges.*.scene", "equals": ["scenes/001-el-puente.md"] }
+      ]
+    },
+    {
+      "id": "bridges",
+      "do": "call",
+      "tool": "graph_central",
+      "args": { "book": "grafo", "metric": "betweenness" },
+      "checks": [
+        { "name": "the place that joins both halves ranks first", "path": "bridges.data.ranking.*.id", "equals": ["note:Puente de Sal", "note:Elena", "note:Tomás"] },
+        { "name": "betweenness counts the shortest paths through each note", "path": "bridges.data.ranking.*.betweenness", "equals": [6, 4, 0] }
+      ]
+    },
+    {
+      "id": "suggest",
+      "do": "call",
+      "tool": "graph_suggest_links",
+      "args": { "book": "grafo", "node": "la capitana" },
+      "checks": [
+        { "name": "the note that shares a neighbour but no link is suggested", "path": "suggest.data.suggestions.*.to", "equals": ["note:Tomás"] },
+        { "name": "the suggestion says why", "path": "suggest.data.suggestions.0.via", "equals": ["note:Puente de Sal"] },
+        { "name": "the anchor is the note file", "path": "suggest.data.suggestions.0.anchors.0.file", "equals": "notas/Elena.md" },
+        { "name": "the anchor carries a passage that appears once", "path": "suggest.data.suggestions.0.anchors.0.find", "equals": "Desconfía de Tomás." },
+        { "name": "and the text that links it", "path": "suggest.data.suggestions.0.anchors.0.replace", "equals": "Desconfía de [[Tomás]]." },
+        { "name": "the next step is a proposal, not a write", "path": "suggest.data.next_step", "contains": "propose_revision" }
+      ]
+    },
+    {
+      "id": "link",
+      "do": "call",
+      "tool": "propose_revision",
+      "args": { "book": "grafo", "file": "notas/Elena.md", "find": "Desconfía de Tomás.", "replace": "Desconfía de [[Tomás]].", "rationale": "Enlazar la nota sugerida" },
+      "checks": [{ "name": "the suggested link becomes a proposal", "path": "link.data.created", "equals": true }]
+    },
+    {
+      "id": "unchanged",
+      "do": "book_state",
+      "checks": [
+        { "name": "the note keeps its text until a person accepts", "path": "unchanged.notes.Elena", "equals": "---\ntype: personaje\naliases: [la capitana]\n---\nCapitana del puente. Desconfía de Tomás.\n" }
+      ]
+    },
+    {
+      "id": "accept_link",
+      "do": "person_reviews_proposal",
+      "proposal_id": { "ref": "link.data.proposal.proposal_id" },
+      "decision": "accept",
+      "checks": [{ "name": "the person accepts the link", "path": "accept_link.file", "equals": "notas/Elena.md" }]
+    },
+    {
+      "id": "after",
+      "do": "call",
+      "tool": "graph_suggest_links",
+      "args": { "book": "grafo", "node": "Elena" },
+      "checks": [{ "name": "a linked pair is no longer suggested", "path": "after.data.suggestions", "equals": [] }]
+    }
+  ]
+}

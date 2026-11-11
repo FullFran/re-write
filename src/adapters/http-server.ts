@@ -30,7 +30,7 @@ import { inspectNotion, loadNotionChapters, parseNotionMapping, type NotionMappi
 import { chapterFilename, convertToMarkdown, importBook } from '../application/book-import.ts';
 import { SCENE_EDIT } from '../application/decision.ts';
 import { SceneConflictError, SceneEditRefusal, SceneNotFoundError } from '../application/project.ts';
-import { graphData, notesSummary, noteView } from '../application/story.ts';
+import { graphData, graphQuery, GraphQueryError, GraphTooLargeError, notesSummary, noteView } from '../application/story.ts';
 import { InvalidSceneTextError, MAX_SCENE_BYTES } from '../domain/scene-text.ts';
 
 export interface ServerConfig {
@@ -657,11 +657,13 @@ export function createHandler(
 
     // The story graph as data (read-only): typed edges, degrees, and the as_of_scene cut.
     if (parts.length === 3 && parts[2] === 'graph' && req.method === 'GET') {
-      const asOf = new URL(req.url ?? '/', 'http://localhost').searchParams.get('as_of_scene');
+      const params = new URL(req.url ?? '/', 'http://localhost').searchParams;
+      const asOf = params.get('as_of_scene');
       const project = open(READ);
       try {
-        return json(res, 200, graphData(project, asOf ?? undefined));
+        return json(res, 200, graphData(project, asOf ?? undefined, graphQuery(params)));
       } catch (error) {
+        if (error instanceof GraphQueryError || error instanceof GraphTooLargeError) throw new HttpError(400, error.message);
         if (error instanceof Error && error.message.startsWith('unknown scene')) throw new HttpError(400, error.message);
         throw error;
       }

@@ -87,3 +87,40 @@ test('the graph route is logged under its own route name, without the query', as
   const routes = lines.map((line) => JSON.parse(line)).filter((r) => r.event === 'http.request').map((r) => r.route);
   assert.deepEqual(routes, ['/review/api/books/:book/graph']);
 });
+
+// Issue #115, slice 4: optional query parameters add metrics, knows edges, the paragraph weight and
+// link suggestions; without them the answer keeps exactly its earlier fields.
+test('without the new parameters the graph keeps exactly its earlier fields', async () => {
+  const body = await (await reviewApi(h, '/books/sal/graph', await h.session())).json();
+  assert.deepEqual(Object.keys(body), ['as_of_scene', 'scenes', 'nodes', 'edges', 'too_large']);
+  assert.deepEqual(Object.keys(node(body, 'note:Elena')), ['id', 'kind', 'name', 'type', 'order', 'degree', 'scenes']);
+  assert.ok(body.edges.every((e: any) => Object.keys(e).join() === 'kind,from,to,weight'));
+});
+
+test('metrics, include and suggest add PageRank, betweenness, knows edges, the paragraph weight and link suggestions', async () => {
+  const query = '?metrics=pagerank,betweenness&include=knows,paragraphs&suggest=jaccard&top=2';
+  const res = await reviewApi(h, '/books/sal/graph' + query, await h.session());
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.ok(body.nodes.every((n: any) => typeof n.pagerank === 'number' && typeof n.betweenness === 'number'));
+  assert.equal(node(body, 'note:Brújula').betweenness, 0);
+  assert.deepEqual(body.edges.find((e: any) => e.kind === 'cooccurs'), { kind: 'cooccurs', from: 'note:Elena', to: 'note:Puerto', weight: 2, paragraphs: 2 });
+  assert.deepEqual(body.knows, { edges: [], unresolved: [], ambiguous: [] });
+  assert.deepEqual(body.suggestions, { metric: 'jaccard', items: [] }, 'Elena and Puerto are already linked; Brújula shares nothing');
+  assert.equal(git(h.bookDir, 'status', '--porcelain'), '');
+});
+
+test('an unknown metric, include, suggest or top value is a 400 that names it', async () => {
+  const session = await h.session();
+  for (const [query, pattern] of [
+    ['metrics=closeness', /unknown metrics value: closeness/],
+    ['include=everything', /unknown include value: everything/],
+    ['suggest=magic', /unknown suggest value: magic/],
+    ['suggest=adamic_adar,jaccard', /suggest takes one value: adamic_adar or jaccard/],
+    ['suggest=jaccard&top=0', /top must be a whole number from 1 to 50/],
+  ] as const) {
+    const res = await reviewApi(h, `/books/sal/graph?${query}`, session);
+    assert.equal(res.status, 400, query);
+    assert.match((await res.json()).error, pattern);
+  }
+});

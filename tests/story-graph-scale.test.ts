@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { analyseBook, backlinks, MAX_ANALYSED_CHARS } from '../src/domain/story-graph.ts';
+import {
+  analyseBook, backlinks, betweenness, buildGraph, knowsEdges, MAX_ANALYSED_CHARS, MAX_GRAPH_WORK, MAX_SUGGEST_WORK, pageRank, suggestionCost, suggestLinks,
+  type KnowledgeClaim, type StoryGraph,
+} from '../src/domain/story-graph.ts';
 import { codeRanges, parseWikilinks } from '../src/domain/wikilink.ts';
 
 /**
@@ -80,4 +83,54 @@ test('a text over the work cap is reported as too large to analyse instead of be
   const analysis = analyseBook({ notes: [{ name: 'Elena', text: '' }], scenes: [{ file: 'scenes/1.md', text: huge }, { file: 'scenes/2.md', text: '[[Elena]]' }] });
   assert.deepEqual(analysis.too_large, [{ source_kind: 'scene', source: 'scenes/1.md', chars: MAX_ANALYSED_CHARS + 1 }]);
   assert.deepEqual(analysis.links.map((link) => link.source), ['scenes/2.md'], 'the other scenes are still analysed');
+});
+
+test('the paragraph co-occurrence weight over many paragraphs runs in linear time', () => {
+  const two = (scene: string) => analyseBook({ notes: [{ name: 'A', text: '' }, { name: 'B', text: '' }], scenes: [{ file: 'scenes/1.md', text: scene }] });
+  linear('paragraphs', repeat('[[A]] y [[B]].\n\n'), (text) => {
+    const edge = buildGraph(two(text), undefined, { paragraphs: true }).edges.find((e) => e.kind === 'cooccurs')!;
+    assert.equal(edge.paragraphs, text.length / 16);
+  });
+});
+
+test('PageRank and knows edges over a growing chain of notes run in linear time', () => {
+  // One note per 16 characters of "size", each linking the next, and one knowledge claim per note.
+  const chain = (size: number) => {
+    const count = Math.floor(size / 16);
+    const names = Array.from({ length: count }, (_, i) => `N${i}`);
+    const analysis = analyseBook({ notes: names.map((name, i) => ({ name, text: i + 1 < count ? `[[N${i + 1}]]` : '' })), scenes: [{ file: 'scenes/1.md', text: '' }] });
+    const claims: KnowledgeClaim[] = names.map((name, i) => ({ claim_id: `C-${i}`, subject: name, source_file: 'scenes/1.md', editorial_status: 'proposed', knowledge: { holder: 'N0', fact: name, mode: 'displays' } }));
+    return { analysis, graph: buildGraph(analysis), claims, count };
+  };
+  linear('pagerank', chain, ({ graph, count }) => assert.equal(pageRank(graph).size, count + 1), 'every note and the scene');
+  linear('knows', chain, ({ analysis, claims, count }) => assert.equal(knowsEdges(analysis, claims).edges.length, count));
+});
+
+/** Every pair of `count` notes co-occurs: the densest graph of that size. */
+function complete(count: number): StoryGraph {
+  const ids = Array.from({ length: count }, (_, i) => `note:N${String(i).padStart(4, '0')}`);
+  const edges = [];
+  for (let i = 0; i < count; i += 1) for (let j = i + 1; j < count; j += 1) edges.push({ kind: 'cooccurs' as const, from: ids[i], to: ids[j], weight: 1 });
+  return { nodes: ids.map((id) => ({ id, kind: 'note' as const, name: id.slice(5), type: null, order: null })), edges };
+}
+
+test('the densest graph that suggestions and betweenness accept answers within a second (timed with REWRITE_SCALE_FULL=1)', (t) => {
+  // A complete graph of k notes costs k (k - 1)^2 suggestion steps and k^3 betweenness steps.
+  let k = 2;
+  while ((k + 1) * k * k <= MAX_SUGGEST_WORK) k += 1;
+  assert.ok(suggestionCost(complete(k)) <= MAX_SUGGEST_WORK);
+  assert.ok(suggestionCost(complete(k + 1)) > MAX_SUGGEST_WORK);
+  let n = 2;
+  while ((n + 1) ** 3 <= MAX_GRAPH_WORK) n += 1;
+  if (!FULL) return;
+  for (const [name, run] of [
+    [`suggestions on ${k} notes`, () => suggestLinks(complete(k), { metric: 'adamic_adar', top: 10 })],
+    [`betweenness on ${n} notes`, () => betweenness(complete(n))],
+  ] as const) {
+    const start = performance.now();
+    run();
+    const ms = performance.now() - start;
+    t.diagnostic(`${name}: ${Math.round(ms)} ms`);
+    assert.ok(ms < BOUND_MS, `${name}: ${Math.round(ms)} ms`);
+  }
 });

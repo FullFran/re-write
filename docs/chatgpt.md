@@ -26,9 +26,11 @@ From OpenAI's documentation, read on 2026-11-11:
 | Supports OAuth with CIMD, dynamic client registration or a static client. | Unchanged: Clerk OAuth, protected-resource metadata at `/.well-known/oauth-protected-resource`. |
 
 Not found in OpenAI's documentation: limits on the number of tools, description length or result
-size. The budget is our own: the `chatgpt-tool-metadata` eval keeps the tool list under 28 KB. It was
-about 17 KB with 12 tools; the 7 note and graph tools of [notes-and-graph.md](notes-and-graph.md)
-bring it to about 26 KB. About 600 bytes of each tool are fixed schema overhead, so new tools keep
+size. The budget is our own: the `chatgpt-tool-metadata` eval keeps the tool list under 30 KB. It was
+about 17 KB with 12 tools; the 8 note and graph tools of [notes-and-graph.md](notes-and-graph.md)
+bring it to about 28 KB. It was raised from 28 KB to 30 KB for `graph_suggest_links` rather than
+shortening the untrusted-text sentence, a safety instruction every tool that returns manuscript
+text must keep word for word. About 600 bytes of each tool are fixed schema overhead, so new tools keep
 short descriptions and open output schemas rather than spelling out every field.
 
 Which plans may use write tools is not settled: the developer guide lists Plus, Pro, Business,
@@ -59,6 +61,15 @@ lists Business, Enterprise and Edu. Check it on the writer's own plan.
   `graph_central` answer over the links, and take `as_of_scene` to leave out later scenes. They
   never write: a new note goes through `propose_note`, a change to a note through
   `propose_revision` on its `notas/` file. An unknown or ambiguous note name points to `list_notes`.
+  `graph_central` ranks by `degree`, `pagerank` or `betweenness` (a graph above the work cap is
+  refused with a pointer to degree or PageRank); `graph_neighbors` with `knows: true` adds who
+  knows what, from claims with `knowledge`, and lists holder or subject names that match no note
+  instead of guessing. `graph_suggest_links` lists notes that could be linked, with anchors whose
+  `find` appears once in the note and whose `replace` links it, or an `anchor_problem` saying why
+  there is none: a suggested link reaches the text only through `propose_revision` with those
+  values, which the person accepts at the review URL (its `next_step` says so). A dense book is
+  refused at once rather than computed. The
+  `chatgpt-graph-suggestions` journey pins this flow.
   See [notes-and-graph.md](notes-and-graph.md).
 - **Scene lengths.** `list_scenes` adds `chars`, the length of each scene, so the assistant can plan
   `read_scene` pages of up to 20,000 characters.
