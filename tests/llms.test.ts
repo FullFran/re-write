@@ -33,11 +33,24 @@ test('llms.txt guides a writer from import to evaluation without giving the assi
   assert.ok(guide.includes('no ve nada que la persona no haya importado'));
   assert.ok(guide.includes('Settings -> Connectors/Apps -> RE;write -> Refresh'));
   assert.ok(guide.includes('abre un chat nuevo'));
-  // Existing connection guidance and synthetic-only warning must remain available.
+  // Existing connection guidance must remain available.
   for (const heading of ['## Current state', '## Step 1: Get access', '## Step 2: Connect an agent', '## Step 3: Check it works', '## Using it']) {
     assert.ok(text.includes(heading), heading);
   }
-  assert.ok(text.includes('Use only synthetic text, **never real manuscripts**.'));
+});
+
+test('llms.txt tells writers and assistants that backups are tested and what still reaches others, in both languages', () => {
+  const text = llmsText('https://rewrite.example/mcp');
+  const [english, spanish] = text.split('## Guía para escritores\n');
+  for (const gone of ['synthetic', 'never real manuscripts', 'no backups', 'sintético', 'nunca manuscritos reales']) {
+    assert.ok(!text.includes(gone), `old warning removed: ${gone}`);
+  }
+  for (const phrase of ['encrypted copy of the data every day', 'restore from it has been tested', 'Everyone with access to a book can read all of it', 'sends the text it reads to its own model provider', 'The writer decides what to share']) {
+    assert.ok(english.includes(phrase), `English notice: ${phrase}`);
+  }
+  for (const phrase of ['copia cifrada de los datos cada día', 'se ha comprobado que se puede restaurar', 'quien tenga acceso a un libro puede leerlo entero', 'envías el texto que lees a tu propio proveedor del modelo', 'La persona decide qué comparte']) {
+    assert.ok(spanish.includes(phrase), `Spanish notice: ${phrase}`);
+  }
 });
 
 test('MCP instructions preserve every previous safety sentence and point to the writer workflow', async (t) => {
