@@ -176,7 +176,7 @@ async function saveElsewhere(h: Harness, session: string, change: (text: string)
   assert.equal(res.status, 200);
 }
 
-test('a person edits a scene on the page, saves it, and a poll never closes the editor', async (t) => {
+test('a person edits a scene on the page, saves it, and a poll never touches the editor', async (t) => {
   const { h, page } = await quietPage(t);
   await page.openEditor();
   const original = read(h.bookDir, SCENE);
@@ -187,11 +187,15 @@ test('a person edits a scene on the page, saves it, and a poll never closes the 
   await page.type(mine);
   assert.equal(page.status(), 'Cambios sin guardar');
   assert.equal(JSON.parse(page.storage.get(DRAFT_KEY)!).text, mine, 'the unsaved text is kept in this tab');
-  proposeRevision(h.bookDir, 'scenes/escena-02.md', 'una vela casi consumida', 'una vela nueva');
+  const editor = page.editor();
+  proposeRevision(h.bookDir, 'scenes/escena-02.md', 'una vela casi consumida', 'una vela nueva', 'Vela nueva');
+  assert.equal(page.text(/^Vela nueva$/), false);
   await page.poll();
-  assert.ok(page.editor(), 'a background refresh with news does not re-render over an open editor');
+  // The editor lives in the writing desk (docs/design.md, "Modes"), which no refresh re-renders.
+  assert.equal(page.editor(), editor, 'a background refresh with news never re-renders the open editor');
   assert.equal(page.editor()!.value, mine);
-  assert.ok(page.notice(), 'the news waits behind a notice instead');
+  assert.equal(page.text(/^Vela nueva$/), true, 'the news reaches the review meanwhile');
+  assert.equal(page.notice(), undefined, 'so nothing waits behind a notice');
 
   await page.click('Guardar');
   assert.equal(read(h.bookDir, SCENE), mine);
