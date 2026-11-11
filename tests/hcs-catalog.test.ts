@@ -13,3 +13,10 @@ test('paths must be relative POSIX paths', () => { for (const path of ['../a', '
 test('valid catalog passes document validation', () => { assert.equal(readCatalog(JSON.stringify(catalog())).ok, true); });
 test('dotted identifiers respect the schema length limit', () => { const doc = catalog(); doc.id = `dev.${'a'.repeat(125)}`; assert.equal(errors(doc)[0].code, 'manifest_invalid'); });
 test('depth boundary respects quoted delimiters', () => { const nested = (n: number) => `{"hcsVersion":"0.1","id":"dev.example.a","version":"1","entries":[],"x-test":${'['.repeat(n)}"[\\\""${']'.repeat(n)}}`; assert.equal(readCatalog(nested(63)).ok, true); assert.equal(readCatalog(nested(64)).ok, false); });
+test('contentId is optional and uses the contentHash digest grammar (HCS-0001-R017)', () => {
+  for (const contentId of [`sha256:${'b'.repeat(64)}`, `sha512:${'b'.repeat(128)}`]) { const doc = catalog(); Object.assign(doc.entries[0], { contentId }); assert.equal(readCatalog(JSON.stringify(doc)).ok, true); }
+  for (const contentId of [`sha256:${'B'.repeat(64)}`, `sha256:${'b'.repeat(63)}`, `md5:${'b'.repeat(32)}`, 7]) {
+    const doc = catalog(); Object.assign(doc.entries[0], { contentId });
+    assert.deepEqual(errors(doc).map(e => [e.code, e.requirement]), [['manifest_invalid', 'HCS-0001-R017']]);
+  }
+});

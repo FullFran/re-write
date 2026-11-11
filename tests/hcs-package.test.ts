@@ -125,3 +125,27 @@ test('fetch aborts the download when the caller signal aborts', scratch(async di
     assert.equal(downloadSignal?.aborted, true);
   });
 }));
+
+test('contentId is checked against the uncompressed tar after size and contentHash (HCS-0001-R018)', scratch(dir => {
+  const tar = writeTar([{ name: 'file', data: Buffer.from('ok') }]), bytes = gzipSync(tar);
+  const id = (algorithm = 'sha256') => `${algorithm}:${createHash(algorithm).update(tar).digest('hex')}`;
+  const r018 = (error: any) => { mismatch(error); assert.equal(error.errors[0].requirement, 'HCS-0001-R018'); return true; };
+  verifyPackage(bytes, { ...expected(bytes), contentId: id() }); verifyPackage(bytes, { ...expected(bytes), contentId: id('sha512') });
+  // The identity is of the tar stream, not of the transport bytes, and a malformed one is never trusted.
+  for (const contentId of [`sha256:${'0'.repeat(64)}`, expected(bytes).contentHash, 'sha256:nope']) {
+    assert.throws(() => verifyPackage(bytes, { ...expected(bytes), contentId }), r018);
+    const target = join(dir, 'out'); assert.throws(() => unpackPackage(bytes, { ...expected(bytes), contentId }, target), r018); assert.equal(existsSync(target), false);
+  }
+  // Transport checks come first: a wrong contentHash is reported as R007 even when contentId is wrong too.
+  assert.throws(() => verifyPackage(bytes, { size: bytes.length, contentHash: `sha256:${'0'.repeat(64)}`, contentId: `sha256:${'0'.repeat(64)}` }), (e: any) => { mismatch(e); assert.equal(e.errors[0].requirement, 'HCS-0001-R007'); return true; });
+  // The decompressed-stream bound is inclusive and a correct identity does not lift it.
+  verifyPackage(bytes, { ...expected(bytes), contentId: id() }, { maxUncompressedBytes: tar.length });
+  assert.throws(() => verifyPackage(bytes, { ...expected(bytes), contentId: id() }, { maxUncompressedBytes: tar.length - 1 }), r018);
+  assert.throws(() => verifyPackage(bytes, { ...expected(bytes), contentId: id() }, { maxUncompressedBytes: -1 }), RangeError);
+  const plain = Buffer.from('not gzip'); assert.throws(() => verifyPackage(plain, { ...expected(plain), contentId: id() }), r018);
+  const target = join(dir, 'ok'); unpackPackage(bytes, { ...expected(bytes), contentId: id() }, target); assert.equal(readFileSync(join(target, 'file'), 'utf8'), 'ok');
+}));
+
+test('without contentId, verification stays transport-only', () => {
+  const plain = Buffer.from('not gzip'); verifyPackage(plain, expected(plain));
+});

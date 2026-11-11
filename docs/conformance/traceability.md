@@ -31,8 +31,8 @@ Generated from HCS release 0.1.0-draft.6 (vendor/hcs/PIN.json); do not edit.
 | HCS-0001-R014 | SHOULD | implemented | `src/hcs/package.ts`, `src/hcs/tar.ts`, `tests/hcs-package.test.ts`, `tests/hcs-tar.test.ts` |  |
 | HCS-0001-R015 | SHOULD | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance.test.ts` |  |
 | HCS-0001-R016 | MUST NOT | implemented | `src/hcs/host.ts`, `src/hcs/resolve.ts`, `tests/hcs-resolve.test.ts`, `tests/hcs-conformance.test.ts` |  |
-| HCS-0001-R017 | MUST | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
-| HCS-0001-R018 | MUST | planned |  | [#25](https://github.com/FullFran/re-write/issues/25) |
+| HCS-0001-R017 | MUST | implemented | `src/hcs/catalog.ts`, `tests/hcs-catalog.test.ts`, `tests/hcs-conformance.test.ts` |  |
+| HCS-0001-R018 | MUST | implemented | `src/hcs/package.ts`, `tests/hcs-package.test.ts`, `tests/hcs-conformance.test.ts` |  |
 
 ## HCS-0002
 
