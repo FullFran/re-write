@@ -207,6 +207,38 @@ body[data-mode=focus] .toolbar, body[data-mode=help] .toolbar { margin-bottom: v
 .desk-tools > button { min-height: var(--tap); padding: 0 var(--space-4); }
 .desk-tools > button[aria-expanded=true] { background: var(--pressed); }
 .desk-status { flex: 1 1 100%; margin: 0; }
+/* Libro (docs/book-structure.md): the book tree, a drawer over the text at every width. */
+.desk-tree { position: fixed; top: 0; bottom: 0; left: 0; z-index: 20; width: min(24rem, 92vw); overflow-y: auto; box-sizing: border-box; padding: var(--space-3) var(--space-4) var(--space-6); background: var(--paper); border-right: 1px solid var(--line); box-shadow: 0 0 24px rgb(0 0 0 / 25%); }
+.desk-tree[hidden] { display: none; }
+.tree-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.tree-head > h3 { margin: 0; font-size: var(--text-lg); }
+.tree-total, .tree-status { margin: var(--space-1) 0 var(--space-2); }
+.tree-status:empty { display: none; }
+.tree-tools { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-2) 0; }
+.tree-tools > button, .tree-head > button, .tree-archive-toggle { min-height: var(--tap); padding: 0 var(--space-3); }
+.tree-composer { margin: var(--space-2) 0; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius); }
+.tree-composer input[type=text], .tree-composer select { display: block; width: 100%; box-sizing: border-box; min-height: var(--tap); margin: var(--space-1) 0 var(--space-2); }
+.tree-ask { margin: 0; font-weight: 600; }
+.tree-check { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-2); }
+.tree-ask-actions { display: flex; gap: var(--space-2); }
+.tree-chapter { margin: var(--space-3) 0; }
+.tree-chapter h4 { margin: 0; font-size: var(--text-md); }
+.tree-scenes { list-style: none; margin: var(--space-1) 0 0; padding: 0; }
+.tree-line { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.tree-chapter-head { cursor: grab; }
+.tree-name { flex: 1 1 auto; min-width: 0; min-height: var(--tap); text-align: left; overflow-wrap: anywhere; }
+.tree-words { flex: none; margin: 0; white-space: nowrap; }
+.tree-scene { padding-left: var(--space-2); border-left: 3px solid transparent; }
+.tree-scene[draggable=true] { cursor: grab; }
+.tree-open { border-left-color: var(--accept); background: var(--accept-bg); }
+.tree-name[aria-current=true] { font-weight: 700; }
+.tree-actions { display: none; flex-wrap: wrap; gap: var(--space-1); padding: 0 0 var(--space-2); }
+/* Never on hover: rows that grow under the pointer move the list while the person aims or drags. */
+.tree-scene:focus-within > .tree-actions, .tree-open > .tree-actions, .tree-chapter-actions { display: flex; }
+.tree-act, .tree-move { min-width: var(--tap); min-height: var(--tap); padding: 0 var(--space-2); }
+.tree-drop { outline: 2px dashed var(--accept); outline-offset: -2px; }
+.tree-archive { margin-top: var(--space-5); }
+.tree-archived .tree-name { font-style: italic; }
 /* Analizar: Ayuda only, its scope said before sending (docs/design.md, "Modes"). */
 .analyse-toggle, .desk-analyse { display: none; }
 body[data-mode=help] .analyse-toggle { display: inline-flex; align-items: center; }
@@ -2582,7 +2614,12 @@ function createDesk() {
     tool.setAttribute('aria-expanded', 'false');
     tool.setAttribute('aria-controls', 'desk-panel');
   }
-  tools.append(notesTool, graphTool);
+  // Libro (docs/book-structure.md): the book tree, a drawer over the text.
+  const bookTool = el('button', 'Libro');
+  bookTool.type = 'button';
+  bookTool.setAttribute('aria-expanded', 'false');
+  bookTool.setAttribute('aria-controls', 'desk-tree');
+  tools.append(bookTool, notesTool, graphTool);
   // Analizar, in Ayuda only: the scope is chosen and shown before anything is sent.
   const analyseTool = el('button', 'Analizar', 'analyse-toggle');
   analyseTool.type = 'button';
@@ -2645,9 +2682,13 @@ function createDesk() {
   const help = el('aside', undefined, 'desk-help');
   help.setAttribute('aria-label', 'Ayuda para esta escena');
   bodyBox.append(slot, help);
-  node.append(head, analyse, banner, panes, panel, bodyBox);
+  const tree = el('nav', undefined, 'desk-tree');
+  tree.id = 'desk-tree';
+  tree.setAttribute('aria-label', 'Libro');
+  tree.hidden = true;
+  node.append(head, tree, analyse, banner, panes, panel, bodyBox);
 
-  const state = { book: null, file: null, scenes: [], editor: null, saved: null, pane: 'text', opening: 0, statsQueued: false, notes: null, lib: null, panel: null, scope: 'scene' };
+  const state = { book: null, file: null, scenes: [], archived: [], tree: null, editor: null, saved: null, pane: 'text', opening: 0, statsQueued: false, notes: null, lib: null, panel: null, scope: 'scene' };
 
   // What Analizar would send for a scope: the line that names it, the panel's item and the
   // prompt; or the reason it cannot (why). Never anything the assistant cannot really do.
@@ -2756,6 +2797,14 @@ function createDesk() {
       current.disabled = true;
       options.unshift(current);
     }
+    // An archived scene can be open (it stays readable by path): the picker names it.
+    if (!isNoteFile(state.file) && state.archived.includes(state.file)) {
+      const current = el('option', 'Archivo: ' + deskSceneName(state.file));
+      current.value = '';
+      current.selected = true;
+      current.disabled = true;
+      options.unshift(current);
+    }
     picker.replaceChildren(...options);
     const at = state.scenes.indexOf(state.file);
     prev.disabled = at <= 0;
@@ -2777,6 +2826,7 @@ function createDesk() {
     title.textContent = isNoteFile(state.file) ? noteName(state.file) : sceneTitle(text, state.file);
     const count = wordCount(text);
     words.textContent = count.toLocaleString('es') + (count === 1 ? ' palabra' : ' palabras');
+    if (!isNoteFile(state.file)) bookTree.liveCount(state.file, count);
     showBanner();
     renderAnalyse();
   }
@@ -2848,6 +2898,7 @@ function createDesk() {
     state.file = file;
     if (!isNote) rememberScene(book, file);
     fillPicker();
+    bookTree.markOpen();
     title.textContent = isNote ? noteName(file) : deskSceneName(file);
     words.textContent = '';
     deskStatus.textContent = '';
@@ -3079,6 +3130,523 @@ function createDesk() {
     renderHelp();
   }
 
+  // Libro (docs/book-structure.md): chapters and scenes with word counts, a book total, the open
+  // scene marked. It is a drawer over the text, closed by default. Opening a scene from it is
+  // open(): the scene left behind keeps its unsaved text as its draft, as with the picker.
+  // Structure changes are one request each, carrying the manifest version this tree was read at.
+  const bookTree = (() => {
+    const fmt = (n) => groupedCount(n, 'palabra', 'palabras');
+    const treeHeading = el('h3', 'Libro');
+    treeHeading.tabIndex = -1;
+    const treeClose = el('button', 'Cerrar');
+    treeClose.type = 'button';
+    treeClose.setAttribute('aria-label', 'Cerrar el libro');
+    const treeHead = el('div', undefined, 'tree-head');
+    treeHead.append(treeHeading, treeClose);
+    const totalLine = el('p', '', 'meta tree-total');
+    const newScene = el('button', 'Nueva escena');
+    newScene.type = 'button';
+    const newChapter = el('button', 'Nuevo capítulo');
+    newChapter.type = 'button';
+    const treeTools = el('div', undefined, 'tree-tools');
+    treeTools.append(newScene, newChapter);
+    const composer = el('div', undefined, 'tree-composer');
+    composer.hidden = true;
+    const status = el('p', '', 'meta tree-status');
+    status.setAttribute('role', 'status');
+    const list = el('div', undefined, 'tree-list');
+    const archiveBox = el('section', undefined, 'tree-archive');
+    tree.append(treeHead, totalLine, treeTools, composer, status, list, archiveBox);
+
+    let archiveOpen = false;
+    let focusKey = null;
+    let drag = null;
+    let rows = new Map();
+    let counts = { scenes: new Map(), chapters: new Map() };
+
+    const isOpen = () => !tree.hidden;
+    const narrow = () => Boolean(window.matchMedia && window.matchMedia('(max-width: 63.99em)').matches);
+    const flatten = (data) => data.chapters.flatMap((c) => c.scenes.map((s) => s.file)).concat(data.loose.map((s) => s.file));
+
+    function iconButton(text, label, run, key) {
+      const b = el('button', text, 'tree-act');
+      b.type = 'button';
+      b.setAttribute('aria-label', label);
+      b.title = label;
+      b.focusKey = key;
+      b.addEventListener('click', run);
+      return b;
+    }
+
+    function refreshCounts() {
+      const data = state.tree;
+      if (!data) return;
+      let total = 0;
+      for (const chapter of data.chapters) {
+        chapter.words = chapter.scenes.reduce((n, s) => n + s.words, 0);
+        total += chapter.words;
+        const span = counts.chapters.get(chapter.id);
+        if (span) span.textContent = fmt(chapter.words);
+      }
+      for (const s of data.loose) total += s.words;
+      data.total_words = total;
+      for (const s of data.chapters.flatMap((c) => c.scenes).concat(data.loose, data.archived)) {
+        const span = counts.scenes.get(s.file);
+        if (span) span.textContent = fmt(s.words);
+      }
+      totalLine.textContent = 'Libro: ' + fmt(total);
+    }
+
+    function setTree(data) {
+      state.tree = data;
+      state.scenes = flatten(data);
+      state.archived = data.archived.map((s) => s.file);
+      fillPicker();
+      render();
+    }
+
+    async function load() {
+      const book = state.book;
+      const data = await api('/books/' + book + '/tree');
+      if (book === state.book) setTree(data);
+    }
+
+    async function change(op) {
+      const book = state.book;
+      status.textContent = '';
+      try {
+        const done = await api('/books/' + book + '/structure', Object.assign({ version: state.tree.version }, op));
+        if (book !== state.book) return null;
+        setTree(done.tree);
+        return done;
+      } catch (error) {
+        status.textContent = error.message;
+        if (error.status === 409) {
+          status.textContent += ' Se ha vuelto a cargar el libro; repite el cambio.';
+          await load().catch(() => {});
+        }
+        return null;
+      }
+    }
+
+    function closeNarrow() {
+      if (narrow()) close(false);
+    }
+    async function openScene(file) {
+      if (file !== state.file) await open(file, narrow()).catch((error) => showError(error.message));
+      closeNarrow();
+    }
+
+    // Where a scene is: its group (a chapter id, or null for the scenes outside chapters) and place.
+    function groups() {
+      const data = state.tree;
+      return data.chapters.map((c) => ({ id: c.id, scenes: c.scenes })).concat([{ id: null, scenes: data.loose }]);
+    }
+    function locate(file) {
+      const all = groups();
+      for (let g = 0; g < all.length; g++) {
+        const at = all[g].scenes.findIndex((s) => s.file === file);
+        if (at !== -1) return { g, at, all };
+      }
+      return null;
+    }
+    async function moveScene(file, chapter, position, key) {
+      focusKey = key;
+      await change({ op: 'move_scene', file, chapter, position });
+      applyFocus();
+    }
+    // The arrows move within the group; at its edge they carry the scene into the next group.
+    function stepScene(file, by) {
+      const found = locate(file);
+      if (!found) return undefined;
+      const { g, at, all } = found;
+      const key = (by < 0 ? 'up:' : 'down:') + file;
+      const last = all[g].scenes.length - 1;
+      if (by < 0 && at === 0) return g > 0 ? moveScene(file, all[g - 1].id, undefined, key) : undefined;
+      if (by > 0 && at === last) return g < all.length - 1 ? moveScene(file, all[g + 1].id, 0, key) : undefined;
+      return moveScene(file, all[g].id, at + by, key);
+    }
+    async function stepChapter(id, by) {
+      const at = state.tree.chapters.findIndex((c) => c.id === id);
+      const to = at + by;
+      if (at === -1 || to < 0 || to >= state.tree.chapters.length) return;
+      focusKey = (by < 0 ? 'cup:' : 'cdown:') + id;
+      await change({ op: 'move_chapter', chapter: id, position: to });
+      applyFocus();
+    }
+
+    function applyFocus() {
+      const key = focusKey;
+      focusKey = null;
+      if (!key) return;
+      const target = all(tree, (n) => n.focusKey === key)[0];
+      if (target && target.focus) target.focus();
+    }
+    // The elements with a focusKey, in tree order.
+    function all(root, match) {
+      const found = match(root) ? [root] : [];
+      for (const child of root.children || []) found.push(...all(child, match));
+      return found;
+    }
+
+    function ask(config) {
+      const field = el('input');
+      field.type = 'text';
+      field.value = config.value || '';
+      field.maxLength = 120;
+      field.setAttribute('aria-label', config.label);
+      const parts = [el('p', config.label, 'tree-ask'), field];
+      let chapter = null;
+      if (config.chapters) {
+        chapter = el('select');
+        chapter.setAttribute('aria-label', 'Capítulo');
+        const end = el('option', 'Al final del libro');
+        end.value = '';
+        end.selected = !config.chapter;
+        chapter.append(end);
+        for (const c of state.tree.chapters) {
+          const option = el('option', c.title);
+          option.value = c.id;
+          option.selected = c.id === config.chapter;
+          chapter.append(option);
+        }
+        parts.push(chapter);
+      }
+      let heading = null;
+      if (config.heading) {
+        heading = el('input');
+        heading.type = 'checkbox';
+        heading.checked = true;
+        heading.setAttribute('aria-label', 'Empezar con el título como encabezado');
+        const label = el('label', 'Empezar con el título como encabezado', 'tree-check');
+        label.prepend(heading);
+        parts.push(label);
+      }
+      const confirm = el('button', config.confirm, 'accept');
+      confirm.type = 'button';
+      const cancel = el('button', 'Cancelar');
+      cancel.type = 'button';
+      const row = el('div', undefined, 'tree-ask-actions');
+      row.append(confirm, cancel);
+      parts.push(row);
+      const finish = (restore) => {
+        composer.hidden = true;
+        composer.replaceChildren();
+        if (restore && config.back && config.back.focus) config.back.focus();
+      };
+      const submit = async () => {
+        const title = field.value.trim();
+        if (!title) {
+          status.textContent = 'El título no puede estar vacío.';
+          field.focus();
+          return;
+        }
+        confirm.disabled = true;
+        const ok = await config.run({ title, chapter: chapter ? chapter.value || null : null, heading: heading ? Boolean(heading.checked) : false });
+        confirm.disabled = false;
+        if (ok) finish(false);
+      };
+      confirm.addEventListener('click', submit);
+      cancel.addEventListener('click', () => finish(true));
+      field.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          if (event.preventDefault) event.preventDefault();
+          return submit();
+        } else if (event.key === 'Escape') {
+          if (event.stopPropagation) event.stopPropagation();
+          finish(true);
+        }
+      });
+      composer.replaceChildren(...parts);
+      composer.hidden = false;
+      status.textContent = '';
+      field.focus();
+    }
+
+    function chapterOf(file) {
+      const found = state.tree && locate(file);
+      return found ? found.all[found.g].id : null;
+    }
+    newScene.addEventListener('click', () => ask({
+      label: 'Título de la nueva escena', confirm: 'Crear escena', chapters: true, heading: true, back: newScene,
+      chapter: chapterOf(state.file),
+      async run(values) {
+        const done = await change({ op: 'create_scene', title: values.title, chapter: values.chapter, heading: values.heading });
+        if (!done) return false;
+        await open(done.file, !narrow()).catch((error) => showError(error.message));
+        closeNarrow();
+        return true;
+      },
+    }));
+    newChapter.addEventListener('click', () => ask({
+      label: 'Título del nuevo capítulo', confirm: 'Crear capítulo', back: newChapter,
+      run: async (values) => Boolean(await change({ op: 'create_chapter', title: values.title })),
+    }));
+
+    function rename(kind, id, current, back) {
+      ask({
+        label: kind === 'scene' ? 'Nuevo título de la escena' : 'Nuevo título del capítulo', value: current, confirm: 'Renombrar', back,
+        run: async (values) => Boolean(await change(kind === 'scene'
+          ? { op: 'retitle_scene', file: id, title: values.title }
+          : { op: 'retitle_chapter', chapter: id, title: values.title })),
+      });
+    }
+
+    async function archive(file) {
+      const before = state.scenes.slice();
+      const at = before.indexOf(file);
+      const done = await change({ op: 'archive_scene', file });
+      if (!done) return;
+      if (file === state.file) {
+        // The scene leaves the book: the next one (else the previous) opens; the archived text keeps its draft.
+        const neighbour = before[at + 1] || before[at - 1];
+        focusKey = neighbour ? 'open:' + neighbour : null;
+        if (neighbour) await open(neighbour, false).catch((error) => showError(error.message));
+        else emptyBook();
+      } else focusKey = 'open:' + (before[at + 1] || before[at - 1] || '');
+      applyFocus();
+    }
+
+    // Drag and drop is the pointer way to reorder; the arrows and "Mover a" are the keyboard way.
+    function dropScene(chapter, index) {
+      const dragged = drag;
+      drag = null;
+      if (!dragged || dragged.kind !== 'scene') return;
+      const from = locate(dragged.id);
+      if (!from) return;
+      const sameGroup = from.all[from.g].id === chapter;
+      let position = index;
+      if (position !== undefined && sameGroup && from.at < position) position -= 1;
+      if (sameGroup && position === from.at) return;
+      return moveScene(dragged.id, chapter, position, 'open:' + dragged.id);
+    }
+    function dropChapter(index) {
+      const dragged = drag;
+      drag = null;
+      if (!dragged || dragged.kind !== 'chapter') return;
+      const from = state.tree.chapters.findIndex((c) => c.id === dragged.id);
+      let position = index;
+      if (from < position) position -= 1;
+      if (from === -1 || from === position) return;
+      focusKey = 'cup:' + dragged.id;
+      return change({ op: 'move_chapter', chapter: dragged.id, position }).then(applyFocus);
+    }
+    function dragSource(target, kind, id, key) {
+      target.draggable = true;
+      target.addEventListener('dragstart', (event) => {
+        drag = { kind, id };
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', key);
+        }
+      });
+      target.addEventListener('dragend', () => { drag = null; });
+    }
+    function dropTarget(target, accepts, run) {
+      target.addEventListener('dragover', (event) => {
+        if (!drag || drag.kind !== accepts) return;
+        event.preventDefault();
+        target.classList.add('tree-drop');
+      });
+      target.addEventListener('dragleave', () => target.classList.remove('tree-drop'));
+      target.addEventListener('drop', (event) => {
+        target.classList.remove('tree-drop');
+        if (!drag || drag.kind !== accepts) return;
+        event.preventDefault();
+        if (event.stopPropagation) event.stopPropagation();
+        return run();
+      });
+    }
+
+    function sceneRow(scene, chapterId, at, data) {
+      const li = el('li', undefined, 'tree-scene');
+      const current = scene.file === state.file;
+      if (current) li.className += ' tree-open';
+      const name = el('button', scene.title, 'tree-name');
+      name.type = 'button';
+      name.focusKey = 'open:' + scene.file;
+      if (current) name.setAttribute('aria-current', 'true');
+      name.addEventListener('click', () => openScene(scene.file));
+      const words = el('span', fmt(scene.words), 'meta tree-words');
+      counts.scenes.set(scene.file, words);
+      rows.set(scene.file, { li, name });
+      const label = '«' + scene.title + '»';
+      const move = el('select', undefined, 'tree-move');
+      move.setAttribute('aria-label', 'Mover ' + label + ' a');
+      const head = el('option', 'Mover a…');
+      head.value = '#';
+      head.selected = true;
+      move.append(head);
+      for (const c of data.chapters) {
+        if (c.id === chapterId) continue;
+        const option = el('option', c.title);
+        option.value = c.id;
+        move.append(option);
+      }
+      if (chapterId !== null) {
+        const none = el('option', 'Sin capítulo');
+        none.value = '';
+        move.append(none);
+      }
+      move.addEventListener('change', () => {
+        if (move.value === '#') return;
+        return moveScene(scene.file, move.value || null, undefined, 'open:' + scene.file);
+      });
+      const actions = el('div', undefined, 'tree-actions');
+      actions.append(
+        iconButton('↑', 'Subir ' + label, () => stepScene(scene.file, -1), 'up:' + scene.file),
+        iconButton('↓', 'Bajar ' + label, () => stepScene(scene.file, 1), 'down:' + scene.file),
+        iconButton('✎', 'Renombrar ' + label, () => rename('scene', scene.file, scene.title, name), 'ren:' + scene.file),
+        iconButton('Archivar', 'Archivar ' + label, () => archive(scene.file), 'arc:' + scene.file),
+        move,
+      );
+      const top = el('div', undefined, 'tree-line');
+      top.append(name, words);
+      li.append(top, actions);
+      dragSource(li, 'scene', scene.file, scene.file);
+      dropTarget(li, 'scene', () => dropScene(chapterId, at));
+      return li;
+    }
+
+    function render() {
+      const data = state.tree;
+      list.replaceChildren();
+      archiveBox.replaceChildren();
+      rows = new Map();
+      counts = { scenes: new Map(), chapters: new Map() };
+      data.chapters.forEach((chapter, ci) => {
+        const box = el('section', undefined, 'tree-chapter');
+        const label = '«' + chapter.title + '»';
+        const headRow = el('div', undefined, 'tree-line tree-chapter-head');
+        const heading = el('h4', chapter.title);
+        const words = el('span', fmt(chapter.words), 'meta tree-words');
+        counts.chapters.set(chapter.id, words);
+        headRow.append(heading, words);
+        const actions = el('div', undefined, 'tree-actions tree-chapter-actions');
+        actions.append(
+          iconButton('↑', 'Subir el capítulo ' + label, () => stepChapter(chapter.id, -1), 'cup:' + chapter.id),
+          iconButton('↓', 'Bajar el capítulo ' + label, () => stepChapter(chapter.id, 1), 'cdown:' + chapter.id),
+          iconButton('✎', 'Renombrar el capítulo ' + label, () => rename('chapter', chapter.id, chapter.title, headRow), 'cren:' + chapter.id),
+        );
+        if (!chapter.scenes.length) {
+          actions.append(iconButton('Quitar', 'Quitar el capítulo vacío ' + label, async () => {
+            focusKey = 'tools';
+            await change({ op: 'remove_chapter', chapter: chapter.id });
+            newChapter.focus();
+          }, 'crem:' + chapter.id));
+        }
+        const ul = el('ul', undefined, 'tree-scenes');
+        chapter.scenes.forEach((scene, at) => ul.append(sceneRow(scene, chapter.id, at, data)));
+        if (!chapter.scenes.length) ul.append(el('li', 'Capítulo vacío: arrastra escenas aquí o usa «Mover a…».', 'meta'));
+        box.append(headRow, actions, ul);
+        dragSource(headRow, 'chapter', chapter.id, chapter.id);
+        dropTarget(headRow, 'chapter', () => dropChapter(ci));
+        dropTarget(ul, 'scene', () => dropScene(chapter.id, undefined));
+        list.append(box);
+      });
+      if (data.loose.length || !data.chapters.length) {
+        const box = el('section', undefined, 'tree-chapter tree-loose');
+        if (data.chapters.length) box.append(el('h4', 'Sin capítulo'));
+        const ul = el('ul', undefined, 'tree-scenes');
+        data.loose.forEach((scene, at) => ul.append(sceneRow(scene, null, at, data)));
+        dropTarget(ul, 'scene', () => dropScene(null, undefined));
+        box.append(ul);
+        list.append(box);
+      }
+      renderArchive(data);
+      refreshCounts();
+      applyFocus();
+    }
+
+    function renderArchive(data) {
+      const toggle = el('button', 'Archivo (' + data.archived.length + ')', 'tree-archive-toggle');
+      toggle.type = 'button';
+      toggle.setAttribute('aria-expanded', String(archiveOpen));
+      toggle.focusKey = 'archive';
+      toggle.addEventListener('click', () => {
+        archiveOpen = !archiveOpen;
+        focusKey = 'archive';
+        render();
+      });
+      archiveBox.append(toggle);
+      if (!archiveOpen) return;
+      if (!data.archived.length) archiveBox.append(el('p', 'No hay escenas archivadas.', 'meta'));
+      const ul = el('ul', undefined, 'tree-scenes');
+      for (const scene of data.archived) {
+        const li = el('li', undefined, 'tree-scene tree-archived');
+        const name = el('button', scene.title, 'tree-name');
+        name.type = 'button';
+        name.focusKey = 'open:' + scene.file;
+        if (scene.file === state.file) name.setAttribute('aria-current', 'true');
+        name.addEventListener('click', () => openScene(scene.file));
+        const words = el('span', fmt(scene.words), 'meta tree-words');
+        counts.scenes.set(scene.file, words);
+        rows.set(scene.file, { li, name });
+        const restore = iconButton('Restaurar', 'Restaurar «' + scene.title + '»', async () => {
+          focusKey = 'open:' + scene.file;
+          await change({ op: 'unarchive_scene', file: scene.file });
+          applyFocus();
+        }, 'res:' + scene.file);
+        const top = el('div', undefined, 'tree-line');
+        top.append(name, words, restore);
+        li.append(top);
+        ul.append(li);
+      }
+      archiveBox.append(ul);
+    }
+
+    function open_() {
+      tree.hidden = false;
+      bookTool.setAttribute('aria-expanded', 'true');
+      if (!state.tree) status.textContent = 'Cargando el libro…';
+      treeHeading.focus();
+      return load().then(() => { status.textContent = ''; }).catch((error) => { status.textContent = error.message; });
+    }
+    function close(restoreFocus) {
+      const inside = tree.contains && tree.contains(document.activeElement);
+      tree.hidden = true;
+      bookTool.setAttribute('aria-expanded', 'false');
+      if (restoreFocus || inside) bookTool.focus();
+    }
+    bookTool.addEventListener('click', () => (isOpen() ? close(true) : open_()));
+    treeClose.addEventListener('click', () => close(true));
+    tree.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && isOpen()) close(true);
+    });
+
+    return {
+      // The open scene is marked in place, without rebuilding the tree (the focus stays where it is).
+      markOpen() {
+        for (const [file, row] of rows) {
+          const current = file === state.file;
+          row.li.className = 'tree-scene' + (current ? ' tree-open' : '') + (state.archived.includes(file) ? ' tree-archived' : '');
+          if (current) row.name.setAttribute('aria-current', 'true');
+          else row.name.removeAttribute('aria-current');
+        }
+      },
+      // The open editor's words, unsaved text included, in the tree while the person writes.
+      liveCount(file, count) {
+        const data = state.tree;
+        if (!data) return;
+        const scene = data.chapters.flatMap((c) => c.scenes).concat(data.loose, data.archived).find((s) => s.file === file);
+        if (!scene || scene.words === count) return;
+        scene.words = count;
+        refreshCounts();
+      },
+      // A refresh brought another list of scenes than the tree shows: read the tree again.
+      follow() {
+        if (state.tree && flatten(state.tree).join('|') !== state.scenes.join('|')) load().catch(() => {});
+      },
+      reset() {
+        state.tree = null;
+        list.replaceChildren();
+        archiveBox.replaceChildren();
+        composer.hidden = true;
+        if (isOpen()) close(false);
+      },
+    };
+  })();
+
   return {
     node,
     resume: false,
@@ -3110,8 +3678,10 @@ function createDesk() {
         state.book = book;
         state.file = null;
         slot.replaceChildren();
+        bookTree.reset();
       }
       state.scenes = data.scenes || [];
+      bookTree.follow();
       fillPicker();
       renderHelp();
     },
@@ -3124,7 +3694,7 @@ function createDesk() {
       }
       const remembered = rememberedScene(state.book);
       const wanted = file || state.file || remembered;
-      const target = state.scenes.includes(wanted) ? wanted : state.scenes[0];
+      const target = state.scenes.includes(wanted) || state.archived.includes(wanted) ? wanted : state.scenes[0];
       if (!target) return emptyBook();
       if (file || target !== state.file || !state.editor) return open(target, focus);
       renderHelp();

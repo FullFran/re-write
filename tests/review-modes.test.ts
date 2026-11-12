@@ -423,3 +423,192 @@ test('Analizar in Ayuda shows its scope before sending, and without the engine s
   assert.equal(page.gets.filter((path) => path.includes('/engine')).length, 0, 'no engine path is asked');
   assert.equal(page.editor()!.value.endsWith('Sin guardar.\n'), true, 'the text is untouched');
 });
+
+// --- Libro: the book tree drawer (docs/book-structure.md) -----------------------------------------
+
+const words = (text: string) => (text.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) ?? []).length;
+const grouped = (n: number) => new Intl.NumberFormat('es', { useGrouping: 'always' }).format(n);
+
+/** Drives the drawer: finds controls by the accessible name the person hears. */
+async function treePage(t: any, setup?: (h: Harness) => void) {
+  const ctx = await quietPage(t, setup);
+  await ctx.page.pick('Concentración');
+  const tree = () => document.getElementById('desk-tree') as Element;
+  const named = (label: string) => {
+    const found = all(tree(), (n) => n.attrs['aria-label'] === label && shown(n));
+    assert.equal(found.length, 1, `one "${label}" control`);
+    return found[0];
+  };
+  const press = async (label: string) => { await named(label).events.click(); await ctx.page.settle(); };
+  const fill = async (label: string, value: string) => {
+    const field = named(label);
+    field.value = value;
+    await field.events.input?.();
+  };
+  const text = () => tree().textContent;
+  const status = () => all(tree(), (n) => n.attrs.role === 'status')[0].textContent;
+  const opened = async () => { await ctx.page.click('Libro', ctx.page.desk()!); };
+  return { ...ctx, tree, named, press, fill, text, status, opened };
+}
+
+test('Libro is closed until asked, then shows chapters, scenes, word counts, the total and the open scene', async (t) => {
+  const { h, page, tree, opened, text } = await treePage(t);
+  assert.equal(tree().hidden, true, 'the drawer starts closed');
+  assert.equal(page.button('Libro', page.desk()!).attrs['aria-expanded'], 'false');
+  await opened();
+  assert.equal(tree().hidden, false);
+  assert.equal(page.button('Libro', page.desk()!).attrs['aria-expanded'], 'true');
+  const a = words(read(h.bookDir, SCENE));
+  const b = words(read(h.bookDir, OTHER));
+  assert.match(text(), new RegExp(`Libro: ${grouped(a + b)} palabras`));
+  const names = all(tree(), (n) => n.className === 'tree-name');
+  assert.deepEqual(names.map((n) => n.textContent), ['La puerta de Sal', 'El altar'], 'titles from the first heading');
+  assert.deepEqual(names.map((n) => n.attrs['aria-current'] ?? null), ['true', null], 'the open scene is marked');
+  const counts = all(tree(), (n) => n.className === 'meta tree-words').map((n) => n.textContent);
+  assert.deepEqual(counts, [`${grouped(a)} palabras`, `${grouped(b)} palabras`]);
+});
+
+test('Libro: a chapter, a scene in it, a new title, archive and restore: each is one commit and the page follows', async (t) => {
+  const { h, page, tree, named, press, fill, text, status } = await treePage(t);
+  const commits = () => Number(git(h.bookDir, 'rev-list', '--count', 'HEAD'));
+  const project = () => Project.open(h.bookDir);
+  const submit = async (label: string) => { await page.click(label, tree()); };
+  await page.click('Libro', page.desk()!);
+
+  let before = commits();
+  await page.click('Nuevo capítulo', tree());
+  await fill('Título del nuevo capítulo', 'Primera parte');
+  await submit('Crear capítulo');
+  assert.equal(commits(), before + 1);
+  assert.deepEqual(project().outline().chapters.map((c) => c.title), ['Primera parte']);
+  assert.match(text(), /Primera parte/);
+
+  before = commits();
+  await page.click('Nueva escena', tree());
+  await fill('Título de la nueva escena', 'Llegada');
+  named('Capítulo').value = project().outline().chapters[0].id;
+  await submit('Crear escena');
+  assert.equal(commits(), before + 1);
+  assert.equal(read(h.bookDir, 'scenes/llegada.md'), '# Llegada\n');
+  assert.deepEqual(project().scenes(), ['scenes/llegada.md', SCENE, OTHER]);
+  assert.equal(page.editor()!.value, '# Llegada\n', 'the new scene opens in the editor');
+  const current = all(tree(), (n) => n.attrs['aria-current'] === 'true').map((n) => n.textContent);
+  assert.deepEqual(current, ['Llegada']);
+  const picker = all(page.desk()!, (n) => n.tagName === 'SELECT' && n.attrs['aria-label'] === 'Escena')[0];
+  assert.deepEqual(picker.children.map((o) => o.value), ['scenes/llegada.md', SCENE, OTHER], 'the scene picker follows book order');
+
+  before = commits();
+  await press('Renombrar «Llegada»');
+  await fill('Nuevo título de la escena', 'La llegada');
+  await submit('Renombrar');
+  assert.equal(commits(), before + 1);
+  assert.equal(project().outline().chapters[0].scenes[0].title, 'La llegada');
+  assert.equal(read(h.bookDir, 'scenes/llegada.md'), '# Llegada\n', 'the file keeps its path and its text');
+
+  before = commits();
+  await press('Archivar «El altar»');
+  assert.equal(commits(), before + 1);
+  assert.deepEqual(project().scenes(), ['scenes/llegada.md', SCENE]);
+  assert.deepEqual(project().archivedScenes(), [OTHER]);
+  assert.match(text(), /Archivo \(1\)/);
+  assert.doesNotMatch(text(), /Restaurar/, 'the archive is folded until asked');
+  await page.click('Archivo (1)', tree());
+  await press('Restaurar «El altar»');
+  assert.deepEqual(project().scenes(), ['scenes/llegada.md', SCENE, OTHER]);
+  assert.equal(status(), '');
+});
+
+test('Libro: scenes and chapters reorder from the keyboard with the focus kept on the control that was used', async (t) => {
+  const { h, page, tree, named, press, fill, text } = await treePage(t);
+  const scenes = () => Project.open(h.bookDir).scenes();
+  await page.click('Libro', page.desk()!);
+  await press('Bajar «La puerta de Sal»');
+  assert.deepEqual(scenes(), [OTHER, SCENE]);
+  assert.equal(document.activeElement, named('Bajar «La puerta de Sal»'), 'the focus stays on the same control');
+  await press('Subir «La puerta de Sal»');
+  assert.deepEqual(scenes(), [SCENE, OTHER]);
+  assert.equal(document.activeElement, named('Subir «La puerta de Sal»'));
+
+  // A chapter is made from the keyboard alone: Enter in the title field creates it.
+  await page.click('Nuevo capítulo', tree());
+  await fill('Título del nuevo capítulo', 'Uno');
+  await named('Título del nuevo capítulo').events.keydown({ key: 'Enter', preventDefault() {} });
+  await page.settle();
+  assert.deepEqual(Project.open(h.bookDir).outline().chapters.map((c) => c.title), ['Uno']);
+  const chapter = Project.open(h.bookDir).outline().chapters[0].id;
+
+  // "Mover a" carries a scene into a chapter; the arrows then keep it inside, and past the edge into the next group.
+  const move = named('Mover «La puerta de Sal» a');
+  move.value = chapter;
+  await move.events.change();
+  await page.settle();
+  assert.deepEqual(Project.open(h.bookDir).outline().chapters[0].scenes.map((s) => s.file), [SCENE]);
+  assert.deepEqual(scenes(), [SCENE, OTHER]);
+  await press('Bajar «La puerta de Sal»');
+  assert.deepEqual(Project.open(h.bookDir).outline().chapters[0].scenes, [], 'down from the last place of a chapter leaves it');
+  assert.deepEqual(scenes(), [SCENE, OTHER]);
+  assert.match(text(), /Capítulo vacío/);
+  await press('Quitar el capítulo vacío «Uno»');
+  assert.deepEqual(Project.open(h.bookDir).outline().chapters, []);
+});
+
+test('Libro: dragging a scene before another one reorders it', async (t) => {
+  const { h, page, tree } = await treePage(t);
+  await page.click('Libro', page.desk()!);
+  const [first, second] = all(tree(), (n) => /^tree-scene( |$)/.test(n.className));
+  await second.events.dragstart({ dataTransfer: { effectAllowed: '', setData() {} } });
+  let prevented = false;
+  await first.events.dragover({ preventDefault() { prevented = true; } });
+  assert.equal(prevented, true, 'a scene can be dropped on a scene');
+  await first.events.drop({ preventDefault() {}, stopPropagation() {} });
+  await page.settle();
+  assert.deepEqual(Project.open(h.bookDir).scenes(), [OTHER, SCENE]);
+});
+
+test('Libro: switching scenes from the tree never loses unsaved text', async (t) => {
+  const { h, page, tree } = await treePage(t);
+  await page.click('Libro', page.desk()!);
+  const mine = page.editor()!.value + 'Escrito y sin guardar.\n';
+  await page.type(mine);
+  const go = async (title: string) => {
+    const name = all(tree(), (n) => n.className === 'tree-name' && n.textContent === title)[0];
+    await name.events.click();
+    await page.settle();
+  };
+  await go('El altar');
+  assert.equal(page.editor()!.value, read(h.bookDir, OTHER), 'the other scene opens');
+  assert.ok([...page.storage.keys()].some((key) => key.startsWith('rewrite:draft:') && key.endsWith(SCENE)), 'the text left behind is kept as its draft');
+  await go('La puerta de Sal');
+  assert.equal(page.editor()!.value, mine, 'coming back, the unsaved text is still there');
+  assert.equal(read(h.bookDir, SCENE).endsWith('Escrito y sin guardar.\n'), false, 'and nothing was saved behind the back');
+});
+
+test('Libro: a change based on an older book is refused, the tree reloads and says so', async (t) => {
+  const { h, page, text, status, fill, tree } = await treePage(t);
+  await page.click('Libro', page.desk()!);
+  const project = Project.open(h.bookDir);
+  project.editStructure(project.outline().version, { op: 'create_chapter', title: 'Desde otra pestaña' }, 'otra');
+  const before = Number(git(h.bookDir, 'rev-list', '--count', 'HEAD'));
+  await page.click('Nuevo capítulo', tree());
+  await fill('Título del nuevo capítulo', 'Tarde');
+  await page.click('Crear capítulo', tree());
+  assert.equal(Number(git(h.bookDir, 'rev-list', '--count', 'HEAD')), before, 'nothing was written');
+  assert.match(status(), /El libro cambió desde que lo abriste/);
+  assert.match(status(), /Se ha vuelto a cargar/);
+  assert.match(text(), /Desde otra pestaña/);
+});
+
+test('Libro: an archived scene stays openable and is named in the picker; the tree is a drawer over the text', async (t) => {
+  const { h, page, tree, press } = await treePage(t);
+  await page.click('Libro', page.desk()!);
+  await press('Archivar «La puerta de Sal»');
+  assert.equal(page.editor()!.value, read(h.bookDir, OTHER), 'archiving the open scene opens the next one');
+  await page.click('Archivo (1)', tree());
+  const archived = all(tree(), (n) => n.className === 'tree-name' && n.textContent === 'La puerta de Sal')[0];
+  await archived.events.click();
+  await page.settle();
+  assert.equal(page.editor()!.value, read(h.bookDir, SCENE), 'an archived scene opens by path');
+  const picker = all(page.desk()!, (n) => n.tagName === 'SELECT' && n.attrs['aria-label'] === 'Escena')[0];
+  assert.deepEqual(picker.children.map((o) => o.textContent), ['Archivo: escena-01', 'escena-02']);
+  assert.match(REVIEW_CSS, /\.desk-tree \{ position: fixed;/, 'the tree is a drawer over the text');
+});

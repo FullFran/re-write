@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, normalize, resolve } from 'node:path';
 import { Git } from '../adapters/git.ts';
@@ -12,6 +13,10 @@ import { sameAttribute, validateAttribute } from '../domain/claim-attribute.ts';
 import { verdictFields, CONTINUITY_VERDICTS, InvalidFindingVerdictError, inspectContinuity, type Finding, type Verdict, type VerdictHistoryEntry, type VerdictKind } from '../domain/continuity.ts';
 import { applyChange, inverseChange, proposalId, type Proposal } from '../domain/proposal.ts';
 import { checkSceneText, isExactUtf8 } from '../domain/scene-text.ts';
+import {
+  applyOperation, parseManifest, resolveManifest,
+  type BookManifest, type BookOutline, type OutlineScene, type StructureOp,
+} from '../domain/book.ts';
 import { checkNoteName, NOTES_DIR } from '../domain/note.ts';
 import { foldName } from '../domain/wikilink.ts';
 import {
@@ -24,6 +29,18 @@ import {
 } from '../domain/reanchor.ts';
 
 const SCENES_DIR = 'scenes';
+/** The book manifest: order, chapters, titles, archive (docs/book-structure.md). */
+const MANIFEST_PATH = join(STATE_DIR, 'book.json');
+
+/** A structural write was based on a manifest that is no longer the current one. Nothing was written. */
+export class BookStructureConflictError extends Error {
+  readonly outline: BookOutline;
+  constructor(outline: BookOutline) {
+    super('El libro cambió desde que lo abriste; no se ha cambiado nada.');
+    this.name = 'BookStructureConflictError';
+    this.outline = outline;
+  }
+}
 
 /**
  * A person's edit was based on a version of the scene that is no longer the current one
@@ -159,7 +176,50 @@ export class Project {
     return new JsonStore<{ title: string }>(this.dir, '.').get('project')!.title;
   }
 
+  /**
+   * The active scenes in book order: the manifest order (docs/book-structure.md), then scenes the
+   * manifest does not list in sorted-path order. Archived scenes are not here (see archivedScenes)
+   * but stay readable and reviewable by path. Without a manifest this is the sorted scene paths.
+   */
   scenes(): string[] {
+    const { chapters, loose } = this.resolved();
+    return [...chapters.flatMap((c) => c.scenes), ...loose];
+  }
+
+  /** Scenes taken out of the book with archive: still files in scenes/, sorted by path. */
+  archivedScenes(): string[] {
+    return [...this.resolved().archived].sort();
+  }
+
+  /** Every scene file in scenes/, archived or not, sorted by path. */
+  allScenes(): string[] {
+    return this.sceneFiles();
+  }
+
+  /**
+   * The book structure for display and for export: chapters with their scenes, scenes outside any
+   * chapter (`loose`, last in reading order), archived scenes and the manifest `version` a
+   * structural write must send back. Reading order is the chapters' scenes then `loose`, which is
+   * exactly scenes(). Titles are the display titles from the manifest, null when a scene has none.
+   */
+  outline(): BookOutline {
+    const { manifest } = this.readManifest();
+    const { chapters, loose, archived } = resolveManifest(manifest, this.sceneFiles());
+    const scene = (file: string): OutlineScene => ({ file, title: manifest?.titles[file] ?? null });
+    return {
+      version: this.manifestVersion(),
+      chapters: chapters.map((c) => ({ id: c.id, title: c.title, scenes: c.scenes.map(scene) })),
+      loose: loose.map(scene),
+      archived: [...archived].sort().map(scene),
+    };
+  }
+
+  private resolved(): ReturnType<typeof resolveManifest> {
+    return resolveManifest(this.readManifest().manifest, this.sceneFiles());
+  }
+
+  /** Sorted `scenes/*.md` regular files: the order of a book without a manifest. */
+  private sceneFiles(): string[] {
     const dir = join(this.dir, SCENES_DIR);
     if (!this.isRegular(dir, 'directory')) return [];
     // A symlink is not a scene: it could point outside the book.
@@ -167,6 +227,57 @@ export class Project {
       .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
       .map((entry) => `${SCENES_DIR}/${entry.name}`)
       .sort();
+  }
+
+  /** The stored manifest. A file that is not a valid manifest counts as absent but is reported. */
+  private readManifest(): { manifest: BookManifest | null; unreadable: boolean } {
+    const path = join(this.dir, MANIFEST_PATH);
+    if (!this.isRegular(path, 'file')) return { manifest: null, unreadable: false };
+    try {
+      const manifest = parseManifest(JSON.parse(readFileSync(path, 'utf8')));
+      return { manifest, unreadable: manifest === null };
+    } catch {
+      return { manifest: null, unreadable: true };
+    }
+  }
+
+  /** Identifies the stored manifest bytes; "none" before the first structural write. */
+  private manifestVersion(): string {
+    const path = join(this.dir, MANIFEST_PATH);
+    if (!this.isRegular(path, 'file')) return 'none';
+    return createHash('sha256').update(readFileSync(path)).digest('hex').slice(0, 16);
+  }
+
+  /**
+   * A person changes the book structure: one operation, one commit. `version` is the outline
+   * version the person saw; another one means the structure changed meanwhile and nothing is
+   * written (BookStructureConflictError). Scene files are never moved, renamed or deleted; a
+   * created scene is the only new file.
+   */
+  editStructure(version: string, op: StructureOp, by: string): { outline: BookOutline; file?: string; changed: boolean } {
+    const { manifest: stored, unreadable } = this.readManifest();
+    if (unreadable) throw new SceneEditRefusal(`${MANIFEST_PATH} is not a valid book manifest; fix or remove it before reorganising`);
+    if (this.manifestVersion() !== version) throw new BookStructureConflictError(this.outline());
+    if (this.git.isDirty(MANIFEST_PATH)) throw new SceneEditRefusal(`${MANIFEST_PATH} has uncommitted edits; commit them before reorganising`);
+    const existing = this.sceneFiles();
+    const { chapters, loose, archived } = resolveManifest(stored, existing);
+    const base: BookManifest = { version: 1, chapters, loose, titles: { ...(stored?.titles ?? {}) }, archived };
+    const applied = applyOperation(base, op, existing);
+    const next = `${JSON.stringify(applied.manifest, null, 2)}\n`;
+    if (stored !== null && JSON.stringify(stored) === JSON.stringify(applied.manifest)) return { outline: this.outline(), changed: false };
+    const paths = applied.created ? [applied.created, MANIFEST_PATH] : [MANIFEST_PATH];
+    const created = new Map<string, number>();
+    this.commitWrites(`rewrite: ${applied.summary}\n\nEdited-by: ${by}`, paths, () => {
+      if (applied.created) {
+        mkdirSync(join(this.dir, SCENES_DIR), { recursive: true });
+        const title = applied.manifest.titles[applied.created];
+        writeFileSync(join(this.dir, applied.created), op.op === 'create_scene' && op.heading ? `# ${title}\n` : '', { flag: 'wx' });
+        created.set(applied.created, lstatSync(join(this.dir, applied.created)).ino);
+      }
+      mkdirSync(join(this.dir, STATE_DIR), { recursive: true });
+      writeFileSync(join(this.dir, MANIFEST_PATH), next);
+    }, created);
+    return { outline: this.outline(), ...(applied.created ? { file: applied.created } : {}), changed: true };
   }
 
   /** True only for a real file or directory: never a symlink, which could lead outside the book. */

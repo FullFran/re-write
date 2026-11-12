@@ -230,6 +230,22 @@ in the same page and over the same text:
   file name) and its word count. **Guardar**, **Cerrar editor** and the save status sit above
   the text and stick to the top while writing. **Editar escena** in Revisión opens that scene
   here; **Cerrar editor** goes back to Revisión at that scene.
+- **Libro** (the book tree, [book structure](book-structure.md)) is the first button of the
+  group in the desk's head. It opens a drawer (`nav`, `aria-label="Libro"`, `#desk-tree`) over
+  the text at every width (`min(24rem, 92vw)`, fixed to the left edge); on a phone choosing a
+  scene closes it, on a wide screen it stays open. It shows **Libro: n palabras** (the active
+  scenes), the chapters with their word count, each chapter's scenes with theirs, and the scenes
+  outside any chapter under **Sin capítulo**. The scene title is the manifest title, else its first
+  heading, else its file; the open scene has `aria-current` and a marked edge. **Nueva escena**
+  (title, chapter or end of the book, optionally the title as a heading) and **Nuevo capítulo** ask
+  for the title in a field inside the drawer (Enter accepts, Escape cancels). The row of the open or
+  focused scene (never on hover: a row that grows under the pointer moves the list) shows **↑**, **↓**, **✎** (rename), **Archivar** and **Mover a…**; a chapter row
+  shows **↑**, **↓**, **✎** and, when empty, **Quitar**. The arrows move a scene within its group
+  and past its edge into the next one, and keep the focus on the control used; scenes and chapters
+  also drag. **Archivo (n)** folds the archived scenes; **Restaurar** brings one back at the end.
+  Choosing a scene is the same open as the scene list's: the scene left behind keeps its unsaved
+  text as its draft. A structure change sent from an older tree is refused with 409; the drawer
+  says so and reloads. The scene list stays as the quick switch; it follows book order.
 - **Ayuda para esta escena** (an `aside`) is built only in Ayuda, from the book data the page
   already holds, filtered to the open scene. From 64em it is a column on the right of the
   editor that scrolls on its own; with the assistant open it goes under the text up to 100em,
