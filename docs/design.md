@@ -241,17 +241,22 @@ in the same page and over the same text:
   the person already rewrote it, the help says **No se encuentra la cita en el texto del
   editor** instead of selecting something else. Reading view gives way to the live preview to
   show the selection.
+- **The version** a card was read from is on its meta line as **versión** and the first ten
+  characters of the commit: a claim, each quote of a finding and each citation of a possible
+  problem; a pending change says **Propuesto sobre la versión … de la escena.**
 - **Analizar** (Ayuda only; Concentración never analyses): a button in the desk's head
   (`aria-expanded`) opens a box with **Qué analizar** (**Esta escena**, **La selección**, **El
   libro**, `aria-pressed`) and the scope said before anything is sent, as a status line:
   **Se analizará: escena 3 (1.240 palabras)**, **Se analizará: la selección de escena 3 (85
-  palabras)**, **Se analizará: el libro «Título» (12 escenas)**; numbers always grouped. Under
+  palabras)**, **Se analizará: el libro «Título» (12 escenas)**; numbers always grouped. The
+  scene count is of the saved text, the one the assistant reads, not of the editor. Under
   it, what the assistant really reads: the saved version of the scene (unsaved changes do not
   enter, and it says so), the selection exactly as in the editor (inside the prompt; longer
   than the server's prompt limit is refused with a reason), or the saved scenes of the book,
   saying which it read. **Enviar al asistente** fills and sends one prompt through the
   assistant panel with the usual page context (the book, and the scene as the item for a
-  scene or a selection); no new server path. ChatGPT not connected: the panel opens on
+  scene or a selection); no new server path. Once sent, the box names what went:
+  **Enviado al asistente: escena 3 (1.240 palabras). La respuesta aparece en su panel.** ChatGPT not connected: the panel opens on
   **Conectar ChatGPT** with the prompt already written, and the box says to connect first.
   Engine off: the box says the assistant is not enabled here, that the RE;write account is
   enough to write and review, and that the RE;write connector works from the writer's own
