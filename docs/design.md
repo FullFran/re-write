@@ -239,7 +239,7 @@ in the same page and over the same text:
   heading, else its file; the open scene has `aria-current` and a marked edge. **Nueva escena**
   (title, chapter or end of the book, optionally the title as a heading) and **Nuevo capítulo** ask
   for the title in a field inside the drawer (Enter accepts, Escape cancels). The row of the open or
-  focused scene shows **↑**, **↓**, **✎** (rename), **Archivar** and **Mover a…**; a chapter row
+  focused scene (never on hover: a row that grows under the pointer moves the list) shows **↑**, **↓**, **✎** (rename), **Archivar** and **Mover a…**; a chapter row
   shows **↑**, **↓**, **✎** and, when empty, **Quitar**. The arrows move a scene within its group
   and past its edge into the next one, and keep the focus on the control used; scenes and chapters
   also drag. **Archivo (n)** folds the archived scenes; **Restaurar** brings one back at the end.

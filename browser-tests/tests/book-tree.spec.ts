@@ -14,7 +14,7 @@ const drawer = (page: Page) => page.getByRole('navigation', { name: 'Libro' });
 const loose = (book: { bytes: (file: string) => Buffer }) => {
   try { return JSON.parse(book.bytes('.rewrite/book.json').toString('utf8')).loose; } catch { return null; }
 };
-// A row's actions show on hover or focus, as a person reaches them.
+// A row's actions show for the open scene or when the row has the focus, never on hover.
 const row = (page: Page, name: string) => drawer(page).locator('.tree-scene', { has: page.locator('.tree-name', { hasText: name }) });
 const toggle = (page: Page) => page.getByRole('group', { name: 'Notas y grafo del libro' }).getByRole('button', { name: 'Libro', exact: true });
 
@@ -88,7 +88,7 @@ test('switching scenes from the tree keeps unsaved text; on a phone the tree is 
 test('archiving a scene moves it to Archivo and restoring brings it back, with no file deleted', async ({ page, book }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openTree(page, book.base);
-  await row(page, 'El altar').hover();
+  await row(page, 'El altar').locator('.tree-name').focus();
   await drawer(page).getByRole('button', { name: 'Archivar «El altar»' }).click();
   await expect(drawer(page).getByRole('button', { name: 'Archivo (1)' })).toBeVisible();
   expect(book.bytes(OTHER).length).toBeGreaterThan(0);

@@ -233,7 +233,8 @@ body[data-mode=focus] .toolbar, body[data-mode=help] .toolbar { margin-bottom: v
 .tree-open { border-left-color: var(--accept); background: var(--accept-bg); }
 .tree-name[aria-current=true] { font-weight: 700; }
 .tree-actions { display: none; flex-wrap: wrap; gap: var(--space-1); padding: 0 0 var(--space-2); }
-.tree-scene:focus-within > .tree-actions, .tree-scene:hover > .tree-actions, .tree-open > .tree-actions, .tree-chapter-actions { display: flex; }
+/* Never on hover: rows that grow under the pointer move the list while the person aims or drags. */
+.tree-scene:focus-within > .tree-actions, .tree-open > .tree-actions, .tree-chapter-actions { display: flex; }
 .tree-act, .tree-move { min-width: var(--tap); min-height: var(--tap); padding: 0 var(--space-2); }
 .tree-drop { outline: 2px dashed var(--accept); outline-offset: -2px; }
 .tree-archive { margin-top: var(--space-5); }
