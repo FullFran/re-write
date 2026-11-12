@@ -159,14 +159,17 @@ export function parseInline(src: string, style: Run = {}, runs: Run[] = []): Run
   return runs;
 }
 
-/** Joins the lines of one paragraph: a soft newline is a space, a hard break (two spaces or a backslash) is a break run. */
+/**
+ * Joins the lines of one paragraph. Every newline is a line break, as the editor shows it: the
+ * writer presses Enter for a new line and expects it kept. Two trailing spaces or a backslash
+ * (Markdown's own hard break) are accepted and removed.
+ */
 function paragraphRuns(lines: string[]): Run[] {
   const runs: Run[] = [];
   lines.forEach((raw, n) => {
-    const hard = n < lines.length - 1 && (/ {2,}$/.test(raw) || /\\$/.test(raw));
-    const line = (hard && raw.endsWith('\\') ? raw.slice(0, -1) : raw).trim();
+    const hard = n < lines.length - 1;
+    const line = (raw.endsWith('\\') && hard ? raw.slice(0, -1) : raw).trim();
     const part = parseInline(line);
-    if (n > 0 && !(runs[runs.length - 1]?.br)) push(runs, ' ', {});
     for (const run of part) {
       if (run.text !== undefined && !run.bold && !run.italic && !run.strike) push(runs, run.text, {});
       else runs.push(run);

@@ -46,9 +46,9 @@ writer in `src/adapters/zip.ts`. The output is deterministic.
 
 Supported Markdown, as the editor writes it: headings (Heading 1 to 3; deeper levels use Heading 3),
 paragraphs, **bold**, *italic*, ***both***, ~~strikethrough~~, bullet and numbered lists (three
-levels, each numbered list restarts at 1), block quotes (Quote style), hard line breaks (two spaces
-or a backslash at the end of a line; a single newline inside a paragraph is a space, as in
-Markdown), scene breaks and code (code and fenced blocks become plain text lines). Anything else
+levels, each numbered list restarts at 1), block quotes (Quote style), line breaks (every newline
+inside a paragraph is kept as a line break, as the editor shows it; a trailing backslash or two
+spaces are accepted and removed), scene breaks and code (code and fenced blocks become plain text lines). Anything else
 (tables, raw HTML, images, links) stays as plain text and is never dropped: a link `[text](url)`
 becomes `text (url)`. Control characters that XML 1.0 forbids are removed; `& < > "` are escaped.
 

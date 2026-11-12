@@ -44,6 +44,11 @@ test('markdown parser: the subset becomes blocks and runs', () => {
   assert.equal((blocks[blocks.length - 1] as any).runs[0].text, '**no**', 'code stays literal');
 });
 
+test('markdown parser: each newline inside a paragraph is a line break, as the editor shows it', () => {
+  const [para]: any = parseMarkdown('Primera línea\nsegunda línea');
+  assert.deepEqual(para.runs, [{ text: 'Primera línea' }, { br: true }, { text: 'segunda línea' }]);
+});
+
 function docxParts(buf: Buffer): Record<string, string> {
   return Object.fromEntries(readZip(buf).map((e) => [e.name, e.getData().toString('utf8')]));
 }
