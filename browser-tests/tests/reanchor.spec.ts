@@ -57,7 +57,7 @@ for (const [name, size] of [['desktop', DESKTOP], ['phone', PHONE]] as const) {
 
     await card.getByRole('button', { name: 'Aceptar', exact: true }).click();
     await expect(claimIn(page, 'canon', book, id)).toHaveCount(1);
-    expect(book.cli('canon').claims.some((c: any) => c.claim_id === id)).toBe(true);
+    expect(book.cli('canon').canon.some((c: any) => c.claim_id === id)).toBe(true);
   });
 }
 
