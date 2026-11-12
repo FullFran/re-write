@@ -448,17 +448,17 @@ async function treePage(t: any, setup?: (h: Harness) => void) {
   };
   const text = () => tree().textContent;
   const status = () => all(tree(), (n) => n.attrs.role === 'status')[0].textContent;
-  const opened = async () => { await ctx.page.click('Libro', ctx.page.desk()!); };
+  const opened = async () => { await ctx.page.click('Índice', ctx.page.desk()!); };
   return { ...ctx, tree, named, press, fill, text, status, opened };
 }
 
 test('Libro is closed until asked, then shows chapters, scenes, word counts, the total and the open scene', async (t) => {
   const { h, page, tree, opened, text } = await treePage(t);
   assert.equal(tree().hidden, true, 'the drawer starts closed');
-  assert.equal(page.button('Libro', page.desk()!).attrs['aria-expanded'], 'false');
+  assert.equal(page.button('Índice', page.desk()!).attrs['aria-expanded'], 'false');
   await opened();
   assert.equal(tree().hidden, false);
-  assert.equal(page.button('Libro', page.desk()!).attrs['aria-expanded'], 'true');
+  assert.equal(page.button('Índice', page.desk()!).attrs['aria-expanded'], 'true');
   const a = words(read(h.bookDir, SCENE));
   const b = words(read(h.bookDir, OTHER));
   assert.match(text(), new RegExp(`Libro: ${grouped(a + b)} palabras`));
@@ -474,7 +474,7 @@ test('Libro: a chapter, a scene in it, a new title, archive and restore: each is
   const commits = () => Number(git(h.bookDir, 'rev-list', '--count', 'HEAD'));
   const project = () => Project.open(h.bookDir);
   const submit = async (label: string) => { await page.click(label, tree()); };
-  await page.click('Libro', page.desk()!);
+  await page.click('Índice', page.desk()!);
 
   let before = commits();
   await page.click('Nuevo capítulo', tree());
@@ -522,7 +522,7 @@ test('Libro: a chapter, a scene in it, a new title, archive and restore: each is
 test('Libro: scenes and chapters reorder from the keyboard with the focus kept on the control that was used', async (t) => {
   const { h, page, tree, named, press, fill, text } = await treePage(t);
   const scenes = () => Project.open(h.bookDir).scenes();
-  await page.click('Libro', page.desk()!);
+  await page.click('Índice', page.desk()!);
   await press('Bajar «La puerta de Sal»');
   assert.deepEqual(scenes(), [OTHER, SCENE]);
   assert.equal(document.activeElement, named('Bajar «La puerta de Sal»'), 'the focus stays on the same control');
@@ -555,7 +555,7 @@ test('Libro: scenes and chapters reorder from the keyboard with the focus kept o
 
 test('Libro: dragging a scene before another one reorders it', async (t) => {
   const { h, page, tree } = await treePage(t);
-  await page.click('Libro', page.desk()!);
+  await page.click('Índice', page.desk()!);
   const [first, second] = all(tree(), (n) => /^tree-scene( |$)/.test(n.className));
   await second.events.dragstart({ dataTransfer: { effectAllowed: '', setData() {} } });
   let prevented = false;
@@ -568,7 +568,7 @@ test('Libro: dragging a scene before another one reorders it', async (t) => {
 
 test('Libro: switching scenes from the tree never loses unsaved text', async (t) => {
   const { h, page, tree } = await treePage(t);
-  await page.click('Libro', page.desk()!);
+  await page.click('Índice', page.desk()!);
   const mine = page.editor()!.value + 'Escrito y sin guardar.\n';
   await page.type(mine);
   const go = async (title: string) => {
@@ -586,7 +586,7 @@ test('Libro: switching scenes from the tree never loses unsaved text', async (t)
 
 test('Libro: a change based on an older book is refused, the tree reloads and says so', async (t) => {
   const { h, page, text, status, fill, tree } = await treePage(t);
-  await page.click('Libro', page.desk()!);
+  await page.click('Índice', page.desk()!);
   const project = Project.open(h.bookDir);
   project.editStructure(project.outline().version, { op: 'create_chapter', title: 'Desde otra pestaña' }, 'otra');
   const before = Number(git(h.bookDir, 'rev-list', '--count', 'HEAD'));
@@ -601,7 +601,7 @@ test('Libro: a change based on an older book is refused, the tree reloads and sa
 
 test('Libro: an archived scene stays openable and is named in the picker; the tree is a drawer over the text', async (t) => {
   const { h, page, tree, press } = await treePage(t);
-  await page.click('Libro', page.desk()!);
+  await page.click('Índice', page.desk()!);
   await press('Archivar «La puerta de Sal»');
   assert.equal(page.editor()!.value, read(h.bookDir, OTHER), 'archiving the open scene opens the next one');
   await page.click('Archivo (1)', tree());
@@ -681,6 +681,22 @@ test('Libro shows every scene in book order with a heading, a scene break, a con
   assert.equal(all(toc, (n) => n.className === 'book-toc-total')[0].textContent, `Total del libro: ${grouped(total)} palabras`);
   assert.equal(page.gets.filter((path) => path.endsWith('/manuscript')).length, 1, 'the whole book arrives in one request');
   assert.equal(page.gets.filter((path) => path.includes('/scenes/')).length, 0, 'no scene is read one by one');
+});
+
+test('Libro shows each chapter as a heading in the text and in the contents', async (t) => {
+  const { page } = await quietPage(t, (h) => {
+    const project = Project.open(h.bookDir);
+    const second = project.scenes()[1];
+    project.editStructure(project.outline().version, { op: 'create_chapter', title: 'Primera parte' }, 'user_fran');
+    project.editStructure(project.outline().version, { op: 'move_scene', file: second, chapter: project.outline().chapters[0].id }, 'user_fran');
+  });
+  await page.pick('Libro');
+  await until(page, () => sections().length === 2);
+  const chapters = all(place(), (n) => n.className === 'book-chapter');
+  assert.deepEqual(chapters.map((n) => n.textContent), ['Primera parte'], 'one heading, before its first scene');
+  const toc = all(place(), (n) => n.tagName === 'NAV')[0];
+  assert.deepEqual(all(toc, (n) => n.className === 'book-toc-chapter').map((n) => n.textContent), ['Primera parte']);
+  assert.equal(all(toc, (n) => n.tagName === 'BUTTON').length, 2, 'scenes stay the only buttons');
 });
 
 test('Libro: a scene in the contents scrolls to it and takes the focus; the drawer is a keyboard-operable disclosure', async (t) => {

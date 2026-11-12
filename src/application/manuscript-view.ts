@@ -1,6 +1,6 @@
 /**
  * The whole manuscript in one read (the Libro place of the review page): every scene in the
- * book's reading order (Project.scenes) with its title, its text and its word count. Read-only.
+ * book's reading order (Project.scenes) with its chapter, title, text and word count. Read-only.
  */
 import type { Project } from './project.ts';
 
@@ -10,6 +10,8 @@ export const MANUSCRIPT_TEXT_CAP = 16 * 1024 * 1024;
 export interface ManuscriptScene {
   file: string;
   title: string;
+  /** The chapter the scene is in (docs/book-structure.md), or null outside any chapter. */
+  chapter: string | null;
   words: number;
   /** Absent when the caller asked for counts only; null when the size cap left it out. */
   text?: string | null;
@@ -40,9 +42,15 @@ export function manuscriptView(project: Project, options: { withText?: boolean; 
   let sent = 0;
   let truncated = false;
   const scenes: ManuscriptScene[] = [];
+  // The outline gives each scene its chapter and its title from the manifest; scenes() the order.
+  const outline = project.outline();
+  const placed = new Map<string, { chapter: string | null; title: string | null }>();
+  for (const chapter of outline.chapters) for (const s of chapter.scenes) placed.set(s.file, { chapter: chapter.title, title: s.title });
+  for (const s of outline.loose) placed.set(s.file, { chapter: null, title: s.title });
   for (const file of project.scenes()) {
     const text = project.readScene(file) ?? '';
-    const scene: ManuscriptScene = { file, title: sceneHeading(text, file), words: countWords(text) };
+    const where = placed.get(file);
+    const scene: ManuscriptScene = { file, title: where?.title ?? sceneHeading(text, file), chapter: where?.chapter ?? null, words: countWords(text) };
     if (withText) {
       const size = Buffer.byteLength(text);
       if (sent + size <= cap) {

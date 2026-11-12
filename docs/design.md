@@ -209,7 +209,9 @@ in the same page and over the same text:
 
 - **Libro** (`#book`, a `section` labelled **Manuscrito del libro**) is a place, not an editor. It
   reads the book in one request, `GET /review/api/books/{book}/manuscript` (member read; the
-  scenes in `Project.scenes()` order with `file`, `title`, `words` and `text`, plus
+  scenes in `Project.scenes()` order with `file`, `title` (the manifest title, else the first
+  heading), `chapter` (its chapter's title, or null; [book structure](book-structure.md)), `words`
+  and `text`, plus
   `total_words`, `title` and `truncated`). The text sent is capped at 16 MiB in all: scenes
   past the cap come with `text: null` and Libro says so on that scene; their counts are still
   there. `?text=0` returns the counts only, which the goals line uses. Nothing is written or
@@ -217,7 +219,8 @@ in the same page and over the same text:
   and count, a scene break (`⁂`, `role="separator"`) between scenes and **Escribir aquí**. The
   Markdown is shown as plain blocks (headings, rules, paragraphs) built only from text nodes,
   never as HTML; the editor's own *Lectura* view lives in the editor bundle and is not loaded
-  here. The contents (`nav`, **Contenido del libro**) list each scene with its count and the
+  here. A chapter is a heading (`h2`) before its first scene, and a plain line in the contents.
+  The contents (`nav`, **Contenido del libro**) list each scene with its count and the
   book total; a scene in it is a button that scrolls to the scene and focuses its heading. From
   64em it sits beside the text and sticks; below that it is a drawer opened by **Contenido**
   (`aria-expanded`, `aria-controls`; Escape closes it and gives the focus back).
@@ -260,8 +263,9 @@ in the same page and over the same text:
   file name) and its word count. **Guardar**, **Cerrar editor** and the save status sit above
   the text and stick to the top while writing. **Editar escena** in Revisión opens that scene
   here; **Cerrar editor** goes back to Revisión at that scene.
-- **Libro** (the book tree, [book structure](book-structure.md)) is the first button of the
-  group in the desk's head. It opens a drawer (`nav`, `aria-label="Libro"`, `#desk-tree`) over
+- **Índice** (the book tree, [book structure](book-structure.md); not **Libro**, the place to read
+  the whole book) is the first button of the group in the desk's head. It opens a drawer (`nav`,
+  `aria-label="Índice"`, `#desk-tree`) over
   the text at every width (`min(24rem, 92vw)`, fixed to the left edge); on a phone choosing a
   scene closes it, on a wide screen it stays open. It shows **Libro: n palabras** (the active
   scenes), the chapters with their word count, each chapter's scenes with theirs, and the scenes

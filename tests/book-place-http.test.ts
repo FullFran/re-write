@@ -52,6 +52,7 @@ test('past the size cap the remaining scenes keep their counts but not their tex
   const fake = {
     title: () => 'Libro',
     scenes: () => ['scenes/a.md', 'scenes/b.md'],
+    outline: () => ({ version: 'none', chapters: [], loose: [], archived: [] }),
     readScene: (file: string) => (file === 'scenes/a.md' ? '# A\nuno dos tres\n' : '# B\ncuatro cinco\n'),
   } as unknown as Project;
   const view = manuscriptView(fake, { maxBytes: 20 });
@@ -60,4 +61,18 @@ test('past the size cap the remaining scenes keep their counts but not their tex
   assert.equal(view.scenes[1].text, null);
   assert.equal(view.scenes[1].words, 3, 'counted although not sent');
   assert.equal(view.total_words, 7, 'A, uno, dos, tres + B, cuatro, cinco');
+});
+
+test('the manuscript follows the book: each scene names its chapter, and a manifest title wins over the heading', async (t) => {
+  const h = await startHarness();
+  t.after(() => h.close());
+  const project = Project.open(h.bookDir);
+  const [first, second] = project.scenes();
+  const step = (op: any) => project.editStructure(project.outline().version, op, 'user_fran');
+  step({ op: 'create_chapter', title: 'Primera parte' });
+  step({ op: 'move_scene', file: second, chapter: project.outline().chapters[0].id });
+  step({ op: 'retitle_scene', file: second, title: 'El altar, de noche' });
+  const body = await (await reviewApi(h, '/books/sal/manuscript', await h.session())).json();
+  assert.deepEqual(body.scenes.map((s: any) => [s.file, s.chapter, s.title]),
+    [[second, 'Primera parte', 'El altar, de noche'], [first, null, 'La puerta de Sal']]);
 });

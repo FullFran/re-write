@@ -207,7 +207,7 @@ body[data-mode=focus] .toolbar, body[data-mode=help] .toolbar { margin-bottom: v
 .desk-tools > button { min-height: var(--tap); padding: 0 var(--space-4); }
 .desk-tools > button[aria-expanded=true] { background: var(--pressed); }
 .desk-status { flex: 1 1 100%; margin: 0; }
-/* Libro (docs/book-structure.md): the book tree, a drawer over the text at every width. */
+/* Índice (docs/book-structure.md): the book tree, a drawer over the text at every width. */
 .desk-tree { position: fixed; top: 0; bottom: 0; left: 0; z-index: 20; width: min(24rem, 92vw); overflow-y: auto; box-sizing: border-box; padding: var(--space-3) var(--space-4) var(--space-6); background: var(--paper); border-right: 1px solid var(--line); box-shadow: 0 0 24px rgb(0 0 0 / 25%); }
 .desk-tree[hidden] { display: none; }
 .tree-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
@@ -400,6 +400,8 @@ body[data-mode=book] .toolbar { margin-bottom: var(--space-3); }
 .book-place[data-toc=open] .book-toc { display: block; }
 .book-toc ol { list-style: none; margin: 0; padding: 0; }
 .book-toc-total { margin: 0 0 var(--space-2); font-weight: 600; }
+.book-toc-chapter { list-style: none; margin: var(--space-2) 0 0; font-weight: 600; }
+.book-chapter { margin: var(--space-4) 0 var(--space-2); }
 .book-toc-item { display: flex; justify-content: space-between; gap: var(--space-2); width: 100%; min-height: var(--tap); text-align: left; border-color: transparent; background: transparent; }
 .book-toc-words, .book-toc-flag { color: var(--muted); white-space: nowrap; }
 .book-text { max-width: 40em; margin: 0 auto; padding-bottom: var(--space-5); font: var(--text-md)/1.7 var(--font-prose); }
@@ -2256,7 +2258,14 @@ function createBookPlace() {
     const sections = [];
     const items = [];
     const unsaved = [];
+    let chapter = null;
     data.scenes.forEach((scene, at) => {
+      // A chapter is a heading before its first scene, in the text and in the contents.
+      if (scene.chapter && scene.chapter !== chapter) {
+        sections.push(el('h2', scene.chapter, 'book-chapter'));
+        items.push(el('li', scene.chapter, 'book-toc-chapter'));
+      }
+      chapter = scene.chapter || null;
       // Unsaved text of the desk is kept as a draft of this tab: it is what the person wrote
       // last, so Libro shows it for that scene and says so.
       const draft = readDraft(book, scene.file);
@@ -2309,7 +2318,7 @@ function createBookPlace() {
     tocList.replaceChildren(...items);
     tocTotal.textContent = 'Total del libro: ' + groupedCount(data.total_words, 'palabra', 'palabras');
     heading.textContent = data.title || 'Libro';
-    status.textContent = data.scenes.length ? '' : 'Este libro aún no tiene escenas. Impórtalas desde Revisión para empezar.';
+    status.textContent = data.scenes.length ? '' : 'Este libro aún no tiene escenas: crea la primera con «Nueva escena» en el Índice de Concentración, o impórtalas desde Revisión.';
     if (data.truncated) status.textContent = 'El libro es muy grande: algunas escenas no se muestran aquí completas.';
     return unsaved;
   }
@@ -2988,8 +2997,8 @@ function createDesk() {
     tool.setAttribute('aria-expanded', 'false');
     tool.setAttribute('aria-controls', 'desk-panel');
   }
-  // Libro (docs/book-structure.md): the book tree, a drawer over the text.
-  const bookTool = el('button', 'Libro');
+  // Índice (docs/book-structure.md): the book tree, a drawer over the text. Not "Libro", the place to read the book.
+  const bookTool = el('button', 'Índice');
   bookTool.type = 'button';
   bookTool.setAttribute('aria-expanded', 'false');
   bookTool.setAttribute('aria-controls', 'desk-tree');
@@ -3058,7 +3067,7 @@ function createDesk() {
   bodyBox.append(slot, help);
   const tree = el('nav', undefined, 'desk-tree');
   tree.id = 'desk-tree';
-  tree.setAttribute('aria-label', 'Libro');
+  tree.setAttribute('aria-label', 'Índice');
   tree.hidden = true;
   // The goals line (docs/design.md, "Modes"): saved words of the book and of today.
   const goalsFooter = el('p', '', 'meta desk-goals');
@@ -3507,17 +3516,17 @@ function createDesk() {
     renderHelp();
   }
 
-  // Libro (docs/book-structure.md): chapters and scenes with word counts, a book total, the open
+  // Índice (docs/book-structure.md): chapters and scenes with word counts, a book total, the open
   // scene marked. It is a drawer over the text, closed by default. Opening a scene from it is
   // open(): the scene left behind keeps its unsaved text as its draft, as with the picker.
   // Structure changes are one request each, carrying the manifest version this tree was read at.
   const bookTree = (() => {
     const fmt = (n) => groupedCount(n, 'palabra', 'palabras');
-    const treeHeading = el('h3', 'Libro');
+    const treeHeading = el('h3', 'Índice');
     treeHeading.tabIndex = -1;
     const treeClose = el('button', 'Cerrar');
     treeClose.type = 'button';
-    treeClose.setAttribute('aria-label', 'Cerrar el libro');
+    treeClose.setAttribute('aria-label', 'Cerrar el índice');
     const treeHead = el('div', undefined, 'tree-head');
     treeHead.append(treeHeading, treeClose);
     const totalLine = el('p', '', 'meta tree-total');
