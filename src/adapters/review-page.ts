@@ -385,8 +385,40 @@ main:has(> [role=alert]) .notice:not([hidden]) { position: static; width: auto; 
   .desk-panes > button { flex: 1 1 0; }
   .desk[data-pane=help] .desk-editor, .desk[data-pane=text] .desk-help { display: none; }
 }
+/* Libro (docs/design.md, "Modes"): the whole manuscript to read, with its contents beside it (a drawer under 64em). */
+.book-place { display: none; }
+body[data-mode=book] .book-place { display: block; }
+body[data-mode=book] #app > section:not(.book-place), body[data-mode=book] .section-nav, body[data-mode=book] .create-toggle { display: none; }
+body[data-mode=book] .toolbar { margin-bottom: var(--space-3); }
+.desk-goals { margin: var(--space-3) 0 0; }
+.book-goals { margin: var(--space-1) 0; font-weight: 600; }
+.book-goals-form { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); margin: var(--space-2) 0; }
+.book-goals-form label { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
+.book-goals-form input { width: 9rem; min-height: var(--tap); }
+.book-toc-toggle { min-height: var(--tap); margin: var(--space-2) 0; }
+.book-toc { display: none; margin-bottom: var(--space-4); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); font-family: var(--font-ui); }
+.book-place[data-toc=open] .book-toc { display: block; }
+.book-toc ol { list-style: none; margin: 0; padding: 0; }
+.book-toc-total { margin: 0 0 var(--space-2); font-weight: 600; }
+.book-toc-item { display: flex; justify-content: space-between; gap: var(--space-2); width: 100%; min-height: var(--tap); text-align: left; border-color: transparent; background: transparent; }
+.book-toc-words, .book-toc-flag { color: var(--muted); white-space: nowrap; }
+.book-text { max-width: 40em; margin: 0 auto; padding-bottom: var(--space-5); font: var(--text-md)/1.7 var(--font-prose); }
+.book-text p { white-space: pre-line; }
+.book-scene-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.book-scene-title { margin: 0; scroll-margin-top: var(--space-4); }
+.book-write { min-height: var(--tap); font-family: var(--font-ui); }
+.book-unsaved { padding: var(--space-2); border-left: 3px solid var(--line); font-family: var(--font-ui); font-size: var(--text-sm); }
+.book-heading { margin: var(--space-4) 0 var(--space-2); }
+.book-rule, .book-break { margin: var(--space-4) 0; text-align: center; color: var(--muted); }
+.book-rule::after, .book-break::after { content: '⁂'; letter-spacing: .3em; }
+.book-break { margin: var(--space-6) 0; }
 /* Wide screens in Ayuda: the editor in the centre, the help in a column on its right. */
 @media (min-width: 64em) {
+  body[data-mode=book] main { max-width: 84rem; }
+  body[data-mode=book] header { padding-left: max(var(--gutter), calc((100% - 84rem) / 2 + var(--gutter))); padding-right: max(var(--gutter), calc((100% - 84rem) / 2 + var(--gutter))); }
+  .book-toc-toggle { display: none; }
+  .book-layout { display: grid; grid-template-columns: 17rem minmax(0, 1fr); gap: var(--space-6); align-items: start; }
+  .book-place .book-toc, .book-place[data-toc=open] .book-toc { display: block; position: sticky; top: var(--space-3); max-height: calc(100vh - 2 * var(--space-3)); overflow-y: auto; margin-bottom: 0; }
   .mode-switch { flex: none; margin-left: auto; }
   .mode-switch > button { flex: none; padding: 0 var(--space-3); }
   body[data-mode=help] main { max-width: 84rem; }
@@ -1865,6 +1897,7 @@ function sceneEditor(book, scene, close, editorLib, onText, links) {
         savedShown = value;
         normalising = false;
         remember();
+        if (!isNote) bookGoals.refresh(book).catch(() => {});
         if (!dirty() && wasNormalising) status.textContent = 'Guardado, con los finales de línea normalizados.';
         return;
       }
@@ -1923,7 +1956,7 @@ function sceneEditor(book, scene, close, editorLib, onText, links) {
 // writing desk: one scene in the editor and, in Ayuda, the work waiting on that scene.
 // Revisión is the full review page. The desk is built once and never re-rendered by a
 // refresh or a decision, so switching modes keeps the text, the cursor and the selection.
-const MODES = [['focus', 'Concentración'], ['help', 'Ayuda RE;write'], ['review', 'Revisión']];
+const MODES = [['focus', 'Concentración'], ['help', 'Ayuda RE;write'], ['book', 'Libro'], ['review', 'Revisión']];
 let mode = 'review';
 let lastWritingMode = 'focus';
 let modeSwitch = null;
@@ -1975,7 +2008,7 @@ function modeSwitchNode() {
 // the caret in it, options.caret says the caret was in the text when the person switched.
 async function setMode(next, options = {}) {
   mode = next;
-  if (next !== 'review') lastWritingMode = next;
+  if (next === 'focus' || next === 'help') lastWritingMode = next;
   try {
     window.localStorage.setItem(modeKey(), next);
   } catch {
@@ -1989,10 +2022,16 @@ async function setMode(next, options = {}) {
     if (desk) desk.resume = Boolean(options.caret);
     return;
   }
+  if (next === 'book') {
+    // Libro is a reading place: the desk stays as it is, hidden, with any unsaved text in it.
+    if (desk) desk.resume = Boolean(options.caret);
+    await ensureBookPlace().show(selectedBook);
+    return;
+  }
   const shown = ensureDesk();
   const resume = shown.resume || options.caret;
   shown.resume = false;
-  await shown.show(options.file, options.focus);
+  await shown.show(options.file, options.focus, options.at);
   if (resume && !options.file) shown.focusEditor();
 }
 
@@ -2010,6 +2049,301 @@ function showMode(shown) {
   if (document.body && document.body.setAttribute) document.body.setAttribute('data-mode', shown);
   if (modeSwitch) for (const choice of modeSwitch.buttons) choice.setAttribute('aria-pressed', String(choice.mode === shown));
   if (desk) desk.sync();
+}
+
+// ---- Goals (docs/design.md, "Modes", Libro) ----
+// A book target and a daily target, set by the person and kept in this browser only, under the
+// same hash of the person as the mode: rewrite:goals:<hash>:<book> holds { book, day } and
+// rewrite:goals-day:<hash>:<book> holds { date, total }, the saved words of the book the first
+// time that local day it was read. Today's words are the saved total now minus that one, so
+// only saved text counts; the server stores nothing.
+const GOAL_MAX = 10000000;
+const groupedNumber = (n) => new Intl.NumberFormat('es', { useGrouping: 'always' }).format(n);
+function localDate() {
+  const now = new Date();
+  const two = (n) => String(n).padStart(2, '0');
+  return now.getFullYear() + '-' + two(now.getMonth() + 1) + '-' + two(now.getDate());
+}
+// Without a person there is no key to store under: nothing is kept (the page's own memory only).
+const goalsKey = (book) => (personKey ? 'rewrite:goals:' + personKey + ':' + book : null);
+const goalsDayKey = (book) => (personKey ? 'rewrite:goals-day:' + personKey + ':' + book : null);
+function readJsonKey(key) {
+  if (!key) return null;
+  try {
+    return JSON.parse(window.localStorage.getItem(key));
+  } catch {
+    return null;
+  }
+}
+function writeJsonKey(key, value) {
+  if (!key) return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // No storage: the goals last while the page is open.
+  }
+}
+const goalNumber = (value) => (Number.isInteger(value) && value > 0 ? Math.min(value, GOAL_MAX) : 0);
+// "1.240 / 80.000 palabras · hoy +350 / 500"; each target is optional, and so is "hoy" until
+// the day's first reading of the book is known (today is null).
+function goalsLine(total, today, targets) {
+  if (total === null) return '';
+  const book = goalNumber(targets.book);
+  const day = goalNumber(targets.day);
+  let line = book ? groupedNumber(total) + ' / ' + groupedNumber(book) + ' palabras' : groupedCount(total, 'palabra', 'palabras');
+  if (today !== null) {
+    line += ' · hoy ' + (today < 0 ? '−' : '+') + groupedNumber(Math.abs(today)) + (day ? ' / ' + groupedNumber(day) : '');
+  }
+  return line;
+}
+const GOALS_HINT = 'Cuenta solo el texto guardado: lo que escribes y aún no has guardado no suma hasta que pulses Guardar.';
+const bookGoals = {
+  book: null,
+  total: null,
+  base: null,
+  targets: { book: 0, day: 0 },
+  nodes: [],
+  // A node whose text is the goals line, kept up to date.
+  watch(node) {
+    node.title = GOALS_HINT;
+    this.nodes.push(node);
+    node.textContent = this.line();
+  },
+  line() {
+    return goalsLine(this.total, this.total === null || this.base === null ? null : this.total - this.base, this.targets);
+  },
+  render() {
+    const text = this.line();
+    for (const node of this.nodes) node.textContent = text;
+    if (this.onchange) this.onchange();
+  },
+  select(book) {
+    if (book === this.book) return;
+    const saved = readJsonKey(goalsKey(book)) || {};
+    this.book = book;
+    this.total = null;
+    this.base = null;
+    this.targets = { book: goalNumber(saved.book), day: goalNumber(saved.day) };
+  },
+  setTarget(kind, value) {
+    this.targets[kind] = goalNumber(Math.floor(Number(value)));
+    writeJsonKey(goalsKey(this.book), this.targets);
+    this.render();
+  },
+  // The saved total of the book was read: the first reading of the local day is the baseline.
+  record(book, total) {
+    this.select(book);
+    const today = localDate();
+    const saved = readJsonKey(goalsDayKey(book)) || (this.mem && this.mem.book === book ? this.mem : null);
+    if (saved && saved.date === today && Number.isFinite(saved.total)) {
+      this.base = saved.total;
+    } else {
+      this.base = total;
+      writeJsonKey(goalsDayKey(book), { date: today, total });
+    }
+    this.mem = { book, date: today, total: this.base };
+    this.total = total;
+    this.render();
+  },
+  // Asks the server for the saved counts only (no text).
+  async refresh(book) {
+    if (!book) return;
+    this.select(book);
+    const data = await api('/books/' + book + '/manuscript?text=0');
+    if (book !== this.book) return;
+    this.record(book, data.total_words);
+  },
+};
+
+// ---- Libro (docs/design.md, "Modes"): the whole manuscript, read-only and continuous ----
+let bookPlace = null;
+function ensureBookPlace() {
+  if (!bookPlace) {
+    bookPlace = createBookPlace();
+    app.append(bookPlace.node);
+  }
+  return bookPlace;
+}
+
+// The scene's Markdown as plain blocks: headings, a rule for a scene-internal break, and
+// paragraphs. Only ever text nodes: nothing in a scene is parsed as HTML. (The editor's own
+// reading view lives in the editor bundle, which this place does not load.)
+function renderProse(box, text) {
+  for (const block of String(text).replace(/\r\n?/g, '\n').split(/\n{2,}/)) {
+    const trimmed = block.trim();
+    if (!trimmed) continue;
+    const heading = /^#{1,6}[ \t]+(.+?)[ \t#]*$/.exec(trimmed);
+    if (heading) box.append(el('h4', heading[1], 'book-heading'));
+    else if (/^(?:\*{3,}|-{3,}|_{3,})$/.test(trimmed)) box.append(el('div', '', 'book-rule'));
+    else box.append(el('p', trimmed.replace(/^>[ \t]?/gm, '')));
+  }
+}
+
+function createBookPlace() {
+  const node = el('section', undefined, 'book-place');
+  node.id = 'book';
+  node.setAttribute('aria-label', 'Manuscrito del libro');
+  const head = el('div', undefined, 'book-head');
+  const heading = el('h2', 'Libro', 'book-title');
+  const status = el('p', '', 'meta');
+  status.setAttribute('role', 'status');
+  const goalsText = el('p', '', 'book-goals');
+  bookGoals.watch(goalsText);
+  const goalsBox = el('div', undefined, 'book-goals-form');
+  goalsBox.setAttribute('role', 'group');
+  goalsBox.setAttribute('aria-label', 'Objetivos');
+  const goalInputs = [['book', 'Objetivo del libro (palabras)'], ['day', 'Objetivo de hoy (palabras)']].map(([kind, label]) => {
+    const wrap = el('label', label + ' ');
+    const input = el('input');
+    input.type = 'number';
+    input.setAttribute('min', '0');
+    input.setAttribute('step', '1');
+    input.setAttribute('inputmode', 'numeric');
+    input.kind = kind;
+    input.addEventListener('change', () => bookGoals.setTarget(kind, input.value));
+    wrap.append(input);
+    goalsBox.append(wrap);
+    return input;
+  });
+  const hint = el('p', GOALS_HINT, 'meta');
+  head.append(heading, goalsText, goalsBox, hint, status);
+
+  // The contents: beside the text from 64em, a drawer under it.
+  const toggle = el('button', 'Contenido', 'book-toc-toggle');
+  toggle.type = 'button';
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.setAttribute('aria-controls', 'book-toc');
+  const toc = el('nav', undefined, 'book-toc');
+  toc.id = 'book-toc';
+  toc.setAttribute('aria-label', 'Contenido del libro');
+  const tocTotal = el('p', '', 'book-toc-total');
+  const tocList = el('ol');
+  toc.append(tocTotal, tocList);
+  const text = el('div', undefined, 'book-text');
+  const layout = el('div', undefined, 'book-layout');
+  layout.append(toc, text);
+  node.append(head, toggle, layout);
+
+  const state = { book: null, seq: 0, sections: [] };
+
+  function setDrawer(open, back) {
+    node.setAttribute('data-toc', open ? 'open' : 'closed');
+    toggle.setAttribute('aria-expanded', String(open));
+    if (!open && back) toggle.focus();
+  }
+  setDrawer(false);
+  toggle.addEventListener('click', () => setDrawer(toggle.getAttribute('aria-expanded') !== 'true'));
+  node.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && toggle.getAttribute('aria-expanded') === 'true') setDrawer(false, true);
+  });
+
+  function goTo(at) {
+    const section = state.sections[at];
+    if (!section) return;
+    setDrawer(false);
+    section.scrollIntoView({ block: 'start' });
+    section.heading.focus();
+  }
+
+  function write(file) {
+    // The last writing mode, with the caret at the start of that scene.
+    return setMode(lastWritingMode, { file, focus: true, at: { line: 1, column: 1, length: 0 } })
+      .catch((error) => showError(error.message));
+  }
+
+  function fill(book, data) {
+    state.sections = [];
+    const sections = [];
+    const items = [];
+    const unsaved = [];
+    data.scenes.forEach((scene, at) => {
+      // Unsaved text of the desk is kept as a draft of this tab: it is what the person wrote
+      // last, so Libro shows it for that scene and says so.
+      const draft = readDraft(book, scene.file);
+      const mine = draft && typeof draft.text === 'string' && scene.text !== null && draft.text !== scene.text ? draft.text : null;
+      const section = el('section', undefined, 'book-scene');
+      section.id = 'libro-escena-' + (at + 1);
+      const label = sceneLabel(scene.file);
+      const title = el('h3', label.charAt(0).toUpperCase() + label.slice(1), 'book-scene-title');
+      title.tabIndex = -1;
+      const meta = el('p', scene.title + ' · ' + groupedCount(scene.words, 'palabra', 'palabras'), 'meta');
+      const write_ = el('button', 'Escribir aquí', 'book-write');
+      write_.type = 'button';
+      write_.setAttribute('aria-label', 'Escribir aquí: ' + scene.title);
+      write_.addEventListener('click', () => write(scene.file));
+      const bar = el('div', undefined, 'book-scene-head');
+      bar.append(title, write_);
+      section.append(bar, meta);
+      if (mine !== null) {
+        const warn = el('p', 'Sin guardar: se muestra tu versión de esta escena, que aún no está guardada.', 'book-unsaved');
+        warn.setAttribute('role', 'note');
+        section.append(warn);
+        unsaved.push(scene.file);
+      }
+      const body = el('div', undefined, 'book-prose');
+      if (scene.text === null) {
+        body.append(el('p', 'Esta escena es demasiado larga para mostrarla aquí junto al resto del libro. Ábrela con «Escribir aquí».', 'meta'));
+      } else {
+        renderProse(body, mine !== null ? mine : scene.text);
+      }
+      section.append(body);
+      sections.push(section);
+      if (at < data.scenes.length - 1) {
+        const rule = el('div', '', 'book-break');
+        rule.setAttribute('role', 'separator');
+        sections.push(rule);
+      }
+      section.heading = title;
+      state.sections.push(section);
+
+      const item = el('li');
+      const go = el('button', undefined, 'book-toc-item');
+      go.type = 'button';
+      go.append(el('span', scene.title, 'book-toc-name'), el('span', groupedNumber(scene.words), 'book-toc-words'));
+      if (mine !== null) go.append(el('span', ' · sin guardar', 'book-toc-flag'));
+      go.addEventListener('click', () => goTo(at));
+      item.append(go);
+      items.push(item);
+    });
+    text.replaceChildren(...sections);
+    tocList.replaceChildren(...items);
+    tocTotal.textContent = 'Total del libro: ' + groupedCount(data.total_words, 'palabra', 'palabras');
+    heading.textContent = data.title || 'Libro';
+    status.textContent = data.scenes.length ? '' : 'Este libro aún no tiene escenas. Impórtalas desde Revisión para empezar.';
+    if (data.truncated) status.textContent = 'El libro es muy grande: algunas escenas no se muestran aquí completas.';
+    return unsaved;
+  }
+
+  bookGoals.onchange = () => {
+    for (const input of goalInputs) input.value = bookGoals.targets[input.kind] ? String(bookGoals.targets[input.kind]) : '';
+  };
+
+  return {
+    node,
+    // Reads the whole manuscript in one request and shows it; nothing is written.
+    async show(book) {
+      state.book = book;
+      const seq = ++state.seq;
+      if (!book) {
+        text.replaceChildren(el('p', 'Elige o crea un libro para verlo entero.', 'meta'));
+        tocList.replaceChildren();
+        return;
+      }
+      bookGoals.select(book);
+      bookGoals.onchange();
+      status.textContent = 'Cargando el libro…';
+      let data;
+      try {
+        data = await api('/books/' + book + '/manuscript');
+      } catch (error) {
+        if (seq === state.seq) status.textContent = error.message;
+        return;
+      }
+      if (seq !== state.seq || book !== selectedBook) return;
+      fill(book, data);
+      bookGoals.record(book, data.total_words);
+    },
+  };
 }
 
 const deskSceneName = (file) => String(file).replace(/^scenes\//, '').replace(/\.md$/, '');
@@ -2726,7 +3060,10 @@ function createDesk() {
   tree.id = 'desk-tree';
   tree.setAttribute('aria-label', 'Libro');
   tree.hidden = true;
-  node.append(head, tree, analyse, banner, panes, panel, bodyBox);
+  // The goals line (docs/design.md, "Modes"): saved words of the book and of today.
+  const goalsFooter = el('p', '', 'meta desk-goals');
+  bookGoals.watch(goalsFooter);
+  node.append(head, tree, analyse, banner, panes, panel, bodyBox, goalsFooter);
 
   const state = { book: null, file: null, scenes: [], archived: [], tree: null, editor: null, saved: null, pane: 'text', opening: 0, statsQueued: false, notes: null, lib: null, panel: null, scope: 'scene' };
 
@@ -3725,8 +4062,16 @@ function createDesk() {
       fillPicker();
       renderHelp();
     },
-    async show(file, focus) {
+    async show(file, focus, at) {
       if (state.book !== selectedBook) this.update(selectedBook, latestQueue || {});
+      bookGoals.refresh(state.book).catch(() => {});
+      // "Escribir aquí" on a scene that is already open: the editor (and its undo history) stays.
+      if (file && at && state.editor && file === state.file && !isNoteFile(file)) {
+        const from = offsetAt(state.editor.getValue(), at.line, at.column);
+        if (from !== null) state.editor.select(from, from + at.length);
+        if (focus && state.box) state.box.focusEditor();
+        return undefined;
+      }
       // A note stays open across modes, as a scene does.
       if (!file && state.editor && isNoteFile(state.file)) {
         renderHelp();
@@ -3736,7 +4081,7 @@ function createDesk() {
       const wanted = file || state.file || remembered;
       const target = state.scenes.includes(wanted) || state.archived.includes(wanted) ? wanted : state.scenes[0];
       if (!target) return emptyBook();
-      if (file || target !== state.file || !state.editor) return open(target, focus);
+      if (file || target !== state.file || !state.editor) return open(target, focus, at);
       renderHelp();
       return undefined;
     },
@@ -4008,7 +4353,11 @@ async function renderApp(selectedBookId, selectedScene, highlight) {
     showSceneInReview = (file) => built.openQuote(file);
     if (assistant) assistant.pageChanged();
     showMode(mode);
-    if (mode !== 'review') {
+    if (bookPlace) app.append(bookPlace.node);
+    if (mode === 'book') {
+      if (desk) desk.update(currentBook, state.data);
+      await ensureBookPlace().show(currentBook);
+    } else if (mode !== 'review') {
       ensureDesk().update(currentBook, state.data);
       await desk.show();
     } else if (desk) {
@@ -4166,7 +4515,7 @@ window.addEventListener('load', async () => {
     window.Clerk.mountUserButton(document.getElementById('user'));
     await rememberPerson();
     mode = readMode();
-    if (mode !== 'review') lastWritingMode = mode;
+    if (mode === 'focus' || mode === 'help') lastWritingMode = mode;
     showMode(mode);
     // Signing out (or another account) while the page is open.
     if (window.Clerk.addListener) {

@@ -86,11 +86,12 @@ class Element {
   }
   get isConnected(): boolean { let node: Element = this; while (node.parent) node = node.parent; return node.tagName === 'BODY'; }
   getBoundingClientRect() { return { top: 0 }; }
-  scrollIntoView() {}
+  scrollIntoView() { scrolled.push(this); }
   focus() { document.activeElement = this; }
   setSelectionRange(start: number, end: number) { this.selection = [start, end]; }
 }
 let document: any;
+const scrolled: Element[] = [];
 function all(root: Element, match: (node: Element) => boolean): Element[] {
   return [...(match(root) ? [root] : []), ...root.children.flatMap((c) => all(c, match))];
 }
@@ -213,11 +214,11 @@ async function quietPage(t: any, setup?: (h: Harness) => void) {
 test('the page starts in Revisión, and a chosen mode is remembered per person in this browser', async (t) => {
   const { h, session, page } = await quietPage(t);
   assert.equal(page.mode(), 'review', 'without a choice nothing existing changes');
-  assert.deepEqual(page.switchState(), { 'Concentración': 'false', 'Ayuda RE;write': 'false', 'Revisión': 'true' });
+  assert.deepEqual(page.switchState(), { 'Concentración': 'false', 'Ayuda RE;write': 'false', 'Libro': 'false', 'Revisión': 'true' });
 
   await page.pick('Concentración');
   assert.equal(page.mode(), 'focus');
-  assert.deepEqual(page.switchState(), { 'Concentración': 'true', 'Ayuda RE;write': 'false', 'Revisión': 'false' });
+  assert.deepEqual(page.switchState(), { 'Concentración': 'true', 'Ayuda RE;write': 'false', 'Libro': 'false', 'Revisión': 'false' });
   assert.equal(page.local.get(`rewrite:mode:${personOf(session)}`), 'focus', 'kept under the hash of the person, never the person');
 
   const again = await openPage(h, session, page.local);
@@ -611,4 +612,202 @@ test('Libro: an archived scene stays openable and is named in the picker; the tr
   const picker = all(page.desk()!, (n) => n.tagName === 'SELECT' && n.attrs['aria-label'] === 'Escena')[0];
   assert.deepEqual(picker.children.map((o) => o.textContent), ['Archivo: escena-01', 'escena-02']);
   assert.match(REVIEW_CSS, /\.desk-tree \{ position: fixed;/, 'the tree is a drawer over the text');
+});
+
+// ---- Libro: the whole manuscript to read, and the writing goals (docs/design.md, "Modes") ----
+
+const countWords = (text: string) => (text.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) ?? []).length;
+const localDay = () => {
+  const now = new Date();
+  const two = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}`;
+};
+/** Lets the page's pending requests finish (they use the real server, not the fake timers). */
+async function until(page: { settle: () => Promise<void> }, done: () => boolean) {
+  for (let round = 0; round < 200 && !done(); round++) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await page.settle();
+  }
+  assert.ok(done(), 'the page got there');
+}
+const place = () => document.getElementById('book') as Element;
+const sections = () => place() ? all(place(), (n) => n.className === 'book-scene') : [];
+const goalsText = () => all(place(), (n) => n.className === 'book-goals')[0]?.textContent ?? '';
+const footerText = () => all(document.getElementById('desk') as Element, (n) => n.className === 'meta desk-goals')[0]?.textContent ?? '';
+
+test('Libro is a fourth place in the switch, remembered per person, and the other three behave as before', async (t) => {
+  const { h, session, page } = await quietPage(t);
+  assert.deepEqual(Object.keys(page.switchState()), ['Concentración', 'Ayuda RE;write', 'Libro', 'Revisión']);
+  await page.pick('Libro');
+  assert.equal(page.mode(), 'book');
+  assert.deepEqual(page.switchState(), { 'Concentración': 'false', 'Ayuda RE;write': 'false', 'Libro': 'true', 'Revisión': 'false' });
+  assert.equal(page.local.get(`rewrite:mode:${personOf(session)}`), 'book');
+  await until(page, () => sections().length === 2);
+
+  const again = await openPage(h, session, page.local);
+  await until(again, () => sections().length === 2);
+  assert.equal(again.mode(), 'book', 'a reload comes back to Libro');
+
+  // The three older modes keep their own behaviour around it.
+  await again.pick('Concentración');
+  assert.equal(again.mode(), 'focus');
+  assert.equal(again.editor()?.value, read(h.bookDir, SCENE));
+  await again.pick('Ayuda RE;write');
+  assert.equal(again.help()?.attrs['aria-label'], 'Ayuda para esta escena');
+  await again.pick('Revisión');
+  assert.equal(again.mode(), 'review');
+  assert.deepEqual(again.switchState(), { 'Concentración': 'false', 'Ayuda RE;write': 'false', 'Libro': 'false', 'Revisión': 'true' });
+});
+
+test('Libro shows every scene in book order with a heading, a scene break, a contents with counts and the total', async (t) => {
+  const { h, page } = await quietPage(t);
+  await page.pick('Libro');
+  await until(page, () => sections().length === 2);
+  const files = Project.open(h.bookDir).scenes();
+  const texts = files.map((file) => read(h.bookDir, file));
+  assert.deepEqual(sections().map((s) => all(s, (n) => n.tagName === 'H3')[0].textContent), ['Escena 01', 'Escena 02']);
+  assert.match(sections()[0].textContent, /La puerta de Sal/);
+  assert.equal(all(place(), (n) => n.attrs.role === 'separator').length, 1, 'one scene break between two scenes');
+  const prose = all(sections()[0], (n) => n.className === 'book-prose')[0];
+  assert.ok(all(prose, (n) => n.tagName === 'P').every((p) => !/^#/.test(p.textContent)), 'Markdown headings are not shown as raw marks');
+  assert.ok(prose.textContent.includes('Elena llevaba once años custodiando el puente de Sal'));
+
+  const toc = all(place(), (n) => n.tagName === 'NAV')[0];
+  assert.equal(toc.attrs['aria-label'], 'Contenido del libro');
+  const items = all(toc, (n) => n.tagName === 'BUTTON').map((b) => b.textContent);
+  assert.equal(items.length, files.length);
+  for (let i = 0; i < files.length; i++) assert.ok(items[i].endsWith(grouped(countWords(texts[i]))), `scene ${i + 1} shows its count`);
+  const total = texts.reduce((n, text) => n + countWords(text), 0);
+  assert.equal(all(toc, (n) => n.className === 'book-toc-total')[0].textContent, `Total del libro: ${grouped(total)} palabras`);
+  assert.equal(page.gets.filter((path) => path.endsWith('/manuscript')).length, 1, 'the whole book arrives in one request');
+  assert.equal(page.gets.filter((path) => path.includes('/scenes/')).length, 0, 'no scene is read one by one');
+});
+
+test('Libro: a scene in the contents scrolls to it and takes the focus; the drawer is a keyboard-operable disclosure', async (t) => {
+  const { page } = await quietPage(t);
+  await page.pick('Libro');
+  await until(page, () => sections().length === 2);
+  const toc = all(place(), (n) => n.tagName === 'NAV')[0];
+  const toggle = page.button('Contenido', place());
+  assert.equal(toggle.attrs['aria-expanded'], 'false');
+  assert.equal(toggle.attrs['aria-controls'], toc.id);
+  await toggle.events.click();
+  assert.equal(toggle.attrs['aria-expanded'], 'true');
+  assert.equal(place().attrs['data-toc'], 'open');
+  place().events.keydown({ key: 'Escape' });
+  assert.equal(toggle.attrs['aria-expanded'], 'false', 'Escape closes the drawer');
+  assert.equal(document.activeElement, toggle, 'and gives the focus back');
+
+  await toggle.events.click();
+  scrolled.length = 0;
+  const second = all(toc, (n) => n.tagName === 'BUTTON')[1];
+  assert.equal(second.tagName, 'BUTTON', 'a native button: Enter and Space click it');
+  await second.events.click();
+  assert.deepEqual(scrolled, [sections()[1]], 'the second scene is scrolled to');
+  assert.equal(document.activeElement, all(sections()[1], (n) => n.tagName === 'H3')[0], 'its heading has the focus');
+  assert.equal(toggle.attrs['aria-expanded'], 'false', 'choosing a scene closes the drawer');
+});
+
+test('Escribir aquí opens that scene in the desk, in the last writing mode, with the caret at its start', async (t) => {
+  const { h, page } = await quietPage(t);
+  await page.pick('Ayuda RE;write');
+  await page.pick('Libro');
+  await until(page, () => sections().length === 2);
+  await page.click('Escribir aquí', sections()[1]);
+  assert.equal(page.mode(), 'help', 'back in the mode that was last used for writing');
+  await until(page, () => page.editor()?.value === read(h.bookDir, OTHER));
+  assert.deepEqual((page.editor() as Element).selection, [0, 0], 'the caret is at the start of the scene');
+  assert.equal(document.activeElement, page.editor());
+
+  await page.pick('Concentración');
+  await page.pick('Libro');
+  await page.click('Escribir aquí', sections()[0]);
+  assert.equal(page.mode(), 'focus');
+  await until(page, () => page.editor()?.value === read(h.bookDir, SCENE));
+});
+
+test('unsaved text in the desk survives a trip to Libro, which shows it as the person\'s version and writes nothing', async (t) => {
+  const { h, page } = await quietPage(t);
+  await page.pick('Concentración');
+  const area = page.editor()!;
+  const mine = area.value + 'Frase nueva sin guardar.\n';
+  await page.type(mine);
+  const head = git(h.bookDir, 'rev-parse', 'HEAD');
+  await page.pick('Libro');
+  await until(page, () => sections().length === 2);
+  assert.match(sections()[0].textContent, /Sin guardar: se muestra tu versión/);
+  assert.match(sections()[0].textContent, /Frase nueva sin guardar\./);
+  assert.doesNotMatch(sections()[1].textContent, /Sin guardar/, 'only the scene with unsaved text is marked');
+  assert.match(all(place(), (n) => n.className === 'book-toc-flag')[0].textContent, /sin guardar/);
+
+  await page.pick('Concentración');
+  assert.equal(page.editor(), area, 'the editor is the same element');
+  assert.equal(area.value, mine, 'with the text as it was');
+  await page.pick('Libro');
+  await page.click('Escribir aquí', sections()[0]);
+  assert.equal(page.editor(), area, 'Escribir aquí on the open scene keeps its editor');
+  assert.equal(area.value, mine);
+  assert.deepEqual(area.selection, [0, 0]);
+  assert.equal(git(h.bookDir, 'rev-parse', 'HEAD'), head, 'nothing was committed');
+});
+
+test('goals: stored per person and book, shown in Libro and in the desk, and today counts saved words only', async (t) => {
+  const { h, session, page } = await quietPage(t);
+  const texts = Project.open(h.bookDir).scenes().map((file) => read(h.bookDir, file));
+  const total = texts.reduce((n, text) => n + countWords(text), 0);
+  const person = personOf(session);
+  await page.pick('Libro');
+  await until(page, () => /hoy/.test(goalsText()));
+  assert.equal(goalsText(), `${grouped(total)} palabras · hoy +0`, 'the first reading of the day is the baseline');
+  assert.deepEqual(JSON.parse(page.local.get(`rewrite:goals-day:${person}:sal`)!), { date: localDay(), total });
+  assert.match(all(place(), (n) => n.className === 'book-goals')[0].title, /solo el texto guardado/, 'it says only saved text counts');
+
+  const [bookGoal, dayGoal] = all(place(), (n) => n.tagName === 'INPUT');
+  bookGoal.value = '80000';
+  await bookGoal.events.change();
+  dayGoal.value = '500';
+  await dayGoal.events.change();
+  assert.equal(goalsText(), `${grouped(total)} / 80.000 palabras · hoy +0 / 500`);
+  assert.deepEqual(JSON.parse(page.local.get(`rewrite:goals:${person}:sal`)!), { book: 80000, day: 500 });
+
+  await page.pick('Concentración');
+  await until(page, () => footerText() !== '');
+  assert.equal(footerText(), `${grouped(total)} / 80.000 palabras · hoy +0 / 500`, 'the desk footer shows the same line');
+
+  // Saved words add to today; unsaved ones do not.
+  await page.type(page.editor()!.value + 'uno dos tres\n');
+  assert.equal(footerText(), `${grouped(total)} / 80.000 palabras · hoy +0 / 500`);
+  await page.click('Guardar', page.desk()!);
+  await until(page, () => footerText().includes('hoy +3'));
+  assert.equal(footerText(), `${grouped(total + 3)} / 80.000 palabras · hoy +3 / 500`);
+
+  // A reload keeps the targets and the day's baseline; another person starts clean.
+  const again = await openPage(h, session, page.local);
+  await again.pick('Libro');
+  await until(again, () => /hoy/.test(goalsText()));
+  assert.equal(goalsText(), `${grouped(total + 3)} / 80.000 palabras · hoy +3 / 500`);
+  const stranger = await openPage(h, await h.session('user_other'), page.local);
+  assert.equal(stranger.local.get(`rewrite:goals:${personOf(await h.session('user_other'))}:sal`), undefined);
+});
+
+test('goals: a baseline from an earlier day is replaced, one from today is kept, and a shrinking book shows a minus', async (t) => {
+  const { h, session } = await quietPage(t);
+  const total = Project.open(h.bookDir).scenes().reduce((n, file) => n + countWords(read(h.bookDir, file)), 0);
+  const key = `rewrite:goals-day:${personOf(session)}:sal`;
+
+  const old = new Map([[key, JSON.stringify({ date: '2001-02-03', total: 1 })]]);
+  const next = await openPage(h, session, new Map([...old, [`rewrite:mode:${personOf(session)}`, 'book']]));
+  await until(next, () => /hoy/.test(goalsText()));
+  assert.equal(goalsText(), `${grouped(total)} palabras · hoy +0`, 'a new day starts from the saved total');
+  assert.deepEqual(JSON.parse(next.local.get(key)!), { date: localDay(), total });
+
+  const today = new Map([[key, JSON.stringify({ date: localDay(), total: total - 100 })], [`rewrite:mode:${personOf(session)}`, 'book']]);
+  const same = await openPage(h, session, today);
+  await until(same, () => /hoy/.test(goalsText()));
+  assert.equal(goalsText(), `${grouped(total)} palabras · hoy +100`);
+
+  const more = new Map([[key, JSON.stringify({ date: localDay(), total: total + 2000 })], [`rewrite:mode:${personOf(session)}`, 'book']]);
+  const fewer = await openPage(h, session, more);
+  await until(fewer, () => /hoy/.test(goalsText()));
+  assert.equal(goalsText(), `${grouped(total)} palabras · hoy −${grouped(2000)}`);
 });

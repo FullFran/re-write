@@ -197,16 +197,46 @@ the selected rating has `aria-pressed`.
 
 ## Modes
 
-Issue #101: the writer chooses how much help is on screen. One switch, three modes, all
+Issue #101: the writer chooses how much help is on screen. One switch, four places, all
 in the same page and over the same text:
 
 | Mode | What is on screen |
 | --- | --- |
 | **Concentración** | The writing desk only: the open scene in the editor. No review section, no section navigation, no card, no analysis; the assistant is closed and never opens by itself. |
 | **Ayuda RE;write** | The same desk plus **Ayuda para esta escena**: the scene's proposed changes, findings, possible problems and claims, with their usual actions. |
+| **Libro** | The whole manuscript to read, full width and read-only (see **Libro** below); the desk is hidden, not closed. |
 | **Revisión** | The full review page as described above; the desk is hidden, not closed. |
 
-- **The switch** is a group (`.mode-switch`, `role="group"`, `aria-label="Modo"`) of three
+- **Libro** (`#book`, a `section` labelled **Manuscrito del libro**) is a place, not an editor. It
+  reads the book in one request, `GET /review/api/books/{book}/manuscript` (member read; the
+  scenes in `Project.scenes()` order with `file`, `title`, `words` and `text`, plus
+  `total_words`, `title` and `truncated`). The text sent is capped at 16 MiB in all: scenes
+  past the cap come with `text: null` and Libro says so on that scene; their counts are still
+  there. `?text=0` returns the counts only, which the goals line uses. Nothing is written or
+  committed. Each scene has a heading (`Escena 01`, as the assistant names scenes), its title
+  and count, a scene break (`⁂`, `role="separator"`) between scenes and **Escribir aquí**. The
+  Markdown is shown as plain blocks (headings, rules, paragraphs) built only from text nodes,
+  never as HTML; the editor's own *Lectura* view lives in the editor bundle and is not loaded
+  here. The contents (`nav`, **Contenido del libro**) list each scene with its count and the
+  book total; a scene in it is a button that scrolls to the scene and focuses its heading. From
+  64em it sits beside the text and sticks; below that it is a drawer opened by **Contenido**
+  (`aria-expanded`, `aria-controls`; Escape closes it and gives the focus back).
+  **Escribir aquí** opens that scene in the desk in the last writing mode (Concentración or
+  Ayuda; Concentración after a reload into Libro) with the caret at its start; on the scene that
+  is already open it keeps the editor, its text and its undo history. **Unsaved text is never
+  lost**: the desk is hidden, not rebuilt, and Libro shows the unsaved version it keeps as the
+  scene's draft (the same one a reload of the tab restores) marked **Sin guardar: se muestra tu
+  versión…**; the contents flag the scene too, while its counts stay those of the saved text.
+- **Goals** are set in Libro (**Objetivo del libro**, **Objetivo de hoy**, in words) and kept
+  only in this browser, per person and book: `rewrite:goals:<hash>:<book>` holds `{ book, day }`,
+  and `rewrite:goals-day:<hash>:<book>` holds `{ date, total }`, the saved word total of the
+  book the first time that local day it was read (when Libro or the desk was opened or a scene
+  was saved). Today's words are the saved total now minus that total, shown with a sign
+  (`+350`, `−120`). The line reads `1.240 / 80.000 palabras · hoy +350 / 500` (numbers grouped as
+  elsewhere; a target that is not set is left out) in Libro and under the desk. It counts
+  **saved text only**, which its `title` and a line in Libro say; no server format changes.
+
+- **The switch** is a group (`.mode-switch`, `role="group"`, `aria-label="Modo"`) of four
   buttons with `aria-pressed`, at the end of the book row. On a phone it is a dock fixed to
   the bottom, above the safe area; `--dock-h` is its height, and the decision bar, the
   assistant button and the end of the page stop above it. A tap on it does not take the
