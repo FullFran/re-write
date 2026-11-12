@@ -435,3 +435,11 @@ test('rating a possible problem saves the verdict and redraws the book without a
   assert.doesNotMatch(ui.app.textContent, /is not a function|undefined/);
   assert.ok(sectionOf(ui.app, 'Posibles problemas'), 'the book is drawn again');
 });
+
+test('a possible problem says which continuity check found it, in Spanish', async () => {
+  const PLACE = { finding_id: 'F-1', kind: 'place', subject: 'Casa del Peso', explanation: 'Casa del Peso is in two places.', classification: 'possible_contradiction', citations: [{ quote: 'scene', source_file: 'scenes/a.md', story_time: 6, evidence_status: 'valid' }], alternatives: ['moved_or_rebuilt: it may have moved.'] };
+  const ui = page(PHONE, { ...QUEUE, findings: [PLACE] });
+  await ui.renderApp('sal');
+  const section = sectionOf(ui.app, 'Posibles problemas');
+  assert.match(section.textContent, /Posible problema, no un veredicto · Lugar · possible_contradiction/);
+});
