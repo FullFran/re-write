@@ -3,9 +3,9 @@ import { basename, join, normalize, resolve } from 'node:path';
 import { Git } from '../adapters/git.ts';
 import { JsonStore, STATE_DIR } from '../adapters/json-store.ts';
 import type { Extraction } from '../adapters/annotation-extractor.ts';
-import { assessAnchor, buildAnchor, matchesRevision } from '../domain/anchor.ts';
+import { assessAnchor, buildAnchor, matchesRevision, suggestAnchor, type Anchor } from '../domain/anchor.ts';
 import {
-  claimId, EPISTEMIC_KINDS, isCanon, nextEditorialStatus, reopenTransition, StaleStateError,
+  claimId, currentAnchor, EPISTEMIC_KINDS, isCanon, nextEditorialStatus, reopenTransition, StaleStateError,
   type Claim, type ClaimCandidate, type ClaimView, type Decision,
 } from '../domain/claim.ts';
 import { verdictFields, CONTINUITY_VERDICTS, InvalidFindingVerdictError, inspectContinuity, type Finding, type Verdict, type VerdictHistoryEntry, type VerdictKind } from '../domain/continuity.ts';
@@ -14,9 +14,13 @@ import { checkSceneText, isExactUtf8 } from '../domain/scene-text.ts';
 import { checkNoteName, NOTES_DIR } from '../domain/note.ts';
 import { foldName } from '../domain/wikilink.ts';
 import {
-  NARRATIVE_VERDICTS, findingId, viewFinding,
+  NARRATIVE_VERDICTS, currentEvidence, findingId, viewFinding,
   type FindingCandidate, type FindingRecord, type FindingView,
 } from '../domain/finding.ts';
+import {
+  anchorProposalId, reanchorTransition,
+  type AnchorProposal, type AnchorTarget, type Reanchor, type ReanchorOffer,
+} from '../domain/reanchor.ts';
 
 const SCENES_DIR = 'scenes';
 
@@ -75,6 +79,27 @@ export interface NoteEdit {
   by: string;
 }
 
+/** A person accepts a new anchor for evidence that went stale or orphaned. */
+export interface ReanchorInput {
+  by: string;
+  /** The history length the person saw (a claim's history, a finding's new anchors). */
+  expected: number;
+  quote: string;
+  note?: string;
+  /** The anchor proposal being accepted, when the quote came from one. */
+  proposal?: string;
+}
+
+export interface AnchorProposalInput {
+  target: AnchorTarget;
+  item_id: string;
+  /** The finding evidence to re-anchor, by position; omitted for a claim. */
+  evidence?: number;
+  quote: string;
+  rationale?: string;
+  proposed_by: string;
+}
+
 export interface NoteProposalInput {
   name: string;
   text: string;
@@ -98,6 +123,7 @@ export class Project {
   readonly verdicts: JsonStore<Verdict>;
   readonly proposals: JsonStore<Proposal>;
   readonly findings: JsonStore<FindingRecord>;
+  readonly anchorProposals: JsonStore<AnchorProposal>;
 
   constructor(dir: string) {
     this.dir = resolve(dir);
@@ -106,6 +132,7 @@ export class Project {
     this.verdicts = new JsonStore<Verdict>(this.dir, 'verdicts');
     this.proposals = new JsonStore<Proposal>(this.dir, 'proposals');
     this.findings = new JsonStore<FindingRecord>(this.dir, 'findings');
+    this.anchorProposals = new JsonStore<AnchorProposal>(this.dir, 'anchor-proposals');
   }
 
   /** Creates the book repository. Opening an existing book changes nothing. */
@@ -329,26 +356,155 @@ export class Project {
   }
 
   /** Adds the evidence status, always recomputed from the recorded revision and the current text. */
-  view(claim: Claim): ClaimView {
+  view(claim: Claim, proposals: AnchorProposal[] = this.anchorProposals.all()): ClaimView {
     // A stored record with an unusable path is reported as broken, and must not take the whole book down.
     if (!SCENE_FILE.test(normalize(claim.source_file)) || claim.source_file.includes('..')) {
       return { ...claim, evidence_status: 'orphaned', evidence_reason: 'file_missing' };
     }
-    const atRevision = this.git.showAt(claim.revision, claim.source_file);
-    if (atRevision === null || !matchesRevision(claim.anchor, atRevision)) {
-      return { ...claim, evidence_status: 'orphaned', evidence_reason: 'quote_not_in_revision' };
+    const { anchor, revision } = currentAnchor(claim);
+    const current = { ...claim, anchor, revision };
+    const atRevision = this.git.showAt(revision, claim.source_file);
+    if (atRevision === null || !matchesRevision(anchor, atRevision)) {
+      return { ...current, evidence_status: 'orphaned', evidence_reason: 'quote_not_in_revision' };
     }
-    const assessment = assessAnchor(claim.anchor, this.readScene(claim.source_file));
+    const text = this.readScene(claim.source_file);
+    const assessment = assessAnchor(anchor, text);
+    const offer = claim.editorial_status === 'proposed' && assessment.status !== 'valid'
+      ? this.reanchorOffer(anchor, text, proposals, 'claim', claim.claim_id, claim.history.length)
+      : {};
     return {
-      ...claim,
+      ...current,
       evidence_status: assessment.status,
       evidence_reason: assessment.reason,
       current_start: assessment.current_start,
+      ...offer,
     };
   }
 
   claimViews(): ClaimView[] {
-    return this.claims.all().map((claim) => this.view(claim));
+    const proposals = this.anchorProposals.all();
+    return this.claims.all().map((claim) => this.view(claim, proposals));
+  }
+
+  /** The suggested passage and the open agent proposals for one piece of evidence that can be re-anchored. */
+  private reanchorOffer(anchor: Anchor, text: string | null, proposals: AnchorProposal[], target: AnchorTarget, id: string, base: number, evidence?: number): ReanchorOffer {
+    return {
+      anchor_suggestion: suggestAnchor(anchor, text),
+      anchor_proposals: proposals
+        .filter((p) => p.target === target && p.item_id === id && p.base === base && p.evidence === evidence)
+        .sort((a, b) => a.created_at.localeCompare(b.created_at)),
+    };
+  }
+
+  /**
+   * A person accepts a new anchor for a reopened (or never decided) claim whose evidence is stale or
+   * orphaned. The quote must appear once in the scene now. The old anchor stays in the record: the new
+   * one is appended to the history in one commit, and the claim stays proposed until it is decided.
+   */
+  reanchorClaim(id: string, input: ReanchorInput): { claim: ClaimView; changed: boolean } {
+    const claim = this.claims.get(id);
+    if (!claim) throw new Error(`unknown claim: ${id}`);
+    const last = claim.history.at(-1);
+    const previous = last?.action === 'reanchor' && last.anchor && last.revision ? { ...last, anchor: last.anchor, revision: last.revision } : undefined;
+    if (reanchorTransition(claim.history.length, input.expected, previous, input.quote) === 'unchanged') return { claim: this.view(claim), changed: false };
+    if (claim.editorial_status !== 'proposed') throw new Error(`this was already ${claim.editorial_status}; reopen it first`);
+    if (this.view(claim).evidence_status === 'valid') throw new Error('the evidence is valid; there is nothing to re-anchor');
+    const { revision, anchor } = this.newAnchor(claim.source_file, input, 'claim', id, claim.history.length);
+    claim.history.push({
+      at: new Date().toISOString(), by: input.by, from: claim.editorial_status, to: claim.editorial_status,
+      ...(input.note ? { note: input.note } : {}), action: 'reanchor', anchor, revision,
+      ...(input.proposal ? { proposal: input.proposal } : {}),
+    });
+    this.saveRecords(`rewrite: reanchor claim ${id}`, [['claims', id]], () => this.claims.put(id, claim));
+    return { claim: this.view(claim), changed: true };
+  }
+
+  /** The same for one quote of a narrative finding without a standing verdict; `evidence` is its position. */
+  reanchorFinding(id: string, input: ReanchorInput & { evidence: number }): { finding: FindingView; changed: boolean } {
+    const record = this.findings.get(id);
+    if (!record) throw new Error(`unknown finding: ${id}`);
+    const reanchors = record.reanchors ?? [];
+    if (reanchorTransition(reanchors.length, input.expected, reanchors.at(-1), input.quote, input.evidence) === 'unchanged') {
+      return { finding: this.findingView(record), changed: false };
+    }
+    const view = this.findingView(record);
+    if (view.verdict) throw new Error('this was already rated; reopen it first');
+    const evidence = Number.isSafeInteger(input.evidence) ? view.evidence[input.evidence] : undefined;
+    if (!evidence) throw new Error(`this finding has no evidence ${input.evidence}`);
+    if (evidence.status === 'valid') throw new Error('the evidence is valid; there is nothing to re-anchor');
+    const { revision, anchor } = this.newAnchor(evidence.file, input, 'finding', id, reanchors.length, input.evidence);
+    const entry: Reanchor = {
+      at: new Date().toISOString(), by: input.by, evidence: input.evidence, revision, anchor,
+      ...(input.note ? { note: input.note } : {}), ...(input.proposal ? { proposal: input.proposal } : {}),
+    };
+    record.reanchors = [...reanchors, entry];
+    this.saveRecords(`rewrite: reanchor finding ${id}`, [['findings', id]], () => this.findings.put(id, record));
+    return { finding: this.findingView(record), changed: true };
+  }
+
+  /**
+   * An agent proposes a new anchor for evidence that can be re-anchored. It never changes the claim or
+   * finding: a person accepts it in the review page. Repeating it on the same state stores it once.
+   */
+  proposeAnchor(input: AnchorProposalInput): { proposal: AnchorProposal; created: boolean } {
+    let file: string;
+    let base: number;
+    if (input.target === 'claim') {
+      const claim = this.claims.get(input.item_id);
+      if (!claim) throw new Error(`unknown claim: ${input.item_id}`);
+      const view = this.view(claim, []);
+      if (claim.editorial_status !== 'proposed') throw new Error(`this was already ${claim.editorial_status}; a person reopens it first`);
+      if (view.evidence_status === 'valid') throw new Error('the evidence is valid; there is nothing to re-anchor');
+      file = claim.source_file;
+      base = claim.history.length;
+    } else {
+      const record = this.findings.get(input.item_id);
+      if (!record) throw new Error(`unknown finding: ${input.item_id}`);
+      const view = this.findingView(record);
+      if (view.verdict) throw new Error('this was already rated; a person reopens it first');
+      const evidence = Number.isSafeInteger(input.evidence) ? view.evidence[input.evidence!] : undefined;
+      if (!evidence) throw new Error(`this finding has no evidence ${input.evidence}`);
+      if (evidence.status === 'valid') throw new Error('the evidence is valid; there is nothing to re-anchor');
+      file = evidence.file;
+      base = (record.reanchors ?? []).length;
+    }
+    const evidence = input.target === 'finding' ? input.evidence : undefined;
+    const id = anchorProposalId(input.target, input.item_id, evidence, input.quote, base);
+    const existing = this.anchorProposals.get(id);
+    if (existing) return { proposal: existing, created: false };
+    const { revision, anchor } = this.anchorAtHead(file, input.quote);
+    const proposal: AnchorProposal = {
+      anchor_proposal_id: id, target: input.target, item_id: input.item_id,
+      ...(evidence !== undefined ? { evidence } : {}),
+      base, file, quote: input.quote, revision, anchor,
+      ...(input.rationale ? { rationale: input.rationale } : {}),
+      proposed_by: input.proposed_by, created_at: new Date().toISOString(),
+    };
+    this.saveRecords(`rewrite: propose anchor ${id}`, [['anchor-proposals', id]], () => this.anchorProposals.put(id, proposal));
+    return { proposal, created: true };
+  }
+
+  /** The new anchor a person accepts: literal and unique in the scene now, and the open proposal it names. */
+  private newAnchor(file: string, input: ReanchorInput, target: AnchorTarget, id: string, base: number, evidence?: number): { revision: string; anchor: Anchor } {
+    if (input.proposal !== undefined) {
+      const proposal = this.anchorProposals.get(input.proposal);
+      if (!proposal || proposal.target !== target || proposal.item_id !== id || proposal.evidence !== evidence) {
+        throw new Error(`unknown anchor proposal for this item: ${input.proposal}`);
+      }
+      if (proposal.base !== base) throw new StaleStateError();
+      if (proposal.quote !== input.quote) throw new Error('the quote differs from the anchor proposal');
+    }
+    return this.anchorAtHead(file, input.quote);
+  }
+
+  private anchorAtHead(file: string, quote: string): { revision: string; anchor: Anchor } {
+    const revision = this.git.head();
+    const text = this.git.showAt(revision, file);
+    if (text === null) throw new Error(`${file} not found at revision ${revision}`);
+    const anchor = buildAnchor(text, quote);
+    // The scene on disk is the one people read; a quote that does not hold there now is no anchor.
+    if (assessAnchor(anchor, this.readScene(file)).status !== 'valid') throw new Error('quote not found in the scene as it reads now');
+    return { revision, anchor };
   }
 
   canon(): ClaimView[] {
@@ -571,16 +727,27 @@ export class Project {
   }
 
   findingViews(): FindingView[] {
-    return this.findings.all().map((f) => this.findingView(f));
+    const proposals = this.anchorProposals.all();
+    return this.findings.all().map((f) => this.findingView(f, proposals));
   }
 
-  private findingView(f: FindingRecord): FindingView {
+  private findingView(f: FindingRecord, proposals?: AnchorProposal[]): FindingView {
     const view = viewFinding(
       f,
       (file) => this.readScene(file),
       (rev, file) => this.git.showAt(rev, file),
     );
-    return { ...view, ...verdictFields(this.verdicts.get(f.finding_id)) };
+    const result: FindingView = { ...view, ...verdictFields(this.verdicts.get(f.finding_id)) };
+    // Without a standing verdict, each quote that is not valid carries a re-anchoring offer.
+    if (!result.verdict && result.evidence.some((ev) => ev.status !== 'valid')) {
+      const all = proposals ?? this.anchorProposals.all();
+      const base = (f.reanchors ?? []).length;
+      const anchors = currentEvidence(f);
+      result.evidence = result.evidence.map((ev, i) => ev.status === 'valid' ? ev : {
+        ...ev, ...this.reanchorOffer(anchors[i].anchor, this.readScene(ev.file), all, 'finding', f.finding_id, base, i),
+      });
+    }
+    return result;
   }
 
   /**
