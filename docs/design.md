@@ -230,6 +230,20 @@ in the same page and over the same text:
   lost**: the desk is hidden, not rebuilt, and Libro shows the unsaved version it keeps as the
   scene's draft (the same one a reload of the tab restores) marked **Sin guardar: se muestra tu
   versión…**; the contents flag the scene too, while its counts stay those of the saved text.
+- **Esquema** (the book outline and planning view, spec S8) lives inside Libro alongside the reading view,
+  toggled by a two-option switch **Leer** / **Esquema** (`aria-pressed`), remembered per person in
+  `localStorage` (`rewrite:book-view:<hash>`).
+  - In the reading view (**Leer**), a small badge next to each scene heading shows the scene's status
+    (**Borrador**, **Revisado**, **Terminado**).
+  - In the **Esquema** view, scenes are listed one row per scene in book order, grouped under chapter headings.
+    Each row has the scene title, its word count, a status selector, the synopsis (editable inline, saved on blur
+    or Enter, Escape cancels), and **Escribir aquí**, which opens the scene in the desk in the last writing mode.
+  - Under each chapter heading, a meta line shows the chapter total words and how many scenes are Terminado.
+    The book total words and overall Terminado count sit at the top.
+  - A status filter (Todas / Borrador / Revisado / Terminado) filters the rows.
+  - Keyboard operable and phone-friendly: below 64em the rows stack vertically.
+  - Edits go through `POST /review/api/books/:id/structure` guarded by manifest version: a 409 reloads the outline
+    and alerts the person. A failed save keeps the typed synopsis in the field and reports that it was not saved.
 - **Goals** are set in Libro (**Objetivo del libro**, **Objetivo de hoy**, in words) and kept
   only in this browser, per person and book: `rewrite:goals:<hash>:<book>` holds `{ book, day }`,
   and `rewrite:goals-day:<hash>:<book>` holds `{ date, total }`, the saved word total of the

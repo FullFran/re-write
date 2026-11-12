@@ -205,7 +205,12 @@ export class Project {
   outline(): BookOutline {
     const { manifest } = this.readManifest();
     const { chapters, loose, archived } = resolveManifest(manifest, this.sceneFiles());
-    const scene = (file: string): OutlineScene => ({ file, title: manifest?.titles[file] ?? null });
+    const scene = (file: string): OutlineScene => ({
+      file,
+      title: manifest?.titles[file] ?? null,
+      synopsis: manifest?.synopses?.[file] ?? null,
+      status: manifest?.statuses?.[file] ?? 'draft',
+    });
     return {
       version: this.manifestVersion(),
       chapters: chapters.map((c) => ({ id: c.id, title: c.title, scenes: c.scenes.map(scene) })),
@@ -261,7 +266,20 @@ export class Project {
     if (this.git.isDirty(MANIFEST_PATH)) throw new SceneEditRefusal(`${MANIFEST_PATH} has uncommitted edits; commit them before reorganising`);
     const existing = this.sceneFiles();
     const { chapters, loose, archived } = resolveManifest(stored, existing);
-    const base: BookManifest = { version: 1, chapters, loose, titles: { ...(stored?.titles ?? {}) }, archived };
+    if (op.op === 'unarchive_scene' && !archived.includes(op.file)) {
+      const all = new Set([...chapters.flatMap((c) => c.scenes), ...loose, ...archived]);
+      if (typeof op.file !== 'string' || !all.has(op.file)) throw new BookStructureError('not_found', 'Esa escena ya no existe.');
+      return { outline: this.outline(), changed: false };
+    }
+    const base: BookManifest = {
+      version: 1,
+      chapters,
+      loose,
+      titles: { ...(stored?.titles ?? {}) },
+      archived,
+      synopses: { ...(stored?.synopses ?? {}) },
+      statuses: { ...(stored?.statuses ?? {}) },
+    };
     const applied = applyOperation(base, op, existing);
     const next = `${JSON.stringify(applied.manifest, null, 2)}\n`;
     if (stored !== null && JSON.stringify(stored) === JSON.stringify(applied.manifest)) return { outline: this.outline(), changed: false };

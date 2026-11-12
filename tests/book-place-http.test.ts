@@ -23,6 +23,8 @@ test('the manuscript route returns the ordered scenes with text, title and count
     assert.equal(scene.text, read(h.bookDir, scene.file));
     assert.equal(scene.words, words(scene.text));
     assert.equal(typeof scene.title, 'string');
+    assert.equal(scene.status, 'draft', 'default status is draft');
+    assert.equal(scene.synopsis, null, 'default synopsis is null');
   }
   assert.equal(body.scenes[0].title, 'La puerta de Sal', 'the title is the first heading');
   assert.equal(body.total_words, body.scenes.reduce((n: number, s: any) => n + s.words, 0));
@@ -72,7 +74,9 @@ test('the manuscript follows the book: each scene names its chapter, and a manif
   step({ op: 'create_chapter', title: 'Primera parte' });
   step({ op: 'move_scene', file: second, chapter: project.outline().chapters[0].id });
   step({ op: 'retitle_scene', file: second, title: 'El altar, de noche' });
+  step({ op: 'set_synopsis', file: second, synopsis: 'Sinopsis de la noche' });
+  step({ op: 'set_status', file: second, status: 'revised' });
   const body = await (await reviewApi(h, '/books/sal/manuscript', await h.session())).json();
-  assert.deepEqual(body.scenes.map((s: any) => [s.file, s.chapter, s.title]),
-    [[second, 'Primera parte', 'El altar, de noche'], [first, null, 'La puerta de Sal']]);
+  assert.deepEqual(body.scenes.map((s: any) => [s.file, s.chapter, s.title, s.synopsis, s.status]),
+    [[second, 'Primera parte', 'El altar, de noche', 'Sinopsis de la noche', 'revised'], [first, null, 'La puerta de Sal', null, 'draft']]);
 });

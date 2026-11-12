@@ -414,6 +414,39 @@ body[data-mode=book] .toolbar { margin-bottom: var(--space-3); }
 .book-rule, .book-break { margin: var(--space-4) 0; text-align: center; color: var(--muted); }
 .book-rule::after, .book-break::after { content: '⁂'; letter-spacing: .3em; }
 .book-break { margin: var(--space-6) 0; }
+.book-view-toggle { display: inline-flex; gap: var(--space-1); margin: var(--space-2) 0; }
+.book-view-toggle > button { min-height: var(--tap); padding: 0 var(--space-3); }
+.book-view-toggle > button[aria-pressed=true] { background: var(--pressed); }
+.book-scene-status { display: inline-block; font-size: var(--text-xs); font-family: var(--font-ui); font-weight: normal; padding: 2px 6px; border-radius: 4px; vertical-align: middle; margin-left: var(--space-2); }
+.book-status-draft { background: var(--line, #e2e8f0); color: var(--muted, #475569); }
+.book-status-revised { background: #e0f2fe; color: #0369a1; }
+.book-status-final { background: #dcfce7; color: #15803d; }
+.book-outline { max-width: 60rem; margin: var(--space-3) auto; font-family: var(--font-ui); }
+.book-outline[hidden] { display: none; }
+.outline-filter { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: var(--space-2) 0 var(--space-4); }
+.outline-filter > button { min-height: var(--tap); padding: 0 var(--space-3); }
+.outline-filter > button[aria-pressed=true] { background: var(--pressed); }
+.outline-total { font-weight: 600; margin: var(--space-2) 0; }
+.outline-status-line { margin: var(--space-1) 0 var(--space-2); }
+.outline-status-line:empty { display: none; }
+.outline-chapter { margin: var(--space-4) 0 var(--space-3); }
+.outline-chapter-title { margin: var(--space-3) 0 var(--space-1); font-size: var(--text-lg); }
+.outline-chapter-meta { margin: 0 0 var(--space-2); color: var(--muted); font-size: var(--text-sm); }
+.outline-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); border-radius: var(--radius); }
+.outline-row[hidden] { display: none; }
+.outline-row:hover, .outline-row:focus-within { background: rgba(0, 0, 0, 0.02); }
+.outline-scene-info { display: flex; align-items: baseline; gap: var(--space-2); min-width: 14rem; flex: 1 1 auto; }
+.outline-title { font-weight: 600; }
+.outline-words { color: var(--muted); font-size: var(--text-sm); white-space: nowrap; }
+.outline-actions { display: flex; align-items: center; gap: var(--space-2); flex: 2 1 auto; }
+.outline-status { min-height: var(--tap); padding: 0 var(--space-2); }
+.outline-synopsis { flex: 1 1 auto; min-width: 10rem; min-height: var(--tap); padding: 0 var(--space-2); font-family: inherit; }
+.outline-write { min-height: var(--tap); padding: 0 var(--space-3); white-space: nowrap; }
+@media (max-width: 63.99em) {
+  .outline-row { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-2); }
+  .outline-actions { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-2); }
+  .outline-scene-info { display: flex; justify-content: space-between; align-items: baseline; }
+}
 /* Wide screens in Ayuda: the editor in the centre, the help in a column on its right. */
 @media (min-width: 64em) {
   body[data-mode=book] main { max-width: 84rem; }
@@ -2187,6 +2220,34 @@ function createBookPlace() {
   node.setAttribute('aria-label', 'Manuscrito del libro');
   const head = el('div', undefined, 'book-head');
   const heading = el('h2', 'Libro', 'book-title');
+
+  const STATUS_LABELS = { draft: 'Borrador', revised: 'Revisado', final: 'Terminado' };
+
+  const bookViewKey = function () {
+    return 'rewrite:book-view:' + (personKey || '');
+  };
+  function readBookView() {
+    try {
+      return window.localStorage.getItem(bookViewKey()) || 'read';
+    } catch (e) {
+      return 'read';
+    }
+  }
+  function writeBookView(view) {
+    try {
+      window.localStorage.setItem(bookViewKey(), view);
+    } catch (e) {}
+  }
+
+  const viewToggle = el('div', undefined, 'book-view-toggle');
+  viewToggle.setAttribute('role', 'group');
+  viewToggle.setAttribute('aria-label', 'Vista del libro');
+  const leerBtn = el('button', 'Leer');
+  leerBtn.type = 'button';
+  const esquemaBtn = el('button', 'Esquema');
+  esquemaBtn.type = 'button';
+  viewToggle.append(leerBtn, esquemaBtn);
+
   const status = el('p', '', 'meta');
   status.setAttribute('role', 'status');
   const goalsText = el('p', '', 'book-goals');
@@ -2208,7 +2269,7 @@ function createBookPlace() {
     return input;
   });
   const hint = el('p', GOALS_HINT, 'meta');
-  head.append(heading, goalsText, goalsBox, hint, status);
+  head.append(heading, viewToggle, goalsText, goalsBox, hint, status);
 
   // The contents: beside the text from 64em, a drawer under it.
   const toggle = el('button', 'Contenido', 'book-toc-toggle');
@@ -2224,9 +2285,64 @@ function createBookPlace() {
   const text = el('div', undefined, 'book-text');
   const layout = el('div', undefined, 'book-layout');
   layout.append(toc, text);
-  node.append(head, toggle, layout);
 
-  const state = { book: null, seq: 0, sections: [] };
+  // Esquema view container
+  const outlineContainer = el('div', undefined, 'book-outline');
+  outlineContainer.hidden = true;
+
+  let outlineFilter = 'all';
+  const filterBox = el('div', undefined, 'outline-filter');
+  filterBox.setAttribute('role', 'group');
+  filterBox.setAttribute('aria-label', 'Filtrar por estado');
+  const filterButtons = [
+    ['all', 'Todas'],
+    ['draft', 'Borrador'],
+    ['revised', 'Revisado'],
+    ['final', 'Terminado'],
+  ].map(([val, label]) => {
+    const b = el('button', label);
+    b.type = 'button';
+    b.filterValue = val;
+    b.setAttribute('aria-pressed', String(val === outlineFilter));
+    b.addEventListener('click', () => {
+      outlineFilter = val;
+      for (const btn of filterButtons) {
+        btn.setAttribute('aria-pressed', String(btn.filterValue === val));
+      }
+      applyOutlineFilter();
+    });
+    filterBox.append(b);
+    return b;
+  });
+
+  const outlineTotal = el('p', '', 'outline-total');
+  const outlineStatus = el('p', '', 'meta outline-status-line');
+  outlineStatus.setAttribute('role', 'status');
+  const outlineList = el('div', undefined, 'outline-list');
+  outlineContainer.append(filterBox, outlineTotal, outlineStatus, outlineList);
+
+  node.append(head, toggle, layout, outlineContainer);
+
+  const state = { book: null, seq: 0, sections: [], data: null, version: null };
+  let outlineRows = [];
+
+  function setView(view) {
+    writeBookView(view);
+    leerBtn.setAttribute('aria-pressed', String(view === 'read'));
+    esquemaBtn.setAttribute('aria-pressed', String(view === 'outline'));
+    if (view === 'read') {
+      layout.hidden = false;
+      toggle.hidden = false;
+      outlineContainer.hidden = true;
+    } else {
+      layout.hidden = true;
+      toggle.hidden = true;
+      outlineContainer.hidden = false;
+    }
+  }
+  leerBtn.addEventListener('click', () => setView('read'));
+  esquemaBtn.addEventListener('click', () => setView('outline'));
+  setView(readBookView());
 
   function setDrawer(open, back) {
     node.setAttribute('data-toc', open ? 'open' : 'closed');
@@ -2251,6 +2367,184 @@ function createBookPlace() {
     // The last writing mode, with the caret at the start of that scene.
     return setMode(lastWritingMode, { file, focus: true, at: { line: 1, column: 1, length: 0 } })
       .catch((error) => showError(error.message));
+  }
+
+  function applyOutlineFilter() {
+    for (const r of outlineRows) {
+      if (outlineFilter === 'all') {
+        r.hidden = false;
+      } else {
+        r.hidden = r.sceneStatus !== outlineFilter;
+      }
+    }
+  }
+
+  async function reloadOutline() {
+    const book = state.book;
+    if (!book) return;
+    const data = await api('/books/' + book + '/manuscript');
+    if (book !== state.book) return;
+    state.data = data;
+    state.version = data.version || null;
+    fill(book, data);
+    fillOutline(book, data);
+    bookGoals.record(book, data.total_words);
+  }
+
+  async function changeStructure(op, onError) {
+    const book = state.book;
+    outlineStatus.textContent = '';
+    try {
+      const payload = Object.assign({ version: state.version }, op);
+      const done = await api('/books/' + book + '/structure', payload);
+      if (book !== state.book) return null;
+      if (done && done.tree) {
+        state.version = done.tree.version;
+      }
+      await reloadOutline();
+      return done;
+    } catch (error) {
+      if (error.status === 409) {
+        outlineStatus.textContent = 'El libro ha cambiado en otro lugar. Se ha vuelto a cargar; repite el cambio.';
+        await reloadOutline().catch(() => {});
+      } else {
+        outlineStatus.textContent = 'No se ha guardado: ' + error.message;
+      }
+      if (typeof onError === 'function') onError(error);
+      return null;
+    }
+  }
+
+  function fillOutline(book, data) {
+    outlineList.replaceChildren();
+    outlineRows = [];
+    if (!data || !data.scenes.length) {
+      outlineTotal.textContent = '';
+      return;
+    }
+    const totalWords = data.total_words;
+    let totalDone = 0;
+    for (const s of data.scenes) {
+      if (s.status === 'final') totalDone++;
+    }
+    outlineTotal.textContent = 'Total del libro: ' + groupedCount(totalWords, 'palabra', 'palabras') + ' · ' + totalDone + ' ' + (totalDone === 1 ? 'terminada' : 'terminadas');
+
+    const groups = [];
+    let currentGroup = null;
+    for (const scene of data.scenes) {
+      const ch = scene.chapter || null;
+      if (!currentGroup || currentGroup.title !== ch) {
+        currentGroup = { title: ch, scenes: [] };
+        groups.push(currentGroup);
+      }
+      currentGroup.scenes.push(scene);
+    }
+
+    let hasNamedChapters = false;
+    for (const grp of groups) {
+      if (grp.title) { hasNamedChapters = true; break; }
+    }
+
+    for (const grp of groups) {
+      const chapSection = el('section', undefined, 'outline-chapter');
+      let chapWords = 0;
+      let chapDone = 0;
+      for (const s of grp.scenes) {
+        chapWords += s.words;
+        if (s.status === 'final') chapDone++;
+      }
+      if (grp.title) {
+        chapSection.append(el('h3', grp.title, 'outline-chapter-title'));
+      } else if (hasNamedChapters) {
+        chapSection.append(el('h3', 'Sin capítulo', 'outline-chapter-title'));
+      }
+      const chapMetaText = groupedCount(chapWords, 'palabra', 'palabras') + ' · ' + chapDone + ' ' + (chapDone === 1 ? 'terminada' : 'terminadas');
+      chapSection.append(el('p', chapMetaText, 'meta outline-chapter-meta'));
+
+      for (const scene of grp.scenes) {
+        const row = el('div', undefined, 'outline-row');
+        row.sceneStatus = scene.status || 'draft';
+        outlineRows.push(row);
+
+        const info = el('div', undefined, 'outline-scene-info');
+        const titleSpan = el('span', scene.title, 'outline-title');
+        const wordsSpan = el('span', groupedCount(scene.words, 'palabra', 'palabras'), 'meta outline-words');
+        info.append(titleSpan, wordsSpan);
+
+        const actions = el('div', undefined, 'outline-actions');
+        const statusSelect = el('select', undefined, 'outline-status');
+        statusSelect.setAttribute('aria-label', 'Estado: ' + scene.title);
+        const optDraft = el('option', 'Borrador');
+        optDraft.value = 'draft';
+        optDraft.setAttribute('value', 'draft');
+        const optRevised = el('option', 'Revisado');
+        optRevised.value = 'revised';
+        optRevised.setAttribute('value', 'revised');
+        const optFinal = el('option', 'Terminado');
+        optFinal.value = 'final';
+        optFinal.setAttribute('value', 'final');
+        statusSelect.append(optDraft, optRevised, optFinal);
+        statusSelect.value = scene.status || 'draft';
+        statusSelect.addEventListener('change', () => {
+          changeStructure({ op: 'set_status', file: scene.file, status: statusSelect.value });
+        });
+
+        const synopsisInput = el('input', undefined, 'outline-synopsis');
+        synopsisInput.type = 'text';
+        synopsisInput.value = scene.synopsis || '';
+        synopsisInput.placeholder = 'Sinopsis…';
+        synopsisInput.setAttribute('maxlength', '600');
+        synopsisInput.setAttribute('aria-label', 'Sinopsis: ' + scene.title);
+        let savedSynopsis = scene.synopsis || '';
+        let saving = false;
+
+        async function doSaveSynopsis() {
+          const val = synopsisInput.value.trim();
+          if (val === savedSynopsis || saving) return;
+          saving = true;
+          const prev = savedSynopsis;
+          savedSynopsis = val;
+          try {
+            const done = await changeStructure({ op: 'set_synopsis', file: scene.file, synopsis: val }, (err) => {
+              savedSynopsis = prev;
+              outlineStatus.textContent = 'No se ha guardado: ' + err.message;
+            });
+            if (!done) {
+              savedSynopsis = prev;
+            }
+          } finally {
+            saving = false;
+          }
+        }
+
+        synopsisInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            if (e.preventDefault) e.preventDefault();
+            doSaveSynopsis();
+          } else if (e.key === 'Escape') {
+            if (e.preventDefault) e.preventDefault();
+            synopsisInput.value = savedSynopsis;
+            if (synopsisInput.blur) synopsisInput.blur();
+          }
+        });
+        synopsisInput.addEventListener('blur', () => {
+          doSaveSynopsis();
+        });
+
+        const writeBtn = el('button', 'Escribir aquí', 'outline-write');
+        writeBtn.type = 'button';
+        writeBtn.setAttribute('aria-label', 'Escribir aquí: ' + scene.title);
+        writeBtn.addEventListener('click', () => {
+          write(scene.file);
+        });
+
+        actions.append(statusSelect, synopsisInput, writeBtn);
+        row.append(info, actions);
+        chapSection.append(row);
+      }
+      outlineList.append(chapSection);
+    }
+    applyOutlineFilter();
   }
 
   function fill(book, data) {
@@ -2281,7 +2575,8 @@ function createBookPlace() {
       write_.setAttribute('aria-label', 'Escribir aquí: ' + scene.title);
       write_.addEventListener('click', () => write(scene.file));
       const bar = el('div', undefined, 'book-scene-head');
-      bar.append(title, write_);
+      const badge = el('span', STATUS_LABELS[scene.status] || 'Borrador', 'book-scene-status book-status-' + (scene.status || 'draft'));
+      bar.append(title, badge, write_);
       section.append(bar, meta);
       if (mine !== null) {
         const warn = el('p', 'Sin guardar: se muestra tu versión de esta escena, que aún no está guardada.', 'book-unsaved');
@@ -2336,6 +2631,7 @@ function createBookPlace() {
       if (!book) {
         text.replaceChildren(el('p', 'Elige o crea un libro para verlo entero.', 'meta'));
         tocList.replaceChildren();
+        outlineList.replaceChildren();
         return;
       }
       bookGoals.select(book);
@@ -2349,7 +2645,11 @@ function createBookPlace() {
         return;
       }
       if (seq !== state.seq || book !== selectedBook) return;
+      state.data = data;
+      state.version = data.version || null;
       fill(book, data);
+      fillOutline(book, data);
+      setView(readBookView());
       bookGoals.record(book, data.total_words);
     },
   };

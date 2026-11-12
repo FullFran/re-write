@@ -827,3 +827,177 @@ test('goals: a baseline from an earlier day is replaced, one from today is kept,
   await until(fewer, () => /hoy/.test(goalsText()));
   assert.equal(goalsText(), `${grouped(total)} palabras · hoy −${grouped(2000)}`);
 });
+
+// --- Esquema view inside Libro -------------------------------------------------------------
+
+const outlineBox = () => all(place(), (n) => n.className === 'book-outline')[0];
+const outlineRows = () => outlineBox() ? all(outlineBox(), (n) => /^outline-row( |$)/.test(n.className)) : [];
+
+test('Esquema: the Leer/Esquema toggle is remembered per person in this browser', async (t) => {
+  const { h, session, page } = await quietPage(t);
+  const person = personOf(session);
+  await page.pick('Libro');
+  await until(page, () => sections().length === 2);
+
+  const leerBtn = page.button('Leer', place());
+  const esquemaBtn = page.button('Esquema', place());
+  assert.equal(leerBtn.attrs['aria-pressed'], 'true');
+  assert.equal(esquemaBtn.attrs['aria-pressed'], 'false');
+  assert.equal(outlineBox().hidden, true);
+
+  await page.click('Esquema', place());
+  assert.equal(leerBtn.attrs['aria-pressed'], 'false');
+  assert.equal(esquemaBtn.attrs['aria-pressed'], 'true');
+  assert.equal(outlineBox().hidden, false);
+  assert.equal(page.local.get(`rewrite:book-view:${person}`), 'outline');
+
+  // Reload keeps Esquema view
+  const again = await openPage(h, session, page.local);
+  await again.pick('Libro');
+  await until(again, () => outlineRows().length === 2);
+  const againLeer = again.button('Leer', place());
+  const againEsquema = again.button('Esquema', place());
+  assert.equal(againLeer.attrs['aria-pressed'], 'false');
+  assert.equal(againEsquema.attrs['aria-pressed'], 'true');
+  assert.equal(outlineBox().hidden, false);
+
+  await again.click('Leer', place());
+  assert.equal(again.local.get(`rewrite:book-view:${person}`), 'read');
+});
+
+test('Esquema: reading view badge appears next to each scene heading', async (t) => {
+  const { page } = await quietPage(t);
+  await page.pick('Libro');
+  await until(page, () => sections().length === 2);
+
+  const badges = all(place(), (n) => n.className.includes('book-scene-status'));
+  assert.equal(badges.length, 2);
+  assert.equal(badges[0].textContent, 'Borrador');
+  assert.equal(badges[1].textContent, 'Borrador');
+});
+
+test('Esquema: rows in book order under chapter headings, with totals and Terminado count', async (t) => {
+  const { h, page } = await quietPage(t);
+  const project = Project.open(h.bookDir);
+  const [first, second] = project.scenes();
+  const step = (op: any) => project.editStructure(project.outline().version, op, 'user_fran');
+  step({ op: 'create_chapter', title: 'Capítulo 1' });
+  step({ op: 'move_scene', file: first, chapter: project.outline().chapters[0].id });
+  step({ op: 'set_status', file: first, status: 'final' });
+
+  await page.pick('Libro');
+  await page.click('Esquema', place());
+  await until(page, () => outlineRows().length === 2);
+
+  const titles = all(outlineBox(), (n) => n.className === 'outline-title').map((n) => n.textContent);
+  assert.deepEqual(titles, ['La puerta de Sal', 'El altar']);
+
+  // Chapter heading and counters
+  const chapterMeta = all(outlineBox(), (n) => n.className.includes('outline-chapter-meta'))[0];
+  assert.ok(chapterMeta);
+  assert.match(chapterMeta.textContent, /1 terminada/);
+
+  // Book total
+  const bookMeta = all(outlineBox(), (n) => n.className.includes('outline-total'))[0];
+  assert.ok(bookMeta);
+  assert.match(bookMeta.textContent, /palabras/);
+});
+
+test('Esquema: inline synopsis edit saves on Enter and cancels on Escape', async (t) => {
+  const { h, page } = await quietPage(t);
+  await page.pick('Libro');
+  await page.click('Esquema', place());
+  await until(page, () => outlineRows().length === 2);
+
+  const row = outlineRows()[0];
+  const input = all(row, (n) => n.tagName === 'INPUT' && n.className.includes('outline-synopsis'))[0];
+  assert.ok(input);
+  assert.equal(input.value, '');
+
+  const commitsBefore = Number(git(h.bookDir, 'rev-list', '--count', 'HEAD'));
+  input.value = 'Primera sinopsis';
+  await input.events.keydown?.({ key: 'Enter', preventDefault() {} });
+  await until(page, () => Number(git(h.bookDir, 'rev-list', '--count', 'HEAD')) === commitsBefore + 1);
+
+  const p = Project.open(h.bookDir);
+  assert.equal(p.outline().loose[0].synopsis, 'Primera sinopsis');
+
+  // Escape cancels edit
+  const currentInput = all(outlineRows()[0], (n) => n.tagName === 'INPUT' && n.className.includes('outline-synopsis'))[0];
+  assert.equal(currentInput.value, 'Primera sinopsis');
+  currentInput.value = 'Cambio cancelado';
+  await currentInput.events.keydown?.({ key: 'Escape', preventDefault() {} });
+  assert.equal(currentInput.value, 'Primera sinopsis');
+  assert.equal(Number(git(h.bookDir, 'rev-list', '--count', 'HEAD')), commitsBefore + 1);
+});
+
+test('Esquema: status selector saves', async (t) => {
+  const { h, page } = await quietPage(t);
+  await page.pick('Libro');
+  await page.click('Esquema', place());
+  await until(page, () => outlineRows().length === 2);
+
+  const row = outlineRows()[0];
+  const select = all(row, (n) => n.tagName === 'SELECT' && n.className.includes('outline-status'))[0];
+  assert.ok(select);
+  assert.equal(select.value, 'draft');
+
+  const commitsBefore = Number(git(h.bookDir, 'rev-list', '--count', 'HEAD'));
+  select.value = 'final';
+  await select.events.change?.();
+  await until(page, () => Number(git(h.bookDir, 'rev-list', '--count', 'HEAD')) === commitsBefore + 1);
+
+  const p = Project.open(h.bookDir);
+  assert.equal(p.outline().loose[0].status, 'final');
+});
+
+test('Esquema: filter by status works', async (t) => {
+  const { h, page } = await quietPage(t);
+  const project = Project.open(h.bookDir);
+  const [first] = project.scenes();
+  project.editStructure(project.outline().version, { op: 'set_status', file: first, status: 'final' } as any, 'user_fran');
+
+  await page.pick('Libro');
+  await page.click('Esquema', place());
+  await until(page, () => outlineRows().length === 2);
+
+  // Filter Terminado
+  await page.click('Terminado', outlineBox());
+  const visibleFinal = outlineRows().filter((r) => !r.hidden);
+  assert.equal(visibleFinal.length, 1);
+  assert.match(visibleFinal[0].textContent, /La puerta de Sal/);
+
+  // Filter Borrador
+  await page.click('Borrador', outlineBox());
+  const visibleDraft = outlineRows().filter((r) => !r.hidden);
+  assert.equal(visibleDraft.length, 1);
+  assert.match(visibleDraft[0].textContent, /El altar/);
+
+  // Filter Todas
+  await page.click('Todas', outlineBox());
+  const visibleAll = outlineRows().filter((r) => !r.hidden);
+  assert.equal(visibleAll.length, 2);
+});
+
+test('Esquema: a 409 reloads the outline and a failed save keeps typed synopsis', async (t) => {
+  const { h, page } = await quietPage(t);
+  await page.pick('Libro');
+  await page.click('Esquema', place());
+  await until(page, () => outlineRows().length === 2);
+
+  const row = outlineRows()[0];
+  const input = all(row, (n) => n.tagName === 'INPUT' && n.className.includes('outline-synopsis'))[0];
+
+  // Out-of-band structure change to cause 409
+  const p = Project.open(h.bookDir);
+  p.editStructure(p.outline().version, { op: 'create_chapter', title: 'Conflicto' }, 'user_other');
+
+  input.value = 'Sinopsis con conflicto';
+  await input.events.keydown?.({ key: 'Enter', preventDefault() {} });
+  const status = () => all(outlineBox(), (n) => n.attrs.role === 'status')[0];
+  await until(page, () => (status()?.textContent.length ?? 0) > 0);
+
+  // Failed save keeps typed synopsis in the field
+  assert.equal(input.value, 'Sinopsis con conflicto');
+  assert.match(status().textContent, /volver|cargado|conflicto|cambiado/i);
+});
