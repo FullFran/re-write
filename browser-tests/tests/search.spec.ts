@@ -51,6 +51,10 @@ async function expectTapTargets(page: Page): Promise<void> {
     await expect(box).toBeVisible();
     expect((await box.boundingBox())!.height, String(box)).toBeGreaterThanOrEqual(44);
   }
+  // No control covers another: the close button stands after Siguiente, not over it.
+  const next = (await control(page, 'Siguiente').boundingBox())!;
+  const close = (await control(page, 'Cerrar búsqueda').boundingBox())!;
+  expect(close.x).toBeGreaterThanOrEqual(next.x + next.width);
 }
 
 const noSideScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);

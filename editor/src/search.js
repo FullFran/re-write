@@ -124,7 +124,8 @@ export function createSearchPanel(view) {
   };
 }
 
-// The page's tokens (docs/design.md): controls at least --tap high, 16 px text so iOS does not
+// The page's tokens (docs/design.md), on the same selectors as the package's base theme so they
+// win over it: controls at least --tap high, 16 px text so iOS does not
 // zoom, matches marked with --mark and the current one also outlined (not by colour alone).
 const theme = EditorView.theme({
   '.cm-panels': { backgroundColor: 'var(--paper)', color: 'var(--ink)' },
@@ -132,19 +133,19 @@ const theme = EditorView.theme({
   '.cm-panel.cm-search': { display: 'flex', flexDirection: 'column', gap: 'var(--space-1)', padding: '0 0 var(--space-2)', fontFamily: 'var(--font-ui)', fontSize: 'var(--text-md)' },
   '.cm-search-row': { display: 'flex', alignItems: 'center', gap: 'var(--space-1)', minWidth: '0' },
   '.cm-search-options': { gap: 'var(--space-3)', overflowX: 'auto', overscrollBehaviorX: 'contain' },
-  '.cm-search .cm-textfield': {
+  '.cm-panel.cm-search .cm-textfield': {
     flex: '1 1 8em', minWidth: '0', minHeight: 'var(--tap)', boxSizing: 'border-box', margin: '0', padding: '0 var(--space-3)',
     font: 'inherit', fontSize: 'var(--text-md)', color: 'var(--ink)', backgroundColor: 'var(--paper)',
     border: '1px solid var(--edge)', borderRadius: 'var(--radius)',
   },
-  '.cm-search .cm-button': {
+  '.cm-panel.cm-search .cm-button': {
     flex: 'none', minHeight: 'var(--tap)', margin: '0', padding: '0 var(--space-2)', font: 'inherit', fontSize: 'var(--text-sm)', color: 'var(--ink)',
     backgroundColor: 'var(--paper)', backgroundImage: 'none', border: '1px solid var(--edge)', borderRadius: 'var(--radius)', cursor: 'pointer',
   },
-  '.cm-search .cm-button:hover': { backgroundColor: 'var(--pressed)' },
-  '.cm-search [name=close]': { width: 'var(--tap)', padding: '0', fontSize: 'var(--text-xl)', lineHeight: '1', borderColor: 'transparent' },
-  '.cm-search label': { display: 'inline-flex', flex: 'none', alignItems: 'center', gap: 'var(--space-1)', minHeight: 'var(--tap)', fontSize: 'var(--text-sm)', whiteSpace: 'nowrap', cursor: 'pointer' },
-  '.cm-search input[type=checkbox]': { width: '1.25rem', height: '1.25rem', margin: '0' },
+  '.cm-panel.cm-search .cm-button:hover': { backgroundColor: 'var(--pressed)' },
+  '.cm-panel.cm-search [name=close]': { position: 'static', width: 'var(--tap)', padding: '0', fontSize: 'var(--text-xl)', lineHeight: '1', borderColor: 'transparent' },
+  '.cm-panel.cm-search label': { display: 'inline-flex', flex: 'none', margin: '0', alignItems: 'center', gap: 'var(--space-1)', minHeight: 'var(--tap)', fontSize: 'var(--text-sm)', whiteSpace: 'nowrap', cursor: 'pointer' },
+  '.cm-panel.cm-search input[type=checkbox]': { width: '1.25rem', height: '1.25rem', margin: '0' },
   '.cm-searchMatch': { backgroundColor: 'var(--mark)', borderRadius: '2px' },
   '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'var(--mark)', outline: '2px solid var(--ink)' },
 });
