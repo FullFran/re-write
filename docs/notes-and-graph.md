@@ -89,8 +89,9 @@ A pure, dependency-free module (`src/domain/story-graph.ts`) builds the graph fr
   from the smaller id to the larger, weight = scenes they share).
 - **`as_of_scene`**: keeps the scenes up to and including that scene in reading order, with the
   `mention` and `cooccurs` edges they bring. Notes and `link` edges are always kept. Reading order
-  is the order `list_scenes` and the review page already use: scene paths sorted, which for
-  imported books is chapter order (`scenes/001-...`, `scenes/002-...`).
+  is the book order that `list_scenes` and the review page use ([book structure](book-structure.md)):
+  the manifest order when the book has one, else scene paths sorted, which for imported books is
+  chapter order (`scenes/001-...`, `scenes/002-...`). Archived scenes are not in the graph.
 - **Operations** (edges taken in both directions, any kind): neighbours within depth *k*, a shortest
   path (BFS, fewest steps), degree (distinct neighbours) and the degree ranking, connected
   components, and orphans (notes with no edge at all).

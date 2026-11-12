@@ -275,7 +275,6 @@ test('over HTTP: a person reorganises the book; reads need no write permission, 
 
   const queue = await (await reviewApi(h, '/books/sal', session)).json();
   assert.deepEqual(queue.scenes, [A, B, 'scenes/nueva.md']);
-  assert.deepEqual(queue.archived_scenes, []);
   const archived = await structure(session, { version: done.tree.version, op: 'archive_scene', file: A });
   assert.equal(archived.status, 200);
   const list = await (await reviewApi(h, '/books/sal/scenes', session)).json();

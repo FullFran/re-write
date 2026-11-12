@@ -550,7 +550,7 @@ export function createHandler(
 
     if (parts.length === 2 && req.method === 'GET') {
       const project = open(READ);
-      return conditionalJson(req, res, { ...project.reviewQueue(), scenes: project.scenes(), archived_scenes: project.archivedScenes() });
+      return conditionalJson(req, res, { ...project.reviewQueue(), scenes: project.scenes() });
     }
 
     if (parts.length === 3 && parts[2] === 'findings' && req.method === 'GET') {
