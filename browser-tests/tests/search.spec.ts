@@ -98,6 +98,7 @@ test('desktop: Ctrl+F searches; Reemplazar, Reemplazar todo, case, whole word an
   // Distinguir mayúsculas and Palabra completa: "El" is neither "el" nor the start of "Elena".
   await option(page, 'Distinguir mayúsculas').check();
   await option(page, 'Palabra completa').check();
+  // fill() sends input with no keyup, as pasting or dictating on a phone does: it still searches.
   await field(page, 'Buscar').fill('El');
   await expect(page.locator('.desk .cm-searchMatch')).toHaveCount(2);
   await field(page, 'Reemplazar').fill('Aquel');

@@ -113,6 +113,11 @@ export function createSceneEditor({ text, label, view = 'live', notes = [], onCh
   // The search panel's place, under the formatting toolbar (search.js).
   const searchHost = doc.createElement('div');
   searchHost.className = 'scene-search';
+  // The panel reads its fields on keyup and change only; text pasted, dictated or picked from a
+  // phone keyboard's suggestions comes with no keyup, so every input counts as a change.
+  searchHost.addEventListener('input', (event) => {
+    if (event.target instanceof HTMLInputElement && event.target.type !== 'checkbox') event.target.dispatchEvent(new Event('change'));
+  });
   const editSlot = new Compartment();
 
   const cm = new EditorView({

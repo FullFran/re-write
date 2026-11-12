@@ -154,7 +154,8 @@ the selected rating has `aria-pressed`.
   sight above a phone keyboard. It has the **Buscar** and **Reemplazar** fields, **Siguiente**,
   **Anterior**, **Distinguir mayúsculas**, **Palabra completa**, **Expresión regular**,
   **Reemplazar**, **Reemplazar todo** and **Cerrar búsqueda**; Enter, F3 and Ctrl/Cmd+G go to the
-  next match (with Shift, the previous), Escape closes it and returns to the text. Matches are
+  next match (with Shift, the previous), Escape closes it and returns to the text. The search
+  follows every input, so pasted or dictated words search as typed ones do. Matches are
   marked with `--mark`, the current one also outlined. Every control is `--tap` high with 16 px
   fields. A replacement edits the Markdown as typing would, one undo step per press (**Reemplazar
   todo** included), so saving is unchanged. Read-only text can be searched, not replaced.
