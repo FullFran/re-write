@@ -90,3 +90,36 @@ test('a finding quote is re-anchored by its position', async () => {
   assert.equal((await res.json()).finding.evidence_status, 'valid');
   assert.equal(git(h.bookDir, 'log', '-1', '--format=%s'), `rewrite: reanchor finding ${id}`);
 });
+
+test('reanchor is a review action: an agent token is refused, a stranger and a member of another book get the missing-book 404', async () => {
+  const session = await h.session();
+  const id = await reopenedClaim(session);
+  const agent = await h.access();
+  for (const kind of ['claims', 'findings']) {
+    assert.equal((await reviewApi(h, `/books/sal/${kind}/${id}/reanchor`, agent, { expected: 2, evidence: 0, quote: QUOTE })).status, 401);
+  }
+  const stranger = await h.session('user_other');
+  const missing = await (await reviewApi(h, `/books/nope/claims/${id}/reanchor`, stranger, { expected: 2, quote: QUOTE })).json();
+  const head = git(h.bookDir, 'rev-parse', 'HEAD');
+  const refused = await reviewApi(h, `/books/sal/claims/${id}/reanchor`, stranger, { expected: 2, quote: QUOTE });
+  assert.equal(refused.status, 404);
+  assert.deepEqual(await refused.json(), missing);
+  assert.equal(git(h.bookDir, 'rev-parse', 'HEAD'), head);
+
+  // Another book whose claim could be re-anchored: only its member may do it.
+  const other = join(h.data, 'books', 'otra');
+  cli('init', other, '--title', 'Otra');
+  cli('import', other, join(FIXTURES, 'escena-01.md'));
+  cli('extract', other, '--from', join(FIXTURES, 'annotations.json'));
+  writeFileSync(join(other, SCENE), read(other, SCENE).replace(`${QUOTE}, y conocía`, `Nadie sabía nada.\n\nAquella noche, ${QUOTE}, y conocía`));
+  git(other, 'commit', '-qam', 'edit');
+  h.library.grant('otra', 'user_ana');
+  const owner = await h.session('user_ana');
+  const otherClaim = (await (await reviewApi(h, '/books/otra', owner)).json()).claims.find((c: any) => c.anchor.quote === QUOTE);
+  assert.equal(otherClaim.evidence_status, 'stale');
+  const otherHead = git(other, 'rev-parse', 'HEAD');
+  const cross = await reviewApi(h, `/books/otra/claims/${otherClaim.claim_id}/reanchor`, session, { expected: 0, quote: QUOTE });
+  assert.equal(cross.status, 404);
+  assert.deepEqual(await cross.json(), missing);
+  assert.equal(git(other, 'rev-parse', 'HEAD'), otherHead);
+});

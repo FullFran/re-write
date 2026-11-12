@@ -176,3 +176,35 @@ test('an agent proposes an anchor; a person accepts it, which closes the proposa
   assert.equal(view().anchor_proposals, undefined);
   assert.throws(() => project.proposeAnchor({ target: 'claim', item_id: id, quote: QUOTE, proposed_by: 'user_agent' }), /evidence is valid/);
 });
+
+test('a quote that is in HEAD but not in the scene as it reads on disk is refused', () => {
+  const { dir, project, id } = reopenedAfter(moveSentence);
+  // Changed on disk and not committed: people read this text, so the old HEAD passage is no anchor.
+  writeFileSync(join(dir, SCENE), read(dir, SCENE).replace(QUOTE, 'Elena llevaba muchos años custodiando el puente de Sal'));
+  const count = commits(dir);
+  assert.throws(() => project.reanchorClaim(id, { by: BY, expected: 2, quote: QUOTE }), /as it reads now/);
+  assert.equal(commits(dir), count);
+  assert.equal(stored(dir, id).history.length, 2);
+});
+
+test('re-anchoring the same finding twice keeps both entries, and reads the latest', () => {
+  const dir = extractedBook();
+  const project = Project.open(dir);
+  const quote = 'El guardia escupió sobre las losas';
+  const { created: [id] } = project.proposeFindings([{
+    question: 'motivation', kind: 'fact', statement: 'El guardia desprecia el puente.', evidence: [{ file: SCENE, quote }],
+  }], BY);
+  editScene(dir, (text) => text.replace(`${quote} antes`, `Llovía.\n\n${quote} antes`));
+  project.reanchorFinding(id, { by: BY, expected: 0, evidence: 0, quote });
+  editScene(dir, (text) => text.replace(`Llovía.\n\n${quote}`, `Tronaba.\n\n${quote}`));
+  assert.equal(project.findingViews().find((f) => f.finding_id === id)!.evidence[0].status, 'stale');
+  assert.equal(project.reanchorFinding(id, { by: BY, expected: 1, evidence: 0, quote, note: 'otra vez' }).changed, true);
+
+  const record = JSON.parse(read(dir, `.rewrite/findings/${id}.json`));
+  assert.equal(record.reanchors.length, 2);
+  assert.deepEqual(record.reanchors.map((r: any) => [r.evidence, r.anchor.quote, r.note ?? null]), [[0, quote, null], [0, quote, 'otra vez']]);
+  assert.notEqual(record.reanchors[0].revision, record.reanchors[1].revision);
+  const view = project.findingViews().find((f) => f.finding_id === id)!;
+  assert.equal(view.evidence[0].status, 'valid');
+  assert.equal(view.evidence[0].revision, record.reanchors[1].revision);
+});
