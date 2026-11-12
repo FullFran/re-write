@@ -71,6 +71,10 @@ lists Business, Enterprise and Edu. Check it on the writer's own plan.
   refused at once rather than computed. The
   `chatgpt-graph-suggestions` journey pins this flow.
   See [notes-and-graph.md](notes-and-graph.md).
+- **Stale evidence.** When a scene changed under a claim or finding quote, `list_claims` and
+  `list_findings` show `anchor_suggestion`, the passage the scene most likely means now (or
+  `null`), on items still pending. `propose_anchor` proposes a new literal quote that appears once
+  now; it never changes the item, and the person accepts it at the review URL.
 - **Scene lengths.** `list_scenes` adds `chars`, the length of each scene, so the assistant can plan
   `read_scene` pages of up to 20,000 characters.
 
