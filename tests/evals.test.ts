@@ -109,7 +109,7 @@ test('runner self-test: a tool list that grows past its budget fails the metadat
     server(library, subject) {
       const server = inMemoryBuild.server(library, subject);
       server.registerTool('list_more', {
-        title: 'Ver más', description: `Use this ${'never '.repeat(1000)}`, annotations: { readOnlyHint: true },
+        title: 'Ver más', description: `Use this ${'never '.repeat(2000)}`, annotations: { readOnlyHint: true },
       }, () => ({ content: [{ type: 'text' as const, text: '{}' }] }));
       return server;
     },
@@ -118,7 +118,7 @@ test('runner self-test: a tool list that grows past its budget fails the metadat
   assert.deepEqual(failing(outcome), ['chatgpt-tool-metadata', 'onboarding']);
   const metadata = outcome.journeys.find((item) => item.id === 'chatgpt-tool-metadata')!;
   assert.deepEqual(metadata.checks.filter((check) => check.status === 'FAIL').map((check) => `${check.check}: ${check.note}`), [
-    'the tool list stays under 30 KB: expected at most 30000',
+    'the tool list stays under 36 KB: expected at most 36000',
   ]);
 });
 
