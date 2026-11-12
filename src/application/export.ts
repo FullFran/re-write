@@ -33,15 +33,19 @@ export function exportFilename(title: string, format: ExportFormat): string {
 }
 
 /**
- * The book's outline in reading order. Today the scenes are the sorted scene files in one untitled
- * part; the notes (notas/) are not read at all.
+ * The book's outline in reading order (docs/book-structure.md): one titled part per chapter, then
+ * the scenes outside any chapter as an untitled part. Archived scenes and notes (notas/) are left out.
  */
 export function manuscriptOutline(project: Project): ManuscriptPart[] {
-  const scenes = project.scenes().flatMap((file) => {
+  const book = project.outline();
+  const scenes = (list: { file: string; title: string | null }[]) => list.flatMap(({ file, title }) => {
     const text = project.readScene(file);
-    return text === null ? [] : [{ file, text }];
+    return text === null ? [] : [{ file, text, ...(title ? { title } : {}) }];
   });
-  return [{ scenes }];
+  return [
+    ...book.chapters.map((chapter) => ({ title: chapter.title, scenes: scenes(chapter.scenes) })),
+    { scenes: scenes(book.loose) },
+  ];
 }
 
 /** Compiles the manuscript. Reads only: no commit, no change to any book file. */

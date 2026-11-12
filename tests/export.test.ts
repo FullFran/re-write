@@ -113,6 +113,22 @@ test('exportManuscript: scenes in order, notes excluded, nothing written', () =>
   assert.equal(git(dir, 'status', '--porcelain') + git(dir, 'rev-list', '--all', '--count'), before, 'no commit, no change');
 });
 
+test('exportManuscript follows the book: chapters as headings, book order, archived scenes left out', () => {
+  const dir = fixtureBook();
+  writeFileSync(join(dir, 'scenes', '03-c.md'), 'Tercera.\n');
+  git(dir, 'add', '-A');
+  git(dir, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-qm', 'third');
+  const project = Project.open(dir);
+  const step = (op: any) => project.editStructure(project.outline().version, op, 'user_fran');
+  step({ op: 'create_chapter', title: 'Uno' });
+  const chapter = project.outline().chapters[0].id;
+  step({ op: 'move_scene', file: 'scenes/02-b.md', chapter, position: 0 });
+  step({ op: 'move_scene', file: 'scenes/01-a.md', chapter });
+  step({ op: 'archive_scene', file: 'scenes/03-c.md' });
+  assert.equal(exportManuscript(project, 'md').body.toString(), '# El Puente de Sal\n\n## Uno\n\nSegunda ella.\n\n* * *\n\nPrimera.\n');
+  assert.match(docxParts(exportManuscript(project, 'docx').body)['word/document.xml'], /<w:pStyle w:val="Heading1"\/>.*Uno/);
+});
+
 test('exportFilename is a safe ASCII name from the title', () => {
   assert.equal(exportFilename('¿Qué será, Ñandú?/../x', 'md'), 'Que-sera-Nandu-x.md');
   assert.equal(exportFilename('***', 'docx'), 'libro.docx');

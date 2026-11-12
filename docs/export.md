@@ -7,10 +7,12 @@ no file inside the book.
 ## What goes in
 
 - **Title page**: the book title (`Project.title()`).
-- **Scenes in book order**: `Project.scenes()` today (the sorted scene paths). The compile step is
-  a pure function over an ordered outline, `[{ title?, scenes: [{ file, title?, text }] }]`
-  (`src/domain/manuscript.ts`), so book structure with chapters only has to produce that outline.
-  A part with a `title` is a chapter and gets a heading; a part without one is just its scenes.
+- **Scenes in book order** (`docs/book-structure.md`): one part per chapter of `Project.outline()`,
+  titled with the chapter, then the scenes outside any chapter as an untitled part. Archived scenes
+  are left out. The compile step is a pure function over that ordered outline,
+  `[{ title?, scenes: [{ file, title?, text }] }]` (`src/domain/manuscript.ts`). A part with a
+  `title` is a chapter and gets a heading; a part without one is just its scenes. Scene titles get
+  no heading of their own.
 - **Scene text as written.** Markdown is kept in the `.md` export. Wikilinks become their shown
   text with `displayText` (`src/domain/wikilink.ts`): `[[Elena|la capitana]]` is `la capitana`,
   `[[Elena]]` is `Elena`, `[[Sal#Puerto]]` is `Sal`. Code and embeds stay as written.
