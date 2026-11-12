@@ -2581,6 +2581,46 @@ function watchKeyboard() {
   document.addEventListener('focusout', () => setTimeout(() => update(), 0));
 }
 
+// Exportar libro (docs/export.md): the whole manuscript as a file, in the order of the book.
+// A fetch, not a link: the request needs the session's token.
+async function downloadManuscript(book, format) {
+  const token = await window.Clerk.session.getToken();
+  const res = await fetch('/review/api/books/' + encodeURIComponent(book) + '/export?format=' + format, {
+    headers: { authorization: 'Bearer ' + token },
+  });
+  if (!res.ok) throw new Error('export failed: ' + res.status);
+  const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '');
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name ? name[1] : 'libro.' + format;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportTools(currentBook, say) {
+  const group = el('div', undefined, 'desk-tools');
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', 'Exportar libro');
+  for (const [format, label] of [['md', 'Markdown'], ['docx', 'Word']]) {
+    const choice = el('button', 'Exportar ' + label);
+    choice.type = 'button';
+    choice.title = 'Exportar libro (' + label + ')';
+    choice.addEventListener('click', async () => {
+      if (!currentBook()) return;
+      say('Preparando el libro…');
+      try {
+        await downloadManuscript(currentBook(), format);
+        say('Libro exportado (' + label + ').');
+      } catch {
+        say('No se pudo exportar el libro. Inténtalo de nuevo.');
+      }
+    });
+    group.append(choice);
+  }
+  return group;
+}
+
 function createDesk() {
   const node = el('section', undefined, 'desk');
   node.id = 'desk';
@@ -2627,7 +2667,7 @@ function createDesk() {
   analyseTool.setAttribute('aria-controls', 'desk-analyse');
   const deskStatus = el('p', '', 'meta desk-status');
   deskStatus.setAttribute('role', 'status');
-  head.append(scenes, tools, analyseTool, title, words, deskStatus);
+  head.append(scenes, tools, exportTools(() => state.book, (text) => { deskStatus.textContent = text; }), analyseTool, title, words, deskStatus);
   const analyse = el('section', undefined, 'desk-analyse');
   analyse.id = 'desk-analyse';
   analyse.setAttribute('aria-label', 'Analizar');

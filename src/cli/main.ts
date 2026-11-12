@@ -12,6 +12,7 @@ import type { EntryStatus } from '../hcs/lifecycle.ts';
 import { productProblem, rejectedCandidate } from '../adapters/problems.ts';
 import { ANNOTATION_EXTRACTOR, loadAnnotations } from '../adapters/annotation-extractor.ts';
 import { Library } from '../application/library.ts';
+import { exportManuscript, isExportFormat } from '../application/export.ts';
 import { Project, reviewer } from '../application/project.ts';
 import type { ClaimView, Decision } from '../domain/claim.ts';
 import { VERDICTS, type Finding, type VerdictKind } from '../domain/continuity.ts';
@@ -40,6 +41,9 @@ const USAGE = `RE;write: narrative memory with evidence and human review.
   rewrite show <dir> <proposal-id>           show a proposal and its diff
   rewrite review-proposal <dir> <id> accept|reject [--by <name>] [--note <text>]
   rewrite status <dir>                       show the restored project state
+  rewrite export <dir> --format md|docx --out <file>
+                                             write the manuscript (scenes in book order, links as their shown
+                                             text, notes left out) as Markdown or Word; changes nothing in the book
   rewrite grant <data-dir> <book> <user-id>  give a person access to a book on a server
   rewrite revoke <data-dir> <book> <user-id> remove a person's access to a book; applies to their next call
   rewrite package-grant <data-dir> <entry> <permission>
@@ -311,6 +315,16 @@ async function dispatch(args: string[], values: Record<string, string | boolean 
       (command === 'package-grant' ? grantPermission : revokePermission)(data, need(entry, '<entry>'), need(permission, '<permission>'));
       return { json: { entry, permission }, text: `${command === 'package-grant' ? 'granted' : 'revoked'} ${permission} ${command === 'package-grant' ? 'to' : 'from'} ${entry}` };
     }
+    case 'export': {
+      if (rest.length) throw new UsageError('unexpected export arguments');
+      const format = option('format');
+      if (!isExportFormat(format)) throw new UsageError('--format must be md or docx');
+      const file = need(option('out'), '--out');
+      const project = Project.open(need(dir, '<dir>'));
+      const { body } = exportManuscript(project, format);
+      writeFileSync(file, body);
+      return { json: { file, format, bytes: body.length }, text: `wrote ${file} (${format}, ${body.length} bytes)` };
+    }
     case 'status': {
       const status = statusOf(Project.open(need(dir, '<dir>')));
       return { json: status, text: JSON.stringify(status, null, 2) };
@@ -337,7 +351,7 @@ async function main(): Promise<number> {
         by: { type: 'string' }, note: { type: 'string' }, file: { type: 'string' }, find: { type: 'string' },
         replace: { type: 'string' }, rationale: { type: 'string' }, finding: { type: 'string' },
         state: { type: 'string' }, store: { type: 'string' }, grants: { type: 'string' },
-        mapping: { type: 'string' }, 'dry-run': { type: 'boolean' },
+        mapping: { type: 'string' }, format: { type: 'string' }, 'dry-run': { type: 'boolean' },
       },
     });
   } catch (error) {

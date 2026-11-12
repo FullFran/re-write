@@ -1,4 +1,4 @@
-import { crc32 as nodeCrc32, inflateRawSync } from 'node:zlib';
+import { crc32 as nodeCrc32, deflateRawSync, inflateRawSync } from 'node:zlib';
 
 export interface ZipLimits {
   maxBytes?: number;
@@ -356,4 +356,61 @@ function readZipInternal(
 export function readZip(buffer: Buffer, limits: ZipLimits = {}): ZipEntry[] {
   const counter: ZipCounter = { totalBytes: 0, totalMembers: 0 };
   return readZipInternal(buffer, limits, counter, 0);
+}
+
+export interface ZipMember {
+  name: string;
+  data: Buffer;
+}
+
+/**
+ * Writes a ZIP archive (deflate, UTF-8 names, no Zip64). Deterministic: every member carries the
+ * DOS epoch (1980-01-01), so the same members give the same bytes. Names are used as given and
+ * must be relative; the reader above refuses anything else.
+ */
+export function writeZip(members: ZipMember[]): Buffer {
+  const parts: Buffer[] = [];
+  const central: Buffer[] = [];
+  let offset = 0;
+  for (const { name, data } of members) {
+    const nameBytes = Buffer.from(name, 'utf8');
+    const packed = data.length ? deflateRawSync(data) : Buffer.alloc(0);
+    const method = data.length ? 8 : 0;
+    const crc = computeCrc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4); // version needed
+    local.writeUInt16LE(0x0800, 6); // UTF-8 names
+    local.writeUInt16LE(method, 8);
+    local.writeUInt16LE(0, 10); // time 00:00:00
+    local.writeUInt16LE(0x0021, 12); // date 1980-01-01
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(packed.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBytes.length, 26);
+    const entry = Buffer.alloc(46);
+    entry.writeUInt32LE(0x02014b50, 0);
+    entry.writeUInt16LE(20, 4); // version made by
+    entry.writeUInt16LE(20, 6);
+    entry.writeUInt16LE(0x0800, 8);
+    entry.writeUInt16LE(method, 10);
+    entry.writeUInt16LE(0, 12);
+    entry.writeUInt16LE(0x0021, 14);
+    entry.writeUInt32LE(crc, 16);
+    entry.writeUInt32LE(packed.length, 20);
+    entry.writeUInt32LE(data.length, 24);
+    entry.writeUInt16LE(nameBytes.length, 28);
+    entry.writeUInt32LE(offset, 42);
+    parts.push(local, nameBytes, packed);
+    central.push(entry, nameBytes);
+    offset += 30 + nameBytes.length + packed.length;
+  }
+  const directory = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(members.length, 8);
+  end.writeUInt16LE(members.length, 10);
+  end.writeUInt32LE(directory.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...parts, directory, end]);
 }
