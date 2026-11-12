@@ -75,7 +75,7 @@ See [contribution kinds and module classification](contributions.md) for the per
 
 - `knowledge_order` (`rule:knowledge-order`): a character shows a fact before learning it, by story time, from claims with `knowledge`.
 - `age`, `duration` (`rule:attribute-growth`): claims with `attribute.name` `edad` or `años_en` about the same subject (and `about`, and unit) may grow as story time moves forward, never shrink, and must agree at the same story time. Without story time the order is unknown, so a difference is `insufficient_evidence`. Growth is not checked against elapsed story time, because story time has no unit.
-- `date` (`rule:date-order`): `fecha` values about the same subject keep the order story time gives them. Partial dates compare on the parts both have, so `1888` and `1888-03-04` do not conflict.
+- `date` (`rule:date-order`): `fecha` values about the same subject keep the order story time gives them. Partial dates compare on the parts both have, so `1888` and `1888-03-04` do not conflict. A `fecha` claim without story time is skipped: it has no order to contradict.
 - `place` (`rule:attribute-fixed`): a `lugar` about the same subject (for things that do not move, such as a building) has one value, compared without case or accents.
 
 Only narrated facts are compared: a belief, rumor, lie or inference that disagrees with a narrated fact may be the point, and is not reported. Each group is sorted by story time once and swept, so the work is n log n per subject.
@@ -89,11 +89,13 @@ The optional claim field `attribute` carries what these rules read; claims witho
 | Field | Meaning |
 | --- | --- |
 | `name` | `edad` (an age), `años_en` (how long something has lasted), `lugar` (where a thing that does not move is), `fecha` (when it happens) |
-| `value` | `edad`, `años_en`: digits or simple Spanish number words up to 199 (`"once"`, `11`, `"cuarenta y dos"`); `fecha`: `YYYY`, `YYYY-MM`, `YYYY-MM-DD` or a number; `lugar`: a stable key, the same across claims |
+| `value` | `edad`, `años_en`: a whole number from 0 to 200, as digits without separators or simple Spanish number words up to 199 (`"once"`, `11`, `"cuarenta y dos"`); `"1.000"` and `"1,5"` are refused, not guessed, because in Spanish the dot groups thousands and the comma marks decimals. `fecha`: a real calendar date as `YYYY`, `YYYY-MM` or `YYYY-MM-DD` (`1888-02-31` is refused), or a whole number. `lugar`: a stable key, the same across claims |
 | `unit` | `edad`, `años_en` only: `años` (default), `meses`, `semanas` or `días`; values in different units are not compared |
 | `about` | optional stable key for what the value is about, for example the place of `años_en` |
 
-`propose_claims` and annotation files (`rewrite extract --from`) accept it; a value that cannot be read rejects that candidate with a reason, and nothing about it is stored.
+`propose_claims` and annotation files (`rewrite extract --from`) go through one validator (`validateAttribute` in `src/domain/claim-attribute.ts`): only these four keys, text fields of at most 120 characters with no control or format characters (Unicode `Cc`, `Cf`), trimmed. A candidate that fails is rejected with its reason and the `invalid-input` problem, and nothing about it is stored.
+
+A claim stored without an attribute gains one when the same claim (same statement, file and quote) is proposed again with it: the result lists it in `attributed`, the claim records `{ at, by, attribute }` in its append-only `attribute_history`, and its editorial status, editorial history and Canon membership do not change. All changes of one call land in one commit. The same attribute again is `existing`; a different one is refused with a reason starting `attribute_conflict:` (over MCP, the `conflict` problem with status 409) and the stored attribute is kept.
 
 ## 3. Identifiers
 

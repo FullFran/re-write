@@ -64,6 +64,15 @@ export interface Claim extends Omit<ClaimCandidate, 'quote'> {
   proposed_by?: string;
   editorial_status: EditorialStatus;
   history: HistoryEntry[];
+  /** Attributes given to the claim after it was stored, oldest first; only grows. Absent on older records. */
+  attribute_history?: AttributeHistoryEntry[];
+}
+
+/** An attribute attached to a stored claim that had none, by whoever proposed the claim again. */
+export interface AttributeHistoryEntry {
+  at: string;
+  by: string;
+  attribute: ClaimAttribute;
 }
 
 /**

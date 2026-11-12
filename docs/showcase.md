@@ -166,6 +166,8 @@ bridge and the designed communities (loosely: their modularity is clearly positi
 shuffle of the same group sizes); no who-knows-what edge about the mystery before its scene; and
 the continuity check reports exactly A, B and C as knowledge-order problems, and D and E as a
 shrinking duration and a place with two values, each citing both literal quotes in Canon. The copy
-loaded into production on 2026-11-12 has its claims without `attribute`, so there D and E appear
-only after those claims are proposed again with it. The eval journey `showcase-tour` drives the
+loaded into production on 2026-11-12 has its claims without `attribute`: proposing those four
+claims again with `attribute` (through `propose_claims` or `rewrite extract --from` with this
+`annotations.json`) attaches it to the stored claims, listed in `attributed`, without changing
+their review status, and D and E then appear. The eval journey `showcase-tour` drives the
 MCP tools over the book.

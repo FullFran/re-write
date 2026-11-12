@@ -120,6 +120,8 @@ test('two dates that run against story time are a possible contradiction', () =>
   assert.equal(findings[0].classification, 'possible_contradiction');
   assert.match(findings[0].explanation, /1888-02-27/);
   assert.deepEqual(inspectContinuity([dated('1888', 1), dated('1888-05-01', 2), dated('1889', 4)]), []);
+  const undated = claim('aquel día sin momento', { attribute: { name: 'fecha', value: '1700' } });
+  assert.deepEqual(inspectContinuity([dated('1888', 1), undated]), [], 'a fecha without story time is skipped');
 });
 
 test('a belief, rumor or other unnarrated claim that contradicts a narrated fact is not reported', () => {
