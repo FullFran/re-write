@@ -203,7 +203,7 @@
     {
       "name": "propose_claims",
       "title": "Proponer afirmaciones",
-      "description": "Use this when you want to record facts, beliefs or rumors stated in a scene so they can be checked later. Each quote is checked literally against the current text: invalid candidates come back in rejected with a reason, valid ones stay proposed until the person reviews them at review_url. Repeating a call creates no duplicates. Do not use it to accept anything.",
+      "description": "Use this when you want to record facts, beliefs or rumors stated in a scene so they can be checked later. Each quote is checked literally against the current text: invalid candidates come back in rejected with a reason, valid ones stay proposed until the person reviews them at review_url. Repeating a call creates no duplicates. A stored claim proposed again with an attribute it lacked gains it (listed in attributed). Do not use it to accept anything.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -341,29 +341,30 @@
                         {
                           "type": "string",
                           "minLength": 1,
-                          "maxLength": 200
+                          "maxLength": 120
                         },
                         {
                           "type": "number"
                         }
                       ],
-                      "description": "edad and años_en: \"once\" or 11; fecha: YYYY-MM-DD"
+                      "description": "edad and años_en: \"once\" or 11, 0 to 200; fecha: YYYY-MM-DD"
                     },
                     "unit": {
                       "description": "años (default), meses, semanas or días",
                       "type": "string",
-                      "maxLength": 20
+                      "maxLength": 120
                     },
                     "about": {
                       "description": "Stable key, for example the place of años_en",
                       "type": "string",
-                      "maxLength": 200
+                      "maxLength": 120
                     }
                   },
                   "required": [
                     "name",
                     "value"
-                  ]
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -395,6 +396,12 @@
             }
           },
           "existing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "attributed": {
             "type": "array",
             "items": {
               "type": "string"
@@ -1583,7 +1590,7 @@
     "content": [
       {
         "type": "text",
-        "text": "{\n  \"created\": [\n    \"C-491637e11d\"\n  ],\n  \"existing\": [],\n  \"rejected\": [],\n  \"review_url\": \"/review\",\n  \"next_step\": \"Tell the person to open /review to review and decide. You cannot accept or reject anything.\"\n}"
+        "text": "{\n  \"created\": [\n    \"C-491637e11d\"\n  ],\n  \"existing\": [],\n  \"attributed\": [],\n  \"rejected\": [],\n  \"review_url\": \"/review\",\n  \"next_step\": \"Tell the person to open /review to review and decide. You cannot accept or reject anything.\"\n}"
       }
     ],
     "structuredContent": {
@@ -1591,6 +1598,7 @@
         "C-491637e11d"
       ],
       "existing": [],
+      "attributed": [],
       "rejected": [],
       "review_url": "/review",
       "next_step": "Tell the person to open /review to review and decide. You cannot accept or reject anything."
