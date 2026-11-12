@@ -230,7 +230,7 @@ async function dispatch(args: string[], values: Record<string, string | boolean 
       const rejected = result.rejected.map((r) => `\n  rejected: ${r.statement} (${r.reason})`).join('');
       return {
         json: { extractor: extraction.extractor, ...result, rejected: result.rejected.map(rejectedCandidate) },
-        text: `extractor: ${extraction.extractor}${extraction.extractor === ANNOTATION_EXTRACTOR ? ' (hand annotations, no LLM)' : ''}\ncreated: ${result.created.length}; existing: ${result.existing.length}; rejected: ${result.rejected.length}${rejected}`,
+        text: `extractor: ${extraction.extractor}${extraction.extractor === ANNOTATION_EXTRACTOR ? ' (hand annotations, no LLM)' : ''}\ncreated: ${result.created.length}; existing: ${result.existing.length}; attributed: ${result.attributed.length}; rejected: ${result.rejected.length}${rejected}`,
       };
     }
     case 'claims': {
