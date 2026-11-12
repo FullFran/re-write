@@ -29,7 +29,9 @@ import { productProblem } from './problems.ts';
 import { inspectNotion, loadNotionChapters, parseNotionMapping, type NotionMapping } from '../application/notion-export.ts';
 import { chapterFilename, convertToMarkdown, importBook } from '../application/book-import.ts';
 import { SCENE_EDIT } from '../application/decision.ts';
-import { SceneConflictError, SceneEditRefusal, SceneNotFoundError } from '../application/project.ts';
+import { BookStructureConflictError, SceneConflictError, SceneEditRefusal, SceneNotFoundError } from '../application/project.ts';
+import { bookTree } from '../application/book-structure.ts';
+import { BookStructureError, type StructureOp } from '../domain/book.ts';
 import { graphData, graphQuery, GraphQueryError, GraphTooLargeError, notesSummary, noteView } from '../application/story.ts';
 import { InvalidSceneTextError, MAX_SCENE_BYTES } from '../domain/scene-text.ts';
 
@@ -218,7 +220,7 @@ function contextValue(value: string): string {
 /** The scene an item belongs to, or null when the item is not in the book. */
 function itemScene(project: Project, kind: string, id: string): string | null | undefined {
   switch (kind) {
-    case 'scene': return project.scenes().includes(id) ? undefined : null;
+    case 'scene': return project.allScenes().includes(id) ? undefined : null;
     case 'proposal': return project.proposals.get(id)?.file ?? null;
     case 'claim': return project.claims.get(id)?.source_file ?? null;
     case 'narrative_finding': { const record = project.findings.get(id); return record ? record.evidence[0]?.file : null; }
@@ -548,7 +550,7 @@ export function createHandler(
 
     if (parts.length === 2 && req.method === 'GET') {
       const project = open(READ);
-      return conditionalJson(req, res, { ...project.reviewQueue(), scenes: project.scenes() });
+      return conditionalJson(req, res, { ...project.reviewQueue(), scenes: project.scenes(), archived_scenes: project.archivedScenes() });
     }
 
     if (parts.length === 3 && parts[2] === 'findings' && req.method === 'GET') {
@@ -598,6 +600,34 @@ export function createHandler(
 
     if (parts.length === 3 && parts[2] === 'scenes' && req.method === 'GET') {
       return json(res, 200, { scenes: open(READ).scenes() });
+    }
+
+    // The book tree: chapters, scenes, display titles and word counts (docs/book-structure.md).
+    if (parts.length === 3 && parts[2] === 'tree' && req.method === 'GET') {
+      return json(res, 200, bookTree(open(READ)));
+    }
+
+    // A person reorganises the book: one operation, one commit. Human-only: the review door, never an agent.
+    if (parts.length === 3 && parts[2] === 'structure' && req.method === 'POST') {
+      const project = open(SCENE_EDIT);
+      const body = (await readBody(req, 65_536) ?? {}) as Record<string, unknown>;
+      const { version, ...op } = body;
+      if (typeof version !== 'string' || typeof op.op !== 'string') throw new HttpError(400, 'version and op are required');
+      try {
+        const done = project.editStructure(version, op as unknown as StructureOp, subject);
+        return json(res, 200, { ...(done.file ? { file: done.file } : {}), changed: done.changed, tree: bookTree(project, done.outline) });
+      } catch (error) {
+        if (error instanceof BookStructureConflictError) {
+          return json(res, 409, { error: error.message, tree: bookTree(project, error.outline) });
+        }
+        if (error instanceof BookStructureError) {
+          if (error.kind === 'not_found') throw new HttpError(404, error.message);
+          throw new HttpError(400, error.message);
+        }
+        if (error instanceof SceneEditRefusal) return problem(res, 409, library.publicMessage(error));
+        if (error instanceof HttpError || error instanceof HcsFailure) throw error;
+        return problem(res, 409, 'No se pudo cambiar el libro y no se ha cambiado nada. Inténtalo de nuevo.');
+      }
     }
 
     if (parts.length >= 4 && parts[2] === 'scenes' && req.method === 'GET') {
