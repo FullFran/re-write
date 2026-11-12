@@ -180,13 +180,17 @@ for (const size of [{ width: 360, height: 740 }, { width: 390, height: 844 }]) {
     });
     expect(seen.top).toBeGreaterThanOrEqual(seen.vvTop - 1);
     expect(seen.bottom).toBeLessThanOrEqual(seen.vvBottom + 1);
+    // The formatting row gives way, so the text keeps room under the panel.
+    await expect(page.locator('.desk .scene-format')).toBeHidden();
+    expect(seen.vvBottom - seen.bottom, 'room left for the text').toBeGreaterThanOrEqual(120);
     await field(page, 'Reemplazar').fill('Elena Sal');
     await control(page, 'Reemplazar todo').click();
     expect(await noSideScroll(page)).toBe(true);
     await shoot(page, `search-phone-${size.width}-keyboard`);
 
-    // Buscar again closes it.
+    // The keyboard closes: Formato and Buscar come back, and Buscar closes the panel.
     await page.setViewportSize(size);
+    await expect(page.locator('.desk .scene-format')).toBeVisible();
     await buscar.click();
     await expect(panel(page)).toHaveCount(0);
     await page.locator('.desk').getByRole('button', { name: 'Guardar', exact: true }).click();

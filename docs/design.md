@@ -151,9 +151,11 @@ the selected rating has `aria-pressed`.
 - **Search and replace** (`editor/src/search.js`, on `@codemirror/search`): Ctrl/Cmd+F in the
   text, or the toolbar's **Buscar** button (always shown, also on phones, which have no Ctrl+F;
   `aria-expanded`), opens a panel right under the toolbar, inside the sticky head, so it stays in
-  sight above a phone keyboard. It has the **Buscar** and **Reemplazar** fields, **Siguiente**,
-  **Anterior**, **Distinguir mayúsculas**, **Palabra completa**, **Expresión regular**,
-  **Reemplazar**, **Reemplazar todo** and **Cerrar búsqueda**; Enter, F3 and Ctrl/Cmd+G go to the
+  sight above a phone keyboard. Three rows: the **Buscar** field with **Anterior**, **Siguiente**
+  and **Cerrar búsqueda** (×); the **Reemplazar** field with **Reemplazar** and **Reemplazar
+  todo** (Ctrl/Cmd+Enter in the field); **Distinguir mayúsculas**, **Palabra completa** and
+  **Expresión regular**, which scroll sideways on a narrow screen. With a phone keyboard open the
+  formatting row hides while the panel is open, so the text keeps its room. Enter, F3 and Ctrl/Cmd+G go to the
   next match (with Shift, the previous), Escape closes it and returns to the text. The search
   follows every input, so pasted or dictated words search as typed ones do. Matches are
   marked with `--mark`, the current one also outlined. Every control is `--tap` high with 16 px
