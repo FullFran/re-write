@@ -17,6 +17,7 @@ import { ENGINE_HTTP_STATUS, EngineError, EngineManager, type EngineSettings } f
 import { isDirectLoopback, looksLikeEngineToken, parseEngineKey } from './engine-auth.ts';
 import { ACTIVITY_SCENE, EFFORTS, MAX_MODELS, MODEL_ID, type Effort } from './engine-protocol.ts';
 import { ASSISTANT_CSS, ASSISTANT_JS } from './engine-page.ts';
+import { exportManuscript, isExportFormat } from '../application/export.ts';
 import { llmsText } from './llms.ts';
 import { buildMcpServer, logMcpTransport } from './mcp.ts';
 import { recordAuthenticationFailure, recordSubject, recordUnexpectedError, withRequestLog } from './request-log.ts';
@@ -556,6 +557,21 @@ export function createHandler(
     if (parts.length === 3 && parts[2] === 'findings' && req.method === 'GET') {
       const project = open(READ);
       return json(res, 200, { findings: project.findingViews() });
+    }
+
+    // The manuscript as a download (docs/export.md); without `format` this URL is the findings JSON below.
+    if (parts.length === 3 && parts[2] === 'export' && req.method === 'GET'
+      && new URL(req.url ?? '/', 'http://localhost').searchParams.has('format')) {
+      const project = open(READ);
+      const format = new URL(req.url ?? '/', 'http://localhost').searchParams.get('format');
+      if (!isExportFormat(format)) throw new HttpError(400, 'format must be md or docx');
+      const manuscript = exportManuscript(project, format);
+      res.statusCode = 200;
+      res.setHeader('content-type', manuscript.contentType);
+      res.setHeader('content-disposition', `attachment; filename="${manuscript.filename}"`);
+      res.setHeader('cache-control', 'no-store');
+      res.end(manuscript.body);
+      return;
     }
 
     if (

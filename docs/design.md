@@ -304,6 +304,11 @@ Issue #115, slice 2 ([notes and graph](notes-and-graph.md)).
   both writing modes, show a panel over the text (`aria-expanded`, `aria-controls="desk-panel"`);
   the editor stays mounted behind it, so text, cursor and undo history stay. **Volver al texto**
   closes it. The panel's heading takes the focus when it opens.
+- **Exportar libro**, a group (`aria-label="Exportar libro"`) of two buttons, **Exportar
+  Markdown** and **Exportar Word**, next to Notas and Grafo in the desk's head in both writing
+  modes. Each downloads the whole manuscript (scenes in book order, links as their shown text, no
+  notes) with the session's token and says so in the desk's status line (**Libro exportado**).
+  It reads only: no commit, no change to the book. See `docs/export.md`.
 - **Notas** groups the notes by type (Personajes, Lugares, Objetos, Tramas, Otras, with counts)
   and lists each note's aliases. A note opens in the same editor as a scene, with the same views,
   draft, save, conflict and banner rules; the scene list then reads **Nota: <name>**.
