@@ -8,6 +8,7 @@ import {
   claimId, currentAnchor, EPISTEMIC_KINDS, isCanon, nextEditorialStatus, reopenTransition, StaleStateError,
   type Claim, type ClaimCandidate, type ClaimView, type Decision,
 } from '../domain/claim.ts';
+import { validateAttribute } from '../domain/claim-attribute.ts';
 import { verdictFields, CONTINUITY_VERDICTS, InvalidFindingVerdictError, inspectContinuity, type Finding, type Verdict, type VerdictHistoryEntry, type VerdictKind } from '../domain/continuity.ts';
 import { applyChange, inverseChange, proposalId, type Proposal } from '../domain/proposal.ts';
 import { checkSceneText, isExactUtf8 } from '../domain/scene-text.ts';
@@ -340,6 +341,7 @@ export class Project {
     if (!EPISTEMIC_KINDS.includes(candidate.epistemic_kind)) {
       throw new Error(`unknown epistemic_kind: ${candidate.epistemic_kind}`);
     }
+    if (candidate.attribute !== undefined) validateAttribute(candidate.attribute);
     const file = this.scenePath(candidate.source_file);
     const text = this.git.showAt(revision, file);
     if (text === null) throw new Error(`${file} not found at revision ${revision}`);

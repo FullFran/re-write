@@ -12,6 +12,7 @@ import type { Library } from '../application/library.ts';
 import { decide, enforce, ForbiddenError } from '../application/decision.ts';
 import { EPISTEMIC_KINDS, type ClaimCandidate } from '../domain/claim.ts';
 import { ANALYSIS_GUIDE } from '../domain/analysis-guide.ts';
+import { ATTRIBUTE_NAMES } from '../domain/claim-attribute.ts';
 import { FINDING_QUESTIONS, FINDING_KINDS, type FindingCandidate } from '../domain/finding.ts';
 import { neighbors, orphans, shortestPath } from '../domain/story-graph.ts';
 import { CENTRAL_METRICS, graphOf, knowsOf, MAX_SUGGESTIONS, nodeFor, notesSummary, noteView, ranking, suggestionsOf } from '../application/story.ts';
@@ -122,6 +123,12 @@ const candidateSchema = z.object({
     fact: z.string().min(1).max(200).describe('Stable key for the fact, the same across claims'),
     mode: z.enum(['displays', 'acquires', 'hears']).describe('displays: shows they know it; acquires: learns it; hears: is told it'),
   }).optional().describe('How this claim bears on what a character knows'),
+  attribute: z.object({
+    name: z.enum(ATTRIBUTE_NAMES).describe('edad: age; años_en: how long; lugar: where a thing that does not move is; fecha: when'),
+    value: z.union([z.string().min(1).max(200), z.number().finite()]).describe('edad and años_en: "once" or 11; fecha: YYYY-MM-DD'),
+    unit: z.string().max(20).optional().describe('años (default), meses, semanas or días'),
+    about: z.string().max(200).optional().describe('Stable key, for example the place of años_en'),
+  }).optional().describe('Structured value continuity checks compare across narrated facts'),
 });
 
 const findingEvidenceSchema = z.object({
