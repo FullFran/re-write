@@ -53,6 +53,7 @@ CI runs the same command in the `eval` job, fails on any `FAIL`, and keeps `resu
 | `stale-evidence` | Stale evidence never looks current. |
 | `retried-proposal` | A retried proposal is not duplicated. |
 | `rumor-not-canon` | A rumor cannot reach canon. |
+| `continuity-ages-places` | Claims proposed with `attribute` let `inspect_continuity` report a duration that shrinks with story time and a building in two places, citing both quotes with other readings; a rumor that disagrees with a narrated fact is not reported. Its book is `evals/journeys/books/continuidad/`. |
 
 ## ChatGPT-shaped journeys
 
