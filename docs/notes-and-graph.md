@@ -267,7 +267,6 @@ not asserted; on a machine with a GPU they do not occur.
 
 Wherever the manuscript is exported as text, links become their shown text with `displayText`
 (`src/domain/wikilink.ts`): `[[Elena|la capitana]]` becomes `la capitana`, `[[Elena]]` becomes
-`Elena`, `[[Sal#Puerto]]` becomes `Sal`; code and embeds stay as written. Today RE;write has no
-manuscript text export: the only export is the findings JSON, whose quotes are literal evidence and
-are never transformed, because a quote must match the scene text exactly. A future text export must
-use `displayText`.
+`Elena`, `[[Sal#Puerto]]` becomes `Sal`; code and embeds stay as written. The manuscript
+export (`docs/export.md`) applies it. The findings JSON is a different export: its quotes are
+literal evidence and are never transformed, because a quote must match the scene text exactly.
