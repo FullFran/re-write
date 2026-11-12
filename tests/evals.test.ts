@@ -97,7 +97,7 @@ test('runner self-test: a build that allows approval over MCP fails the approval
   assert.match(approval.checks[1].note, /accept_claim/);
   const metadata = broken.journeys.find((item) => item.id === 'chatgpt-tool-metadata')!;
   assert.deepEqual(metadata.checks.filter((check) => check.status === 'FAIL').map((check) => check.check), [
-    'every tool has a title', 'every description starts with Use this', 'only the four proposal tools are write tools',
+    'every tool has a title', 'every description starts with Use this', 'only the five proposal tools are write tools',
   ]);
   assert.deepEqual(broken.summary.journeys, { pass: 10, fail: 3 });
 });

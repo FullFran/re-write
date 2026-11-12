@@ -34,7 +34,7 @@ export const REWRITE_CAPABILITIES = [
   { ref: 'com.fullfran.rewrite.book.read@1', major: 1, provider: 'host', mcpTools: ['list_books', 'list_scenes', 'read_scene'], contract: 'Read books and scenes.' },
   { ref: 'com.fullfran.rewrite.claims.read@1', major: 1, provider: 'host', mcpTools: ['list_claims'], contract: 'Read claims.' },
   { ref: 'com.fullfran.rewrite.claims.propose@1', major: 1, provider: 'host', mcpTools: ['propose_claims'], contract: 'Propose claims.' },
-  { ref: 'com.fullfran.rewrite.revision.propose@1', major: 1, provider: 'host', mcpTools: ['propose_revision', 'list_proposals', 'get_proposal', 'propose_note'], contract: 'Propose revisions and new notes, and inspect proposals.' },
+  { ref: 'com.fullfran.rewrite.revision.propose@1', major: 1, provider: 'host', mcpTools: ['propose_revision', 'list_proposals', 'get_proposal', 'propose_note', 'propose_anchor'], contract: 'Propose revisions, new notes and new anchors, and inspect proposals.' },
   { ref: 'com.fullfran.rewrite.continuity.check@1', major: 1, provider: 'host', movesTo: 'com.fullfran.rewrite.knowledge-order', mcpTools: ['inspect_continuity'], contract: 'Inspect continuity.' },
   { ref: 'com.fullfran.rewrite.findings.read@1', major: 1, provider: 'host', mcpTools: ['list_findings', 'get_analysis_guide'], contract: 'Read narrative findings and analysis guide.' },
   { ref: 'com.fullfran.rewrite.findings.propose@1', major: 1, provider: 'host', mcpTools: ['propose_findings'], contract: 'Propose narrative findings.' },

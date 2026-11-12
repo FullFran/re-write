@@ -74,6 +74,7 @@ const TOOL_PERMISSIONS: Record<string, string> = {
   propose_claims: 'com.fullfran.rewrite.claims.propose',
   propose_findings: 'com.fullfran.rewrite.findings.propose',
   propose_revision: 'com.fullfran.rewrite.revision.propose',
+  propose_anchor: 'com.fullfran.rewrite.revision.propose',
 };
 
 /** Log only known protocol/tool identifiers, never user-supplied unknown names. */
@@ -322,6 +323,26 @@ export function buildMcpServer(library: Library, subject: string, capabilities: 
       rationale: args.rationale,
       finding_id: args.finding_id,
       proposed_by: subject,
+    }),
+    ...review,
+  })));
+
+  register('propose_anchor', {
+    title: 'Proponer nuevo anclaje',
+    description: 'Use this when a claim or finding is stale or orphaned (list_claims, list_findings) and its passage is still in the scene: proposes a new literal quote, which must appear only once now. It never changes the claim or finding: the person accepts it at review_url. Repeating a call creates no duplicates.',
+    inputSchema: {
+      book,
+      target: z.enum(['claim', 'finding']).describe('What to re-anchor'),
+      item_id: z.string().min(1).max(40).describe('claim_id from list_claims or finding_id from list_findings'),
+      evidence: z.number().int().min(0).max(49).optional().describe('For a finding: position of the quote in its evidence, from 0'),
+      quote: text.describe('Literal text from the scene as it reads now; anchor_suggestion is a good start'),
+      rationale: text.optional().describe('Why this passage, in a sentence for the person reviewing'),
+    },
+    outputSchema: resultSchema({ proposal: item, created: z.boolean(), ...toReview }),
+    annotations: proposing,
+  }, (args) => data(() => ({
+    ...library.open(args.book, subject).proposeAnchor({
+      target: args.target, item_id: args.item_id, evidence: args.evidence, quote: args.quote, rationale: args.rationale, proposed_by: subject,
     }),
     ...review,
   })));
