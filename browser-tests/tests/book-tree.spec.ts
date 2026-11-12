@@ -9,14 +9,14 @@ const SCENE = 'scenes/escena-01.md';
 const OTHER = 'scenes/escena-02.md';
 
 const modeButton = (page: Page, name: string) => page.getByRole('group', { name: 'Modo' }).getByRole('button', { name, exact: true });
-const drawer = (page: Page) => page.getByRole('navigation', { name: 'Libro' });
+const drawer = (page: Page) => page.getByRole('navigation', { name: 'Índice' });
 // The manifest's loose list, or null before the first structural write creates the file.
 const loose = (book: { bytes: (file: string) => Buffer }) => {
   try { return JSON.parse(book.bytes('.rewrite/book.json').toString('utf8')).loose; } catch { return null; }
 };
 // A row's actions show for the open scene or when the row has the focus, never on hover.
 const row = (page: Page, name: string) => drawer(page).locator('.tree-scene', { has: page.locator('.tree-name', { hasText: name }) });
-const toggle = (page: Page) => page.getByRole('group', { name: 'Notas y grafo del libro' }).getByRole('button', { name: 'Libro', exact: true });
+const toggle = (page: Page) => page.getByRole('group', { name: 'Notas y grafo del libro' }).getByRole('button', { name: 'Índice', exact: true });
 
 async function openTree(page: Page, base: string): Promise<void> {
   await page.goto(`${base}/review`);
@@ -68,7 +68,7 @@ test('switching scenes from the tree keeps unsaved text; on a phone the tree is 
   const box = (await drawer(page).boundingBox())!;
   expect(box.x).toBe(0);
   expect(box.width).toBeLessThanOrEqual(390);
-  await drawer(page).getByRole('button', { name: 'Cerrar el libro' }).click();
+  await drawer(page).getByRole('button', { name: 'Cerrar el índice' }).click();
   await expect(drawer(page)).toBeHidden();
 
   const text = page.getByRole('textbox', { name: /^Texto de la escena / });

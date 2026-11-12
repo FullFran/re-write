@@ -34,6 +34,7 @@ import { BookStructureConflictError, SceneConflictError, SceneEditRefusal, Scene
 import { bookTree } from '../application/book-structure.ts';
 import { BookStructureError, type StructureOp } from '../domain/book.ts';
 import { graphData, graphQuery, GraphQueryError, GraphTooLargeError, notesSummary, noteView } from '../application/story.ts';
+import { manuscriptView } from '../application/manuscript-view.ts';
 import { InvalidSceneTextError, MAX_SCENE_BYTES } from '../domain/scene-text.ts';
 
 export interface ServerConfig {
@@ -612,6 +613,14 @@ export function createHandler(
       };
       res.setHeader('content-disposition', `attachment; filename="findings-${book}.json"`);
       return json(res, 200, exportData);
+    }
+
+    // The whole manuscript in one read-only request (the Libro place): scenes in book order with
+    // text, title and word counts. ?text=0 returns the counts only (the goals line). The text sent
+    // is capped (MANUSCRIPT_TEXT_CAP); scenes past it come with text: null and truncated: true.
+    if (parts.length === 3 && parts[2] === 'manuscript' && req.method === 'GET') {
+      const params = new URL(req.url ?? '/', 'http://localhost').searchParams;
+      return json(res, 200, manuscriptView(open(READ), { withText: params.get('text') !== '0' }));
     }
 
     if (parts.length === 3 && parts[2] === 'scenes' && req.method === 'GET') {
