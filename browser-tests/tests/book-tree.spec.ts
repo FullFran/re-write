@@ -10,6 +10,12 @@ const OTHER = 'scenes/escena-02.md';
 
 const modeButton = (page: Page, name: string) => page.getByRole('group', { name: 'Modo' }).getByRole('button', { name, exact: true });
 const drawer = (page: Page) => page.getByRole('navigation', { name: 'Libro' });
+// The manifest's loose list, or null before the first structural write creates the file.
+const loose = (book: { bytes: (file: string) => Buffer }) => {
+  try { return JSON.parse(book.bytes('.rewrite/book.json').toString('utf8')).loose; } catch { return null; }
+};
+// A row's actions show on hover or focus, as a person reaches them.
+const row = (page: Page, name: string) => drawer(page).locator('.tree-scene', { has: page.locator('.tree-name', { hasText: name }) });
 const toggle = (page: Page) => page.getByRole('group', { name: 'Notas y grafo del libro' }).getByRole('button', { name: 'Libro', exact: true });
 
 async function openTree(page: Page, base: string): Promise<void> {
@@ -46,14 +52,14 @@ test('scenes reorder from the keyboard, the focus stays on the control, and a dr
   const down = drawer(page).getByRole('button', { name: 'Bajar «La puerta de Sal»' });
   await down.focus();
   await page.keyboard.press('Enter');
-  await expect.poll(() => JSON.parse(book.bytes('.rewrite/book.json').toString('utf8')).loose).toEqual([OTHER, SCENE]);
+  await expect.poll(() => loose(book)).toEqual([OTHER, SCENE]);
   await expect(drawer(page).getByRole('button', { name: 'Bajar «La puerta de Sal»' })).toBeFocused();
 
   const names = drawer(page).locator('.tree-name');
   await expect(names).toHaveText(['El altar', 'La puerta de Sal']);
   await names.nth(1).dragTo(names.nth(0));
   await expect(names).toHaveText(['La puerta de Sal', 'El altar']);
-  expect(JSON.parse(book.bytes('.rewrite/book.json').toString('utf8')).loose).toEqual([SCENE, OTHER]);
+  await expect.poll(() => loose(book)).toEqual([SCENE, OTHER]);
 });
 
 test('switching scenes from the tree keeps unsaved text; on a phone the tree is a drawer over the text that closes on choosing', async ({ page, book }) => {
@@ -82,6 +88,7 @@ test('switching scenes from the tree keeps unsaved text; on a phone the tree is 
 test('archiving a scene moves it to Archivo and restoring brings it back, with no file deleted', async ({ page, book }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openTree(page, book.base);
+  await row(page, 'El altar').hover();
   await drawer(page).getByRole('button', { name: 'Archivar «El altar»' }).click();
   await expect(drawer(page).getByRole('button', { name: 'Archivo (1)' })).toBeVisible();
   expect(book.bytes(OTHER).length).toBeGreaterThan(0);
