@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Anchor, EvidenceStatus } from './anchor.ts';
+import type { ReanchorOffer } from './reanchor.ts';
 
 export const EPISTEMIC_KINDS = ['narrated_fact', 'belief', 'rumor', 'lie', 'inference'] as const;
 export type EpistemicKind = (typeof EPISTEMIC_KINDS)[number];
@@ -14,12 +15,18 @@ export interface HistoryEntry {
   to: string;
   note?: string;
   /**
-   * Set when a person reopened a decision, or asked to revert an accepted proposal (the status does
-   * not change then); absent on ordinary decisions and on all older records.
+   * Set when a person reopened a decision, asked to revert an accepted proposal, or accepted a new
+   * anchor for a claim (the status does not change on the last two); absent on ordinary decisions
+   * and on all older records.
    */
-  action?: 'reopen' | 'revert';
+  action?: 'reopen' | 'revert' | 'reanchor';
   /** The proposal a `revert` entry created or reopened to undo this one. */
   ref?: string;
+  /** On a `reanchor` entry: the new anchor and the revision it was taken from. The old anchor stays. */
+  anchor?: Anchor;
+  revision?: string;
+  /** On a `reanchor` entry: the anchor proposal it accepted, when it came from one. */
+  proposal?: string;
 }
 
 /** How a claim bears on what a character knows. */
@@ -56,11 +63,24 @@ export interface Claim extends Omit<ClaimCandidate, 'quote'> {
   history: HistoryEntry[];
 }
 
-/** evidence_status is derived from the text on every read and is never stored. */
-export interface ClaimView extends Claim {
+/**
+ * evidence_status is derived from the text on every read and is never stored. `anchor` and `revision`
+ * are the current ones: the latest accepted new anchor, else the original. A proposed claim whose
+ * evidence is not valid also carries a re-anchoring offer.
+ */
+export interface ClaimView extends Claim, Partial<ReanchorOffer> {
   evidence_status: EvidenceStatus;
   evidence_reason: string;
   current_start?: number;
+}
+
+/** The anchor a claim's evidence is read from now: the latest accepted new anchor, else the original. */
+export function currentAnchor(claim: Claim): { anchor: Anchor; revision: string } {
+  for (let i = claim.history.length - 1; i >= 0; i--) {
+    const entry = claim.history[i];
+    if (entry.action === 'reanchor' && entry.anchor && entry.revision) return { anchor: entry.anchor, revision: entry.revision };
+  }
+  return { anchor: claim.anchor, revision: claim.revision };
 }
 
 export function shortHash(prefix: string, ...parts: string[]): string {

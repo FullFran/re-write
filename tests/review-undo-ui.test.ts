@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { cli, FIXTURES, read } from './helpers.ts';
+import { cli, FIXTURES, git, read } from './helpers.ts';
 import { proposeRevision, reviewApi, startHarness, type Harness } from './server-helpers.ts';
 
 // The review page's way back from a decision (#98): undo on the card, revert of a text change
@@ -349,4 +350,82 @@ test('a finding verdict can be taken back; the kept verdict is shown and the fin
   assert.equal(lines.length, 1);
   assert.match(lines[0], /^«Me ayuda» por user_fran · .+ · reabierta por user_fran · /);
   assert.equal(page.buttons(rated, 'Deshacer decisión editorial').length, 1);
+});
+
+// Re-anchoring stale evidence after a reopen (#109).
+const MOVED = 'Elena llevaba once años custodiando el puente de Sal';
+
+function editScene(change: (text: string) => string): void {
+  writeFileSync(join(h.bookDir, SCENE), change(read(h.bookDir, SCENE)));
+  git(h.bookDir, 'commit', '-qam', 'edit');
+}
+
+/** The accepted narrated fact, reopened after its scene changed. */
+async function reopenedFact(change: (text: string) => string) {
+  cli('extract', h.bookDir, '--from', join(FIXTURES, 'annotations.json'));
+  const queue = await (await reviewApi(h, `/books/${BOOK}`, session)).json();
+  const claim = queue.claims.find((c: any) => c.anchor.quote === MOVED);
+  await reviewApi(h, `/books/${BOOK}/claims/${claim.claim_id}`, session, { decision: 'accept', expected: 0 });
+  editScene(change);
+  await reviewApi(h, `/books/${BOOK}/claims/${claim.claim_id}/reopen`, session, { expected: 1 });
+  return claim;
+}
+
+test('a reopened claim whose quote moved shows the old quote and the suggestion; accepting it lets the claim into Canon', async () => {
+  const claim = await reopenedFact((text) => text.replace(`${MOVED}, y conocía`, `Nadie sabía nada.\n\nAquella noche, ${MOVED}, y conocía`));
+  const page = await openPage();
+  const card = page.cardWith(page.section('Afirmaciones por revisar'), claim.statement);
+  assert.ok(card.textContent.includes('Cita anterior:'));
+  assert.ok(card.textContent.includes('Pasaje sugerido en la escena actual:'));
+  assert.equal(page.buttons(card, 'Aceptar').length, 0, 'stale evidence cannot be accepted as it is');
+
+  await page.click(card, 'Aceptar pasaje sugerido');
+  assert.equal(page.posts().at(-1)!.path, `/review/api/books/${BOOK}/claims/${claim.claim_id}/reanchor`);
+  assert.deepEqual(page.posts().at(-1)!.body, { expected: 2, quote: MOVED });
+  const reanchored = page.cardWith(page.section('Afirmaciones por revisar'), claim.statement);
+  assert.ok(reanchored.textContent.includes('Nuevo anclaje aceptado por user_fran'));
+  assert.ok(!reanchored.textContent.includes('Pasaje sugerido'));
+  assert.equal(page.document.activeElement, reanchored, 'focus stays on the card');
+
+  await page.click(reanchored, 'Aceptar');
+  assert.deepEqual(page.posts().at(-1)!.body, { decision: 'accept', expected: 3 });
+  assert.ok(page.cardWith(page.section('Canon'), claim.statement), 'Canon shows it with its new anchor');
+  assert.deepEqual(page.alerts(), []);
+});
+
+test('a reopened claim whose quote was removed says no passage was found and offers nothing to accept', async () => {
+  const claim = await reopenedFact((text) => text.replace(`${MOVED}, y conocía cada grieta de sus piedras.\n\n`, ''));
+  const page = await openPage();
+  const card = page.cardWith(page.section('Afirmaciones por revisar'), claim.statement);
+  assert.ok(card.textContent.includes('No se encontró un pasaje'));
+  assert.equal(page.buttons(card, 'Aceptar pasaje sugerido').length, 0);
+  assert.equal(page.buttons(card, 'Rechazar').length, 1, 'it can still be rejected');
+});
+
+test('an anchor an agent proposed is shown on the card and accepted by the person', async () => {
+  const claim = await reopenedFact((text) => text.replace(`${MOVED}, y conocía`, `Nadie sabía nada.\n\nAquella noche, ${MOVED}, y conocía`));
+  const { proposal } = h.library.open(BOOK, 'user_fran').proposeAnchor({ target: 'claim', item_id: claim.claim_id, quote: MOVED, rationale: 'La frase se movió', proposed_by: 'user_agent' });
+  const page = await openPage();
+  const card = page.cardWith(page.section('Afirmaciones por revisar'), claim.statement);
+  assert.ok(card.textContent.includes('Anclaje propuesto por user_agent · La frase se movió'));
+  await page.click(card, 'Aceptar anclaje propuesto');
+  assert.deepEqual(page.posts().at(-1)!.body, { expected: 2, quote: MOVED, proposal: proposal.anchor_proposal_id });
+  const queue = await (await reviewApi(h, `/books/${BOOK}`, session)).json();
+  assert.equal(queue.claims.find((c: any) => c.claim_id === claim.claim_id).history[2].proposal, proposal.anchor_proposal_id);
+});
+
+test('a stale finding quote is re-anchored from its own evidence box', async () => {
+  const quote = 'El guardia escupió sobre las losas';
+  const { findings: [finding] } = h.library.open(BOOK, 'user_fran').proposeFindings([{
+    question: 'motivation', kind: 'fact', statement: 'El guardia desprecia el puente.', evidence: [{ file: SCENE, quote }],
+  }], 'user_agent');
+  editScene((text) => text.replace(`${quote} antes`, `Llovía.\n\n${quote} antes`));
+  const page = await openPage();
+  const card = page.cardWith(page.section('Hallazgos de la trama'), 'El guardia desprecia el puente.');
+  await page.click(card, 'Aceptar pasaje sugerido');
+  assert.equal(page.posts().at(-1)!.path, `/review/api/books/${BOOK}/findings/${finding.finding_id}/reanchor`);
+  assert.deepEqual(page.posts().at(-1)!.body, { expected: 0, evidence: 0, quote });
+  const after = page.cardWith(page.section('Hallazgos de la trama'), 'El guardia desprecia el puente.');
+  assert.ok(after.textContent.includes('evidencia: válida'));
+  assert.equal(page.buttons(after, 'Aceptar pasaje sugerido').length, 0);
 });

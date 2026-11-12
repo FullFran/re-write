@@ -1,6 +1,7 @@
 import { assessAnchor, matchesRevision, type Anchor, type EvidenceStatus } from './anchor.ts';
 import { shortHash } from './claim.ts';
 import type { Verdict } from './continuity.ts';
+import type { Reanchor, ReanchorOffer } from './reanchor.ts';
 
 export const NARRATIVE_VERDICTS = ['useful', 'noise'] as const;
 
@@ -22,7 +23,7 @@ export interface FindingEvidence {
   anchor: Anchor;
 }
 
-export interface FindingEvidenceView extends FindingEvidence {
+export interface FindingEvidenceView extends FindingEvidence, Partial<ReanchorOffer> {
   status: EvidenceStatus;
   reason: string;
   current_start?: number;
@@ -60,6 +61,8 @@ export interface FindingRecord {
   author: string;
   created_at: string;
   verdict?: FindingVerdict | Verdict;
+  /** New anchors a person accepted, oldest first; `evidence` never changes. Absent on older records. */
+  reanchors?: Reanchor[];
 }
 
 export interface FindingView extends Omit<FindingRecord, 'evidence'> {
@@ -67,6 +70,16 @@ export interface FindingView extends Omit<FindingRecord, 'evidence'> {
   evidence_status: EvidenceStatus;
   /** While a verdict is reopened: the kept verdict, with its history and who reopened it. */
   reopened_verdict?: Verdict;
+}
+
+/** The evidence read now: each quote with its latest accepted new anchor, else the original. */
+export function currentEvidence(finding: FindingRecord): FindingEvidence[] {
+  const evidence = finding.evidence.map((ev) => ({ ...ev }));
+  for (const r of finding.reanchors ?? []) {
+    const ev = r.evidence === undefined ? undefined : evidence[r.evidence];
+    if (ev) evidence[r.evidence!] = { file: ev.file, quote: r.anchor.quote, revision: r.revision, anchor: r.anchor };
+  }
+  return evidence;
 }
 
 /** Content-derived id so retries are harmless. */
@@ -86,7 +99,7 @@ export function viewFinding(
   readScene: (file: string) => string | null,
   showAt?: (rev: string, file: string) => string | null,
 ): FindingView {
-  const evidenceViews: FindingEvidenceView[] = finding.evidence.map((ev) => {
+  const evidenceViews: FindingEvidenceView[] = currentEvidence(finding).map((ev) => {
     if (showAt) {
       const atRevision = showAt(ev.revision, ev.file);
       if (atRevision === null || !matchesRevision(ev.anchor, atRevision)) {

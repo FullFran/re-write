@@ -104,6 +104,7 @@ section, article, .scene-viewer { scroll-margin-top: calc(var(--nav-h) + var(--s
 article:focus { outline: 2px solid var(--ink); outline-offset: 4px; }
 :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 blockquote { margin: var(--space-3) 0; padding: var(--space-1) 0 var(--space-1) var(--space-3); border-left: 3px solid var(--edge); }
+.reanchor { margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px dashed var(--edge); }
 .clickable-quote { cursor: pointer; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
 pre { margin: var(--space-3) 0; padding: var(--space-3); overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); font: var(--text-xs)/1.5 var(--font-code); white-space: pre-wrap; overflow-wrap: anywhere; }
 /* A scene is prose to read, not code. */
@@ -508,7 +509,7 @@ function decisionLog(kind, book, entries) {
   const list = el('ol', undefined, 'meta decision-log');
   list.setAttribute('aria-label', 'Historial de decisiones');
   for (const entry of entries) {
-    const word = entry.action === 'revert' ? 'Reversión pedida' : entry.action === 'reopen' || entry.to === 'proposed' ? 'Reabierta' : entry.to === 'accepted' ? 'Aceptada' : 'Rechazada';
+    const word = entry.action === 'revert' ? 'Reversión pedida' : entry.action === 'reanchor' ? 'Nuevo anclaje aceptado' : entry.action === 'reopen' || entry.to === 'proposed' ? 'Reabierta' : entry.to === 'accepted' ? 'Aceptada' : 'Rechazada';
     const line = el('li', word + ' por ' + entry.by + ' · ' + when(entry.at));
     if (entry.action === 'revert' && entry.ref) line.append(document.createTextNode(' · propuesta inversa '), itemLink(kind, book, entry.ref));
     if (entry.note) line.append(document.createTextNode(' · Nota: "' + entry.note + '"'));
@@ -530,6 +531,38 @@ function reconsiderRow(savedKey, label, run, inHistory) {
   if (shown !== label) action.setAttribute('aria-label', shown + ': ' + label.toLowerCase());
   row.append(action);
   return row;
+}
+
+// Evidence that went stale or orphaned, next to the passage the current scene most likely means
+// now (or none) and the anchors agents proposed. Accepting one records a new anchor; the old one
+// stays in the history. accept(quote, proposalId) posts it with the state this tab saw.
+function reanchorBox(oldQuote, offer, accept) {
+  const box = el('div', undefined, 'reanchor');
+  box.append(el('p', 'La evidencia ya no coincide con la escena. Cita anterior:', 'meta badge-stale'), el('blockquote', oldQuote));
+  const suggestion = offer.anchor_suggestion;
+  if (suggestion) {
+    box.append(el('p', 'Pasaje sugerido en la escena actual:', 'meta'), el('blockquote', suggestion.quote));
+    const row = el('div', undefined, 'actions');
+    row.append(button('Aceptar pasaje sugerido', 'accept', () => accept(suggestion.quote)));
+    box.append(row);
+  } else {
+    box.append(el('p', 'No se encontró un pasaje parecido en la escena actual.', 'meta'));
+  }
+  for (const proposal of offer.anchor_proposals || []) {
+    let detail = 'Anclaje propuesto por ' + proposal.proposed_by;
+    if (proposal.rationale) detail += ' · ' + proposal.rationale;
+    box.append(el('p', detail, 'meta'), el('blockquote', proposal.quote));
+    const row = el('div', undefined, 'actions');
+    row.append(button('Aceptar anclaje propuesto', '', () => accept(proposal.quote, proposal.anchor_proposal_id)));
+    box.append(row);
+  }
+  return box;
+}
+
+async function reanchorItem(path, body, key, card, reload) {
+  await api(path + '/reanchor', body);
+  await reload();
+  focusItem(card.id, key);
 }
 
 // Takes back an editorial decision: the item is pending again and the text never changes.
@@ -716,6 +749,10 @@ function claimCard(book, claim, reload, inSession) {
   const history = claim.history || [];
   if (history.length) card.append(decisionLog('claim', book, history));
   const key = 'claim:' + book + '/' + claim.claim_id;
+  if (claim.anchor_suggestion !== undefined) {
+    card.append(reanchorBox(claim.anchor.quote, claim, (quote, proposal) => reanchorItem('/books/' + book + '/claims/' + claim.claim_id,
+      { expected: history.length, quote, ...(proposal ? { proposal } : {}) }, key, card, reload)));
+  }
   if (claim.editorial_status === 'proposed') {
     const actions = el('div', undefined, 'actions decision');
     const decide = (decision) => () => decideCard('claim', book, claim.claim_id, decision, card, reload, history);
@@ -763,6 +800,11 @@ function narrativeFindingCard(book, finding, reload, openQuote) {
       detail += ' (el texto alrededor de la cita cambió en la escena)';
     }
     evBox.append(quoteEl, el('p', detail, 'meta' + (ev.status === 'stale' || ev.status === 'orphaned' ? ' badge-stale' : '')));
+    if (ev.anchor_suggestion !== undefined) {
+      const evidence = finding.evidence.indexOf(ev);
+      evBox.append(reanchorBox(ev.quote, ev, (quote, proposal) => reanchorItem('/books/' + book + '/findings/' + finding.finding_id,
+        { expected: (finding.reanchors || []).length, evidence, quote, ...(proposal ? { proposal } : {}) }, '', card, reload)));
+    }
     card.append(evBox);
   }
 

@@ -170,7 +170,7 @@ test('the MCP offers reading and proposing, and no way to accept or reject', asy
   assert.deepEqual(names, [
     'get_analysis_guide', 'get_proposal', 'graph_central', 'graph_neighbors', 'graph_orphans', 'graph_path', 'graph_suggest_links', 'inspect_continuity',
     'list_books', 'list_claims', 'list_findings', 'list_notes', 'list_proposals', 'list_scenes',
-    'propose_claims', 'propose_findings', 'propose_note', 'propose_revision', 'read_note', 'read_scene',
+    'propose_anchor', 'propose_claims', 'propose_findings', 'propose_note', 'propose_revision', 'read_note', 'read_scene',
   ]);
   assert.ok(!names.some((name) => /review|accept|reject|apply|verdict/.test(name)));
 });
