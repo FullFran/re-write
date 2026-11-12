@@ -52,24 +52,28 @@
         "why": "Tomás says the signatures are forged on day 9, and on day 13 he swears he knew nothing about them."
       }
     ],
-    "for_a_reader": [
+    "attributes": [
       {
         "id": "D",
-        "kind": "age",
+        "kind": "duration",
+        "subject": "Elena",
+        "method": "rule:attribute-growth",
         "quotes": [
           { "scene": "scenes/001-la-puerta-de-sal.md", "quote": "Elena llevaba once años custodiando el puente de Sal" },
           { "scene": "scenes/019-la-medida-de-la-sal.md", "quote": "que llevaba nueve años en el puente" }
         ],
-        "why": "Eleven years on the bridge in scene 1, nine in scene 19. No rule in RE;write compares durations today."
+        "why": "Eleven years on the bridge in scene 1 (story time 1), nine in scene 19 (story time 18): the duration shrinks as story time moves forward."
       },
       {
         "id": "E",
         "kind": "place",
+        "subject": "Casa del Peso",
+        "method": "rule:attribute-fixed",
         "quotes": [
           { "scene": "scenes/006-la-casa-del-peso.md", "quote": "estaba en la orilla de Sal, en la plaza, frente a la fuente de los tres caños" },
           { "scene": "scenes/017-la-puerta.md", "quote": "al otro lado del río, en Ribera, a recoger el libro" }
         ],
-        "why": "The Casa del Peso stands on the Sal bank in scene 6 and in Ribera in scene 17. No rule in RE;write compares places today."
+        "why": "The Casa del Peso stands on the Sal bank in scene 6 and in Ribera in scene 17: a building with two places."
       }
     ]
   }
