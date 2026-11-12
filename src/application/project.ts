@@ -8,6 +8,7 @@ import {
   claimId, currentAnchor, EPISTEMIC_KINDS, isCanon, nextEditorialStatus, reopenTransition, StaleStateError,
   type Claim, type ClaimCandidate, type ClaimView, type Decision,
 } from '../domain/claim.ts';
+import { sameAttribute, validateAttribute } from '../domain/claim-attribute.ts';
 import { verdictFields, CONTINUITY_VERDICTS, InvalidFindingVerdictError, inspectContinuity, type Finding, type Verdict, type VerdictHistoryEntry, type VerdictKind } from '../domain/continuity.ts';
 import { applyChange, inverseChange, proposalId, type Proposal } from '../domain/proposal.ts';
 import { checkSceneText, isExactUtf8 } from '../domain/scene-text.ts';
@@ -303,20 +304,30 @@ export class Project {
     return twin ? `"${name}" differs from the existing note "${twin}" only by case or accents` : null;
   }
 
-  /** Validates candidates against the committed text and stores them as proposed. */
+  /**
+   * Validates candidates against the committed text and stores them as proposed. A candidate that
+   * matches a stored claim without an attribute gives it that attribute (see attachAttribute); every
+   * change of one call lands in one commit.
+   */
   extractClaims(extraction: Extraction, proposedBy?: string): {
-    created: string[]; existing: string[]; rejected: { statement: string; reason: string }[];
+    created: string[]; existing: string[]; attributed: string[]; rejected: { statement: string; reason: string }[];
   } {
     const revision = this.git.head();
     const created: string[] = [];
     const existing: string[] = [];
+    const attributed: string[] = [];
     const rejected: { statement: string; reason: string }[] = [];
     const built = new Map<string, Claim>();
     for (const candidate of extraction.candidates) {
       try {
         const id = claimId(candidate);
-        if (this.claims.get(id) || built.has(id)) {
-          existing.push(id);
+        const stored = built.get(id) ?? this.claims.get(id);
+        if (stored) {
+          const outcome = this.attachAttribute(stored, candidate, proposedBy ?? extraction.extractor);
+          if (outcome === 'attributed') {
+            built.set(id, stored);
+            if (!created.includes(id) && !attributed.includes(id)) attributed.push(id);
+          } else existing.push(id);
           continue;
         }
         const claim = this.buildClaim(id, candidate, revision, extraction.extractor);
@@ -326,12 +337,32 @@ export class Project {
         rejected.push({ statement: candidate.statement, reason: (error as Error).message });
       }
     }
-    if (created.length) {
-      this.saveRecords(`rewrite: extract ${created.length} claims`, created.map((id) => ['claims', id]), () => {
+    if (built.size) {
+      const message = [created.length ? `extract ${created.length} claims` : '', attributed.length ? `attribute ${attributed.length} claims` : '']
+        .filter(Boolean).join(', ');
+      this.saveRecords(`rewrite: ${message}`, [...built.keys()].map((id) => ['claims', id]), () => {
         for (const [id, claim] of built) this.claims.put(id, claim);
       });
     }
-    return { created, existing, rejected };
+    return { created, existing, attributed, rejected };
+  }
+
+  /**
+   * A stored claim proposed again: without an attribute it takes the candidate's, recorded in its
+   * append-only attribute_history; its editorial status, editorial history and Canon membership do
+   * not change. The same attribute again, or none, is 'existing'; a different one is refused and the
+   * stored attribute is kept.
+   */
+  private attachAttribute(stored: Claim, candidate: ClaimCandidate, by: string): 'attributed' | 'existing' {
+    if (candidate.attribute === undefined) return 'existing';
+    const attribute = validateAttribute(candidate.attribute);
+    if (stored.attribute) {
+      if (sameAttribute(stored.attribute, attribute)) return 'existing';
+      throw new Error(`attribute_conflict: claim ${stored.claim_id} already has attribute ${JSON.stringify(stored.attribute)}; it is kept, so propose this one only if a person changes it`);
+    }
+    stored.attribute = attribute;
+    stored.attribute_history = [...(stored.attribute_history ?? []), { at: new Date().toISOString(), by, attribute }];
+    return 'attributed';
   }
 
   private buildClaim(id: string, candidate: ClaimCandidate, revision: string, extractor: string): Claim {
@@ -340,11 +371,13 @@ export class Project {
     if (!EPISTEMIC_KINDS.includes(candidate.epistemic_kind)) {
       throw new Error(`unknown epistemic_kind: ${candidate.epistemic_kind}`);
     }
+    const attribute = candidate.attribute === undefined ? undefined : validateAttribute(candidate.attribute);
     const file = this.scenePath(candidate.source_file);
     const text = this.git.showAt(revision, file);
     if (text === null) throw new Error(`${file} not found at revision ${revision}`);
     return {
       ...fields,
+      ...(attribute ? { attribute } : {}),
       claim_id: id,
       source_file: file,
       revision,

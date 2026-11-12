@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Anchor, EvidenceStatus } from './anchor.ts';
 import type { ReanchorOffer } from './reanchor.ts';
+import type { ClaimAttribute } from './claim-attribute.ts';
 
 export const EPISTEMIC_KINDS = ['narrated_fact', 'belief', 'rumor', 'lie', 'inference'] as const;
 export type EpistemicKind = (typeof EPISTEMIC_KINDS)[number];
@@ -50,6 +51,8 @@ export interface ClaimCandidate {
   story_time?: number;
   reveal_order?: number;
   knowledge?: KnowledgeLink;
+  /** Optional structured value (age, duration, place, date) that continuity checks compare. */
+  attribute?: ClaimAttribute;
 }
 
 export interface Claim extends Omit<ClaimCandidate, 'quote'> {
@@ -61,6 +64,15 @@ export interface Claim extends Omit<ClaimCandidate, 'quote'> {
   proposed_by?: string;
   editorial_status: EditorialStatus;
   history: HistoryEntry[];
+  /** Attributes given to the claim after it was stored, oldest first; only grows. Absent on older records. */
+  attribute_history?: AttributeHistoryEntry[];
+}
+
+/** An attribute attached to a stored claim that had none, by whoever proposed the claim again. */
+export interface AttributeHistoryEntry {
+  at: string;
+  by: string;
+  attribute: ClaimAttribute;
 }
 
 /**

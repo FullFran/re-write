@@ -53,6 +53,7 @@ CI runs the same command in the `eval` job, fails on any `FAIL`, and keeps `resu
 | `stale-evidence` | Stale evidence never looks current. |
 | `retried-proposal` | A retried proposal is not duplicated. |
 | `rumor-not-canon` | A rumor cannot reach canon. |
+| `continuity-ages-places` | Claims proposed with `attribute` let `inspect_continuity` report a duration that shrinks with story time and a building in two places, citing both quotes with other readings; a rumor that disagrees with a narrated fact is not reported. Its book is `evals/journeys/books/continuidad/`. |
 
 ## ChatGPT-shaped journeys
 
@@ -66,7 +67,7 @@ browser import names them (`evals/journeys/books/capitulos/003-la-carta.md`). Se
 | `notes-and-graph` | Links in scenes become notes only when a person accepts the proposal; backlinks and the graph tools follow the links, `as_of_scene` leaves out later scenes, and reading the graph writes nothing. Its book is `evals/journeys/books/grafo/`. |
 | `chatgpt-graph-suggestions` | Who-knows-what edges come from claims and respect `as_of_scene`, names that match no note are reported instead of guessed, betweenness finds the bridge, link suggestions leave out existing links and carry a literal anchor, and a suggested link reaches the note only as a proposal a person accepts. Its book is `evals/journeys/books/grafo/`. |
 | `showcase-tour` | On the complete showcase novel, notes reach the book only when a person accepts them; the graph answers paths, betweenness and orphans; who-knows-what edges keep the mystery hidden until its scene; the continuity check finds the planted knowledge-order problems; and a finding needs a literal quote. Its book is `fixtures/la-puerta-de-sal/` ([showcase](showcase.md)). |
-| `chatgpt-tool-metadata` | Every tool has a title and says when to use it, only proposals are write tools, the tool list stays under 30 KB, and the first 512 characters of the instructions give the order of calls and the review URL. |
+| `chatgpt-tool-metadata` | Every tool has a title and says when to use it, only proposals are write tools, the tool list stays under 36 KB, and the first 512 characters of the instructions give the order of calls and the review URL. |
 
 The in-memory build gives the server the review URL `https://rewrite.invalid/review`, built from the
 journey resource the same way the HTTP server builds it from its configured origin.

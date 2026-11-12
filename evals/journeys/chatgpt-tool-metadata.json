@@ -11,7 +11,7 @@
         { "name": "every tool has a title", "path": "tools.missing_title", "equals": [] },
         { "name": "every description starts with Use this", "path": "tools.missing_when", "equals": [] },
         { "name": "only the five proposal tools are write tools", "path": "tools.writes", "equals": ["propose_anchor", "propose_claims", "propose_findings", "propose_note", "propose_revision"] },
-        { "name": "the tool list stays under 30 KB", "path": "tools.bytes", "at_most": 30000 },
+        { "name": "the tool list stays under 36 KB", "path": "tools.bytes", "at_most": 36000 },
         { "name": "the instructions head gives the order of calls", "path": "tools.instructions_head", "contains": "list_books, list_scenes, get_analysis_guide, read_scene" },
         { "name": "the instructions head gives the review URL", "path": "tools.instructions_head", "contains": "https://rewrite.invalid/review" },
         { "name": "the instructions head says the agent cannot decide", "path": "tools.instructions_head", "contains": "You cannot accept or reject anything" }

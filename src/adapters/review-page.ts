@@ -936,10 +936,13 @@ function findingsSection(book, findings, reload, openQuote) {
   return box;
 }
 
+const CONTINUITY_KINDS = { knowledge_order: 'Orden del conocimiento', age: 'Edad', duration: 'Duración', date: 'Fechas', place: 'Lugar' };
+
 function findingCard(book, finding, reload) {
   const card = el('article');
   card.append(el('p', finding.explanation));
-  card.append(el('p', 'Posible problema, no un veredicto · ' + finding.classification, 'meta'));
+  const kind = CONTINUITY_KINDS[finding.kind] || finding.kind;
+  card.append(el('p', 'Posible problema, no un veredicto · ' + (kind ? kind + ' · ' : '') + finding.classification, 'meta'));
   askButton(card, { kind: 'finding', id: finding.finding_id, label: 'Posible problema: ' + shortText(finding.explanation) },
     '¿Es un error real o puede ser intencionado? Explícamelo con las citas.');
   for (const c of finding.citations) card.append(quote(c.quote, c.source_file + ' · momento de la historia: ' + (c.story_time ?? 'desconocido') + ' · evidencia: ' + c.evidence_status));

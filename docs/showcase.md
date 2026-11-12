@@ -84,9 +84,10 @@ Knowledge-order problems, which `inspect_continuity` (`rewrite check`) finds:
 - **B.** Marcos Ferrer speaks of the altar on day 8, but Anselmo tells him on day 11.
 - **C.** Tomás says the ledger is forged on day 9, but learns it on day 13.
 
-Problems for a reader or the assistant, which no rule in RE;write checks today:
+Problems the age, duration and place rules find, from claims with `attribute` (see
+[architecture: continuity rules](architecture.md#continuity-rules)):
 
-- **D (an age).** Elena has guarded the bridge eleven years in scene 1 and nine in scene 19.
+- **D (a duration).** Elena has guarded the bridge eleven years in scene 1 and nine in scene 19.
 - **E (a place).** The Casa del Peso stands on the Sal bank in scene 6 and in Ribera in scene 17.
 
 The mystery: where Bruno is. Nothing before scene 14 says it, and no who-knows-what edge about it
@@ -163,5 +164,10 @@ node src/cli/main.ts check <data-dir>/books/la-puerta-de-sal
 appears once; every link resolves except the planted one; the orphans, the shortest path, the top
 bridge and the designed communities (loosely: their modularity is clearly positive and above any
 shuffle of the same group sizes); no who-knows-what edge about the mystery before its scene; and
-the continuity check reports exactly A, B and C. D and E are in Canon with their literal quotes;
-no rule checks them yet. The eval journey `showcase-tour` drives the MCP tools over the book.
+the continuity check reports exactly A, B and C as knowledge-order problems, and D and E as a
+shrinking duration and a place with two values, each citing both literal quotes in Canon. The copy
+loaded into production on 2026-11-12 has its claims without `attribute`: proposing those four
+claims again with `attribute` (through `propose_claims` or `rewrite extract --from` with this
+`annotations.json`) attaches it to the stored claims, listed in `attributed`, without changing
+their review status, and D and E then appear. The eval journey `showcase-tour` drives the
+MCP tools over the book.

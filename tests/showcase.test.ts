@@ -121,7 +121,7 @@ test('the mystery stays hidden until its scene: no who-knows-what edge about it 
 });
 
 test('the continuity check reports exactly the planted knowledge-order problems', () => {
-  const findings = project.check();
+  const findings = project.check().filter((f) => f.kind === 'knowledge_order');
   const planted = expected.continuity.knowledge_order;
   assert.deepEqual(
     findings.map((f) => [f.classification, f.holder, f.fact, f.citations.map((c) => c.quote)]).sort(),
@@ -129,9 +129,18 @@ test('the continuity check reports exactly the planted knowledge-order problems'
   );
 });
 
-test('the problems no rule checks are both in Canon, with their literal quotes, for a reader or the assistant', () => {
+test('the continuity check reports exactly the planted age and place problems, citing both quotes', () => {
+  const findings = project.check().filter((f) => f.kind !== 'knowledge_order');
+  assert.deepEqual(
+    findings.map((f) => [f.kind, f.classification, f.subject, f.method, f.citations.map((c) => [c.source_file, c.quote])]).sort(),
+    expected.continuity.attributes.map((p: any) => [p.kind, 'possible_contradiction', p.subject, p.method, p.quotes.map((q: any) => [q.scene, q.quote])]).sort(),
+  );
+  for (const f of findings) assert.ok(f.citations.every((c) => f.explanation.includes(c.quote)), `${f.kind}: the explanation quotes both sides`);
+});
+
+test('the planted age and place problems are both in Canon, with their literal quotes', () => {
   const canon = project.canon();
-  for (const problem of expected.continuity.for_a_reader) {
+  for (const problem of expected.continuity.attributes) {
     for (const side of problem.quotes) {
       assert.ok(canon.some((c) => c.source_file === side.scene && c.anchor.quote === side.quote), `${problem.id}: «${side.quote}»`);
     }

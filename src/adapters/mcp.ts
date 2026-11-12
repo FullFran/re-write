@@ -12,6 +12,7 @@ import type { Library } from '../application/library.ts';
 import { decide, enforce, ForbiddenError } from '../application/decision.ts';
 import { EPISTEMIC_KINDS, type ClaimCandidate } from '../domain/claim.ts';
 import { ANALYSIS_GUIDE } from '../domain/analysis-guide.ts';
+import { ATTRIBUTE_NAMES, MAX_ATTRIBUTE_TEXT } from '../domain/claim-attribute.ts';
 import { FINDING_QUESTIONS, FINDING_KINDS, type FindingCandidate } from '../domain/finding.ts';
 import { neighbors, orphans, shortestPath } from '../domain/story-graph.ts';
 import { CENTRAL_METRICS, graphOf, knowsOf, MAX_SUGGESTIONS, nodeFor, notesSummary, noteView, ranking, suggestionsOf } from '../application/story.ts';
@@ -58,6 +59,7 @@ function nextStepFor(message: string): string {
   if (/\b(quote|text to change) appears \d+ times\b/.test(message)) return 'Read the scene again with read_scene and copy a longer literal passage around it, character by character, so that it appears only once in the scene; then call the tool again with that passage.';
   if (/quote not found in the scene|text to change was not found in the scene|not literal/i.test(message)) return 'Read the scene again with read_scene and copy, character by character (punctuation and accents included), a passage that is in it now. If the scene changed since you read it, reformulate the proposal from the current text instead of retrying the same one.';
   if (/proposal/i.test(message) && /not found|unknown/i.test(message)) return 'Call list_proposals and use one of its proposal_id values.';
+  if (/^attribute_conflict: /.test(message)) return 'That claim already has an attribute, and it is kept: tell the person both values and let them decide; do not propose it again with another attribute.';
   if (/input validation|invalid arguments/i.test(message)) return 'Fix the arguments named in this message and call the tool again; the allowed values are in the tool input schema.';
   if (/forbidden|not allowed|permission/i.test(message)) return 'This person cannot do this on this book. Tell them to ask the person who runs RE;write for access; do not try another way.';
   return 'Tell the person what failed, in their language, and do not try to work around it.';
@@ -122,6 +124,12 @@ const candidateSchema = z.object({
     fact: z.string().min(1).max(200).describe('Stable key for the fact, the same across claims'),
     mode: z.enum(['displays', 'acquires', 'hears']).describe('displays: shows they know it; acquires: learns it; hears: is told it'),
   }).optional().describe('How this claim bears on what a character knows'),
+  attribute: z.strictObject({
+    name: z.enum(ATTRIBUTE_NAMES).describe('edad: age; años_en: how long; lugar: where a thing that does not move is; fecha: when'),
+    value: z.union([z.string().min(1).max(MAX_ATTRIBUTE_TEXT), z.number().finite()]).describe('edad and años_en: "once" or 11, 0 to 200; fecha: YYYY-MM-DD'),
+    unit: z.string().max(MAX_ATTRIBUTE_TEXT).optional().describe('años (default), meses, semanas or días'),
+    about: z.string().max(MAX_ATTRIBUTE_TEXT).optional().describe('Stable key, for example the place of años_en'),
+  }).optional().describe('Structured value continuity checks compare across narrated facts'),
 });
 
 const findingEvidenceSchema = z.object({
@@ -268,13 +276,13 @@ export function buildMcpServer(library: Library, subject: string, capabilities: 
 
   register('propose_claims', {
     title: 'Proponer afirmaciones',
-    description: 'Use this when you want to record facts, beliefs or rumors stated in a scene so they can be checked later. Each quote is checked literally against the current text: invalid candidates come back in rejected with a reason, valid ones stay proposed until the person reviews them at review_url. Repeating a call creates no duplicates. Do not use it to accept anything.',
+    description: 'Use this when you want to record facts, beliefs or rumors stated in a scene so they can be checked later. Each quote is checked literally against the current text: invalid candidates come back in rejected with a reason, valid ones stay proposed until the person reviews them at review_url. Repeating a call creates no duplicates. A stored claim proposed again with an attribute it lacked gains it (listed in attributed). Do not use it to accept anything.',
     inputSchema: {
       book,
       extractor: z.string().min(1).max(60).regex(/^[\w .-]+$/).describe('Name of this agent, for example chatgpt or opencode. It is recorded as declared and not verified.'),
       candidates: z.array(candidateSchema).min(1).max(50).describe('Up to 50 claims, each with a literal quote'),
     },
-    outputSchema: resultSchema({ created: z.array(z.string()), existing: z.array(z.string()), rejected: z.array(item), ...toReview }),
+    outputSchema: resultSchema({ created: z.array(z.string()), existing: z.array(z.string()), attributed: z.array(z.string()), rejected: z.array(item), ...toReview }),
     annotations: proposing,
   }, (args) => data(() => {
     const result = library.open(args.book, subject).extractClaims(
@@ -284,7 +292,11 @@ export function buildMcpServer(library: Library, subject: string, capabilities: 
     // A rejected candidate gets the next step a tool error with the same message would get.
     const rejected = result.rejected.map((r) => {
       const reason = library.publicMessage(new Error(r.reason));
-      return { ...rejectedCandidate({ ...r, reason }), next_step: nextStepFor(reason) };
+      // A different attribute on a stored claim is a conflict with current state, not bad input.
+      const refused = /^attribute_conflict: /.test(reason)
+        ? { ...r, reason, problem: productProblem(reason, 409, 'conflict') }
+        : rejectedCandidate({ ...r, reason });
+      return { ...refused, next_step: nextStepFor(reason) };
     });
     const hints = [...new Set(rejected.map((r) => r.next_step))];
     const retry = hints.length ? ` For each rejected claim, follow its next_step: ${hints.join(' ')}` : '';
@@ -293,7 +305,7 @@ export function buildMcpServer(library: Library, subject: string, capabilities: 
 
   register('inspect_continuity', {
     title: 'Revisar continuidad',
-    description: `Use this when the person asks about continuity or about who knows what, and when. Looks for knowledge-order problems among the proposed claims (it needs claims with knowledge and story_time). Results are heuristics with other possible readings, not verdicts. ${UNTRUSTED}`,
+    description: `Use this when the person asks about continuity or about who knows what, and when. Looks for knowledge-order problems among the proposed claims (it needs claims with knowledge and story_time). It also compares ages, durations, dates and places across narrated facts (claims with attribute). Results are heuristics with other possible readings, not verdicts. ${UNTRUSTED}`,
     inputSchema: { book, ...page },
     outputSchema: resultSchema(paged('findings')),
     annotations: reading,

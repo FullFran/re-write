@@ -26,11 +26,13 @@ From OpenAI's documentation, read on 2026-11-11:
 | Supports OAuth with CIMD, dynamic client registration or a static client. | Unchanged: Clerk OAuth, protected-resource metadata at `/.well-known/oauth-protected-resource`. |
 
 Not found in OpenAI's documentation: limits on the number of tools, description length or result
-size. The budget is our own: the `chatgpt-tool-metadata` eval keeps the tool list under 30 KB. It was
+size. The budget is our own: the `chatgpt-tool-metadata` eval keeps the tool list under 36 KB. It was
 about 17 KB with 12 tools; the 8 note and graph tools of [notes-and-graph.md](notes-and-graph.md)
 bring it to about 28 KB. It was raised from 28 KB to 30 KB for `graph_suggest_links` rather than
 shortening the untrusted-text sentence, a safety instruction every tool that returns manuscript
-text must keep word for word. About 600 bytes of each tool are fixed schema overhead, so new tools keep
+text must keep word for word. It was raised to 36 KB (about 9k tokens) when `propose_anchor` and the
+claim `attribute` brought it to about 30.6 KB, rather than shortening other tools; the next large
+MCP addition should come with a review of the existing descriptions. About 600 bytes of each tool are fixed schema overhead, so new tools keep
 short descriptions and open output schemas rather than spelling out every field.
 
 Which plans may use write tools is not settled: the developer guide lists Plus, Pro, Business,
@@ -75,6 +77,10 @@ lists Business, Enterprise and Edu. Check it on the writer's own plan.
   `list_findings` show `anchor_suggestion`, the passage the scene most likely means now (or
   `null`), on items still pending. `propose_anchor` proposes a new literal quote that appears once
   now; it never changes the item, and the person accepts it at the review URL.
+- **Continuity.** `inspect_continuity` reports knowledge-order problems and ages, durations,
+  dates or places that contradict across narrated facts. These need claims proposed with the
+  optional `attribute` (`edad`, `años_en`, `lugar` or `fecha`); see
+  [architecture: continuity rules](architecture.md#continuity-rules).
 - **Scene lengths.** `list_scenes` adds `chars`, the length of each scene, so the assistant can plan
   `read_scene` pages of up to 20,000 characters.
 

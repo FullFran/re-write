@@ -1,4 +1,6 @@
 import { shortHash, type ClaimView } from './claim.ts';
+import { inspectAttributes, type AttributeFindingKind, type AttributeMethod } from './attribute-continuity.ts';
+import type { AttributeName } from './claim-attribute.ts';
 
 export type Classification = 'possible_contradiction' | 'insufficient_evidence';
 export const CONTINUITY_VERDICTS = ['confirmed', 'deliberate_mystery', 'false_positive'] as const;
@@ -59,13 +61,9 @@ export interface Citation {
   evidence_status: string;
 }
 
-export interface Finding {
+interface FindingBase {
   finding_id: string;
-  kind: 'knowledge_order';
-  holder: string;
-  fact: string;
   classification: Classification;
-  method: 'rule:knowledge-order';
   explanation: string;
   citations: Citation[];
   alternatives: string[];
@@ -74,6 +72,24 @@ export interface Finding {
   reopened_verdict?: Verdict;
 }
 
+export interface KnowledgeFinding extends FindingBase {
+  kind: 'knowledge_order';
+  holder: string;
+  fact: string;
+  classification: Classification;
+  method: 'rule:knowledge-order';
+}
+
+/** Two narrated facts about the same subject whose ages, durations, dates or places cannot all hold. */
+export interface AttributeFinding extends FindingBase {
+  kind: AttributeFindingKind;
+  subject: string;
+  attribute: AttributeName;
+  method: AttributeMethod;
+}
+
+export type Finding = KnowledgeFinding | AttributeFinding;
+
 const ALTERNATIVES = [
   'insufficient_evidence: the text may not establish when the character learned this',
   'deliberate_mystery: the author may be withholding how the character knows',
@@ -81,7 +97,7 @@ const ALTERNATIVES = [
   'guess_or_lie: the character may be guessing or lying, and turn out to be right by chance',
 ];
 
-function cite(claim: ClaimView): Citation {
+export function cite(claim: ClaimView): Citation {
   return {
     claim_id: claim.claim_id,
     source_file: claim.source_file,
@@ -106,15 +122,19 @@ function earliest(claims: ClaimView[]): ClaimView | undefined {
  * order is known, and otherwise says the evidence is insufficient.
  */
 export function inspectContinuity(claims: ClaimView[]): Finding[] {
+  return [...inspectKnowledgeOrder(claims), ...inspectAttributes(claims)];
+}
+
+function inspectKnowledgeOrder(claims: ClaimView[]): KnowledgeFinding[] {
   const usable = claims.filter((c) =>
     c.knowledge && c.editorial_status !== 'rejected' && c.evidence_status !== 'orphaned');
-  const findings: Finding[] = [];
+  const findings: KnowledgeFinding[] = [];
   for (const shown of usable.filter((c) => c.knowledge!.mode === 'displays')) {
     const { holder, fact } = shown.knowledge!;
     const related = usable.filter((c) => c.knowledge!.holder === holder && c.knowledge!.fact === fact);
     const acquired = related.filter((c) => c.knowledge!.mode === 'acquires');
     const firstAcquired = earliest(acquired);
-    const make = (classification: Classification, explanation: string, cited: ClaimView[]): Finding => ({
+    const make = (classification: Classification, explanation: string, cited: ClaimView[]): KnowledgeFinding => ({
       finding_id: shortHash('F-', holder, fact, shown.claim_id),
       kind: 'knowledge_order',
       holder,
