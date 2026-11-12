@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 import { join } from 'node:path';
-import { cli, FIXTURES, read } from './helpers.ts';
+import { cli, FIXTURES, git, read } from './helpers.ts';
+import { Project } from '../src/application/project.ts';
 import { proposeRevision, reviewApi, startHarness, type Harness } from './server-helpers.ts';
 import { REVIEW_CSS } from '../src/adapters/review-page.ts';
 
@@ -315,6 +316,28 @@ test('a quote in Ayuda selects its text in the editor, and says so when it is no
   assert.match(page.help()!.textContent, /No se encuentra la cita en el texto del editor/);
 });
 
+test('Ayuda names the version each finding, claim and pending change was read from', async (t) => {
+  let proposedAt = '';
+  let changeAt = '';
+  const { page } = await quietPage(t, (h) => {
+    cli('extract', h.bookDir, '--from', join(FIXTURES, 'annotations.json'));
+    proposedAt = git(h.bookDir, 'rev-parse', 'HEAD').slice(0, 10);
+    Project.open(h.bookDir).proposeFindings([{
+      question: 'motivation', kind: 'fact', statement: 'Elena custodia el puente.',
+      evidence: [{ file: SCENE, quote: 'Elena llevaba once años custodiando el puente de Sal' }],
+    }], 'assistant_ophelia');
+    changeAt = git(h.bookDir, 'rev-parse', 'HEAD').slice(0, 10);
+    proposeRevision(h.bookDir, SCENE, 'once años', 'doce años', 'Edad de Elena');
+  });
+  await page.pick('Ayuda RE;write');
+  const metas = page.texts(page.help()!, 'p');
+  assert.ok(metas.some((m) => m.endsWith('evidencia: válida · versión ' + proposedAt)),
+    'the narrative finding names the version its quote was read from: ' + metas.join(' | '));
+  assert.ok(metas.some((m) => /narrated_fact · evidencia: valid · .*versión [0-9a-f]{10}$/.test(m)), 'the claim names its version');
+  assert.ok(metas.some((m) => /momento de la historia: 1 · evidencia: valid · versión [0-9a-f]{10}$/.test(m)), 'a continuity citation names its version');
+  assert.ok(metas.includes('Propuesto sobre la versión ' + changeAt + ' de la escena.'), 'the pending change names the version it was written against');
+});
+
 test('the background refresh updates the review but never the editor, and says when the scene changed elsewhere', async (t) => {
   const { h, session, page } = await quietPage(t);
   await page.pick('Ayuda RE;write');
@@ -378,6 +401,7 @@ test('Analizar in Ayuda shows its scope before sending, and without the engine s
   // Unsaved text is not what the assistant reads: the scope says so.
   await page.type(page.editor()!.value + 'Sin guardar.\n');
   await page.click('Esta escena', box());
+  assert.equal(line(), `Se analizará: escena 01 (${new Intl.NumberFormat('es', { useGrouping: 'always' }).format(words)} palabras)`, 'it counts the saved text the assistant reads');
   assert.match(page.texts(box(), 'p').join('|'), /tus cambios sin guardar no entran/);
 
   await page.click('La selección', box());

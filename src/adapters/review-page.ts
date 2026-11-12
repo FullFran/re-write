@@ -729,6 +729,9 @@ function clickable(node, open) {
   });
 }
 
+// The manuscript version (commit) something was read from, short, as a fragment of a meta line.
+const versionOf = (revision) => (revision ? ' · versión ' + String(revision).slice(0, 10) : '');
+
 function quote(text, detail) {
   const box = el('div');
   box.append(el('blockquote', text), el('p', detail, 'meta'));
@@ -742,7 +745,7 @@ function claimCard(book, claim, reload, inSession) {
   card.append(stateBadge(claim.editorial_status), el('p', claim.statement));
   const reason = outsideCanonReason(claim);
   if (reason) card.append(el('p', 'Fuera del Canon: ' + reason, 'meta'));
-  card.append(quote(claim.anchor.quote, claim.source_file + ' · ' + claim.epistemic_kind + ' · evidencia: ' + claim.evidence_status + ' · propuesto por: ' + claim.extractor));
+  card.append(quote(claim.anchor.quote, claim.source_file + ' · ' + claim.epistemic_kind + ' · evidencia: ' + claim.evidence_status + ' · propuesto por: ' + claim.extractor + versionOf(claim.revision)));
   if (claim.uncertainty) card.append(el('p', 'Incertidumbre: ' + claim.uncertainty, 'meta'));
   askButton(card, { kind: 'claim', id: claim.claim_id, label: 'Afirmación: ' + shortText(claim.statement) },
     '¿Esta afirmación está bien apoyada por el texto? ¿Contradice algo del libro?');
@@ -795,7 +798,7 @@ function narrativeFindingCard(book, finding, reload, openQuote) {
     quoteEl.title = 'Haz clic para ver y resaltar esta cita en la escena';
     if (openQuote) clickable(quoteEl, () => openQuote(ev.file, ev.quote, ev.anchor, ev.status));
     const statusText = ev.status === 'valid' ? 'válida' : (ev.status === 'stale' ? 'desactualizada' : (ev.status === 'orphaned' ? 'la cita ya no está en el texto' : ev.status));
-    let detail = ev.file + ' · evidencia: ' + statusText;
+    let detail = ev.file + ' · evidencia: ' + statusText + versionOf(ev.revision);
     if (ev.status === 'stale') {
       detail += ' (el texto alrededor de la cita cambió en la escena)';
     }
@@ -945,7 +948,7 @@ function findingCard(book, finding, reload) {
   card.append(el('p', 'Posible problema, no un veredicto · ' + (kind ? kind + ' · ' : '') + finding.classification, 'meta'));
   askButton(card, { kind: 'finding', id: finding.finding_id, label: 'Posible problema: ' + shortText(finding.explanation) },
     '¿Es un error real o puede ser intencionado? Explícamelo con las citas.');
-  for (const c of finding.citations) card.append(quote(c.quote, c.source_file + ' · momento de la historia: ' + (c.story_time ?? 'desconocido') + ' · evidencia: ' + c.evidence_status));
+  for (const c of finding.citations) card.append(quote(c.quote, c.source_file + ' · momento de la historia: ' + (c.story_time ?? 'desconocido') + ' · evidencia: ' + c.evidence_status + versionOf(c.revision)));
   const others = el('ul', undefined, 'meta');
   for (const alternative of finding.alternatives) others.append(el('li', alternative));
   card.append(others);
@@ -1017,6 +1020,7 @@ function proposalCard(book, { proposal, diff, applicable }, reload, place) {
     card.append(...proposalReconsider(book, proposal, card, reload, place));
     return card;
   }
+  if (proposal.base_revision) card.append(el('p', 'Propuesto sobre la versión ' + proposal.base_revision.slice(0, 10) + ' de la escena.', 'meta'));
   const actions = el('div', undefined, 'actions decision');
   const decide = (decision) => () => decideCard('proposal', book, proposal.proposal_id, decision, card, reload, history);
   if (applicable) actions.append(button('Aceptar cambio', 'accept', decide('accept')));
@@ -2661,7 +2665,9 @@ function createDesk() {
     if (!editor) return { why: 'Abre una escena para analizarla.' };
     if (scope === 'scene') {
       if (isNote) return { why: 'Una nota no es una escena: analiza la selección o el libro.' };
-      return { line: 'Se analizará: ' + where + ' (' + groupedCount(wordCount(editor.getValue()), 'palabra', 'palabras') + ')', item, prompt: ANALYSE_PROMPTS.scene,
+      // The assistant reads the saved scene, so that is the text counted, not the editor's.
+      const saved = state.saved ? state.saved.text : editor.getValue();
+      return { line: 'Se analizará: ' + where + ' (' + groupedCount(wordCount(saved), 'palabra', 'palabras') + ')', item, prompt: ANALYSE_PROMPTS.scene,
         hint: editor.dirty() ? 'El asistente lee la versión guardada: tus cambios sin guardar no entran. Guarda antes si quieres que los lea.' : 'El asistente lee la versión guardada de la escena.' };
     }
     const selected = editor.getSelection();
@@ -2704,8 +2710,9 @@ function createDesk() {
       return;
     }
     const outcome = await analyseWithAssistant(plan.item, plan.prompt, sendAnalyse);
+    // Name exactly what was sent, so the answer is never read as covering more than that.
     analyseStatus.textContent = outcome === 'sent'
-      ? 'Enviado al asistente. La respuesta aparece en su panel.'
+      ? 'Enviado al asistente: ' + plan.line.replace(/^Se analizará: /, '') + '. La respuesta aparece en su panel.'
       : outcome === 'busy'
         ? 'Ya hay una respuesta en curso. Espera a que termine o detenla.'
         : 'Para analizar, conecta tu propia cuenta de ChatGPT en el panel del asistente; el mensaje queda escrito para enviarlo después. Nunca escribas tu contraseña en RE;write.';
