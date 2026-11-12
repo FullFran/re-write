@@ -95,6 +95,8 @@ const MAX_IMPORT_BODY_BYTES = 10 * 1024 * 1024;
 const MAX_NOTION_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_SCENE_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_NOTE = 2_000;
+// The longest new anchor a person can accept, as for a quote proposed through the MCP.
+const MAX_QUOTE = 4_000;
 const MAX_PROMPT = 8_000;
 const READ = 'com.fullfran.rewrite.book.read';
 const IMPORT = 'com.fullfran.rewrite.book.import';
@@ -836,10 +838,11 @@ export function createHandler(
     const action = parts.length === 5 ? parts[4] : null;
     const reopen = action === 'reopen';
     const proposalAction = kind === 'proposals' && (action === 'revert' || action === 'repropose');
-    if (req.method !== 'POST' || !(parts.length === 4 || reopen || proposalAction)) throw new HttpError(404, 'not found');
+    const reanchor = action === 'reanchor' && (kind === 'claims' || kind === 'findings');
+    if (req.method !== 'POST' || !(parts.length === 4 || reopen || proposalAction || reanchor)) throw new HttpError(404, 'not found');
 
     const project = open(REVIEW_DECIDE);
-    const body = (await readBody(req) ?? {}) as { decision?: unknown; verdict?: unknown; note?: unknown; expected?: unknown };
+    const body = (await readBody(req) ?? {}) as { decision?: unknown; verdict?: unknown; note?: unknown; expected?: unknown; quote?: unknown; evidence?: unknown; proposal?: unknown };
     const note = typeof body.note === 'string' ? body.note : undefined;
     if (note !== undefined && note.length > MAX_NOTE) {
       throw new HttpError(400, `La nota supera el límite de ${MAX_NOTE} caracteres.`);
@@ -862,6 +865,16 @@ export function createHandler(
       if (!Number.isSafeInteger(body.expected) || (body.expected as number) < 0) throw new HttpError(400, 'expected must be the history length being reverted');
       const expected = body.expected as number;
       return refusable(() => project.revertProposal(id, subject, expected, note));
+    }
+    if (reanchor) {
+      // A new anchor carries the history length the person saw, like reopen and revert.
+      if (!Number.isSafeInteger(body.expected) || (body.expected as number) < 0) throw new HttpError(400, 'expected must be the history length being re-anchored');
+      if (typeof body.quote !== 'string' || body.quote === '' || body.quote.length > MAX_QUOTE) throw new HttpError(400, 'quote must be the new passage');
+      if (body.proposal !== undefined && typeof body.proposal !== 'string') throw new HttpError(400, 'proposal must be an anchor proposal id');
+      const input = { by: subject, expected: body.expected as number, quote: body.quote, note, proposal: body.proposal as string | undefined };
+      if (kind === 'claims') return refusable(() => project.reanchorClaim(id, input));
+      if (!Number.isSafeInteger(body.evidence) || (body.evidence as number) < 0) throw new HttpError(400, 'evidence must be the position of the quote being re-anchored');
+      return refusable(() => project.reanchorFinding(id, { ...input, evidence: body.evidence as number }));
     }
     if (reopen) {
       // Reopening takes back a decision, so it carries the state the person saw: the history length
