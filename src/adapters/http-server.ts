@@ -31,8 +31,8 @@ import { inspectNotion, loadNotionChapters, parseNotionMapping, type NotionMappi
 import { chapterFilename, convertToMarkdown, importBook } from '../application/book-import.ts';
 import { SCENE_EDIT } from '../application/decision.ts';
 import { BookStructureConflictError, SceneConflictError, SceneEditRefusal, SceneNotFoundError } from '../application/project.ts';
-import { bookTree } from '../application/book-structure.ts';
-import { BookStructureError, type StructureOp } from '../domain/book.ts';
+import { bookTree, type BookTree } from '../application/book-structure.ts';
+import { BookStructureError, type BookOutline, type SceneStatus, type StructureOp } from '../domain/book.ts';
 import { graphData, graphQuery, GraphQueryError, GraphTooLargeError, notesSummary, noteView } from '../application/story.ts';
 import { manuscriptView } from '../application/manuscript-view.ts';
 import { InvalidSceneTextError, MAX_SCENE_BYTES } from '../domain/scene-text.ts';
@@ -627,9 +627,28 @@ export function createHandler(
       return json(res, 200, { scenes: open(READ).scenes() });
     }
 
+    const enrichTree = (tree: BookTree, outline: BookOutline) => {
+      const meta = new Map<string, { synopsis: string | null; status: SceneStatus }>();
+      for (const c of outline.chapters) for (const s of c.scenes) meta.set(s.file, { synopsis: s.synopsis, status: s.status });
+      for (const s of outline.loose) meta.set(s.file, { synopsis: s.synopsis, status: s.status });
+      for (const s of outline.archived) meta.set(s.file, { synopsis: s.synopsis, status: s.status });
+      const attach = (s: any) => {
+        const m = meta.get(s.file);
+        return { ...s, synopsis: m?.synopsis ?? null, status: m?.status ?? 'draft' };
+      };
+      return {
+        ...tree,
+        chapters: tree.chapters.map((c) => ({ ...c, scenes: c.scenes.map(attach) })),
+        loose: tree.loose.map(attach),
+        archived: tree.archived.map(attach),
+      };
+    };
+
     // The book tree: chapters, scenes, display titles and word counts (docs/book-structure.md).
     if (parts.length === 3 && parts[2] === 'tree' && req.method === 'GET') {
-      return json(res, 200, bookTree(open(READ)));
+      const project = open(READ);
+      const outline = project.outline();
+      return json(res, 200, enrichTree(bookTree(project, outline), outline));
     }
 
     // A person reorganises the book: one operation, one commit. Human-only: the review door, never an agent.
@@ -640,10 +659,10 @@ export function createHandler(
       if (typeof version !== 'string' || typeof op.op !== 'string') throw new HttpError(400, 'version and op are required');
       try {
         const done = project.editStructure(version, op as unknown as StructureOp, subject);
-        return json(res, 200, { ...(done.file ? { file: done.file } : {}), changed: done.changed, tree: bookTree(project, done.outline) });
+        return json(res, 200, { ...(done.file ? { file: done.file } : {}), changed: done.changed, tree: enrichTree(bookTree(project, done.outline), done.outline) });
       } catch (error) {
         if (error instanceof BookStructureConflictError) {
-          return json(res, 409, { error: error.message, tree: bookTree(project, error.outline) });
+          return json(res, 409, { error: error.message, tree: enrichTree(bookTree(project, error.outline), error.outline) });
         }
         if (error instanceof BookStructureError) {
           if (error.kind === 'not_found') throw new HttpError(404, error.message);

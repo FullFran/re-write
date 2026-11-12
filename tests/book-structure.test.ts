@@ -280,6 +280,34 @@ test('over HTTP: a person reorganises the book; reads need no write permission, 
   const list = await (await reviewApi(h, '/books/sal/scenes', session)).json();
   assert.deepEqual(list.scenes, [B, 'scenes/nueva.md']);
   assert.equal((await reviewApi(h, `/books/sal/scenes/${encodeURIComponent(A)}`, session)).status, 200, 'an archived scene opens by path');
+
+  // Over HTTP: set_synopsis and set_status
+  const treeBefore = await (await reviewApi(h, '/books/sal/tree', session)).json();
+  const synRes = await structure(session, { version: treeBefore.version, op: 'set_synopsis', file: B, synopsis: 'Sinopsis HTTP' });
+  assert.equal(synRes.status, 200);
+  const synDone = await synRes.json();
+  assert.equal(synDone.tree.loose.find((s: any) => s.file === B).synopsis, 'Sinopsis HTTP');
+
+  const statusRes = await structure(session, { version: synDone.tree.version, op: 'set_status', file: B, status: 'final' });
+  assert.equal(statusRes.status, 200);
+  const statusDone = await statusRes.json();
+  assert.equal(statusDone.tree.loose.find((s: any) => s.file === B).status, 'final');
+  assert.equal(statusDone.tree.loose.find((s: any) => s.file === B).synopsis, 'Sinopsis HTTP');
+
+  // Stale version over HTTP for set_status
+  const staleStatus = await structure(session, { version: synDone.tree.version, op: 'set_status', file: B, status: 'draft' });
+  assert.equal(staleStatus.status, 409);
+  const staleBody = await staleStatus.json();
+  assert.equal(staleBody.tree.version, statusDone.tree.version);
+
+  // Invalid synopsis over HTTP
+  const badSyn = await structure(session, { version: statusDone.tree.version, op: 'set_synopsis', file: B, synopsis: 'a\nb' });
+  assert.equal(badSyn.status, 400);
+
+  // Tree endpoint returns synopsis and status
+  const finalTree = await (await reviewApi(h, '/books/sal/tree', session)).json();
+  assert.equal(finalTree.loose.find((s: any) => s.file === B).synopsis, 'Sinopsis HTTP');
+  assert.equal(finalTree.loose.find((s: any) => s.file === B).status, 'final');
 });
 
 test('MCP list_scenes returns book order and the tool list is unchanged by the manifest', async () => {
@@ -309,3 +337,73 @@ test('Project.scenes still lists a book with no manifest as sorted scenes/*.md (
   cli('import', dir, ...['010-b.md', '002-a.md', '100-c.md'].map((n) => join(dir, '..', n)));
   assert.deepEqual(Project.open(dir).scenes(), ['scenes/002-a.md', 'scenes/010-b.md', 'scenes/100-c.md']);
 });
+
+test('absent synopses and statuses fields read as draft status and null synopsis', () => {
+  const p = book();
+  const outline = p.outline();
+  assert.equal(outline.loose[0].status, 'draft');
+  assert.equal(outline.loose[0].synopsis, null);
+  assert.equal(outline.loose[1].status, 'draft');
+  assert.equal(outline.loose[1].synopsis, null);
+});
+
+test('set_synopsis and set_status each produce exactly one commit and the expected manifest content', () => {
+  const p = book();
+  const before = commits(p);
+  const withSyn = write(p, { op: 'set_synopsis', file: A, synopsis: 'Elena vigila la puerta.' } as any);
+  assert.equal(commits(p), before + 1);
+  assert.equal(withSyn.outline.loose.find((s) => s.file === A)?.synopsis, 'Elena vigila la puerta.');
+  const json1 = JSON.parse(readFileSync(join(p.dir, MANIFEST), 'utf8'));
+  assert.equal(json1.synopses[A], 'Elena vigila la puerta.');
+
+  const withStatus = write(p, { op: 'set_status', file: A, status: 'revised' } as any, withSyn.outline.version);
+  assert.equal(commits(p), before + 2);
+  assert.equal(withStatus.outline.loose.find((s) => s.file === A)?.status, 'revised');
+  const json2 = JSON.parse(readFileSync(join(p.dir, MANIFEST), 'utf8'));
+  assert.equal(json2.statuses[A], 'revised');
+  assert.equal(json2.synopses[A], 'Elena vigila la puerta.', 'synopsis is preserved');
+
+  // Clearing synopsis with empty string
+  const cleared = write(p, { op: 'set_synopsis', file: A, synopsis: '' } as any, withStatus.outline.version);
+  assert.equal(commits(p), before + 3);
+  assert.equal(cleared.outline.loose.find((s) => s.file === A)?.synopsis, null);
+
+  // Same status makes no commit
+  const same = write(p, { op: 'set_status', file: A, status: 'revised' } as any, cleared.outline.version);
+  assert.equal(commits(p), before + 3);
+  assert.equal(same.changed, false);
+});
+
+test('invalid status or synopsis gives 400 with no commit', () => {
+  const p = book();
+  const before = commits(p);
+  for (const synopsis of ['dos\nlíneas', 'nul\u0000', 'a'.repeat(601), 42 as any]) {
+    assert.throws(() => write(p, { op: 'set_synopsis', file: A, synopsis } as any), BookStructureError);
+  }
+  for (const status of ['drafty', 'finished', 'done', '', null as any]) {
+    assert.throws(() => write(p, { op: 'set_status', file: A, status } as any), BookStructureError);
+  }
+  assert.equal(commits(p), before);
+});
+
+test('a stale version with set_synopsis or set_status gives 409 with the book unchanged', () => {
+  const p = book();
+  const v = p.outline().version;
+  write(p, { op: 'set_synopsis', file: A, synopsis: 'Primera' } as any, v);
+  const before = commits(p);
+  assert.throws(() => write(p, { op: 'set_synopsis', file: A, synopsis: 'Segunda' } as any, v), BookStructureConflictError);
+  assert.throws(() => write(p, { op: 'set_status', file: A, status: 'revised' } as any, v), BookStructureConflictError);
+  assert.equal(commits(p), before);
+  assert.equal(p.outline().loose.find((s) => s.file === A)?.synopsis, 'Primera');
+});
+
+test('unarchive_scene on a non-archived scene gives no commit and changes nothing', () => {
+  const p = book();
+  const before = commits(p);
+  const done = write(p, { op: 'unarchive_scene', file: A });
+  assert.equal(commits(p), before);
+  assert.equal(done.changed, false);
+  assert.deepEqual(p.scenes(), [A, B]);
+  assert.deepEqual(p.archivedScenes(), []);
+});
+

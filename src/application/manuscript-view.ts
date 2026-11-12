@@ -3,6 +3,7 @@
  * book's reading order (Project.scenes) with its chapter, title, text and word count. Read-only.
  */
 import type { Project } from './project.ts';
+import type { SceneStatus } from '../domain/book.ts';
 
 /** Text sent in one response; scenes past it keep their counts but come without text. */
 export const MANUSCRIPT_TEXT_CAP = 16 * 1024 * 1024;
@@ -15,6 +16,10 @@ export interface ManuscriptScene {
   words: number;
   /** Absent when the caller asked for counts only; null when the size cap left it out. */
   text?: string | null;
+  /** Synopsis from the manifest or null. */
+  synopsis: string | null;
+  /** Scene status ('draft' | 'revised' | 'final'). */
+  status: SceneStatus;
 }
 
 export interface Manuscript {
@@ -23,6 +28,7 @@ export interface Manuscript {
   total_words: number;
   /** True when at least one scene's text was left out because of the size cap. */
   truncated: boolean;
+  version?: string;
 }
 
 /** Words as a writer counts them: letters and digits, with inner apostrophes and hyphens. */
@@ -44,13 +50,22 @@ export function manuscriptView(project: Project, options: { withText?: boolean; 
   const scenes: ManuscriptScene[] = [];
   // The outline gives each scene its chapter and its title from the manifest; scenes() the order.
   const outline = project.outline();
-  const placed = new Map<string, { chapter: string | null; title: string | null }>();
-  for (const chapter of outline.chapters) for (const s of chapter.scenes) placed.set(s.file, { chapter: chapter.title, title: s.title });
-  for (const s of outline.loose) placed.set(s.file, { chapter: null, title: s.title });
+  const placed = new Map<string, { chapter: string | null; title: string | null; synopsis: string | null; status: SceneStatus }>();
+  for (const chapter of outline.chapters) {
+    for (const s of chapter.scenes) placed.set(s.file, { chapter: chapter.title, title: s.title, synopsis: s.synopsis, status: s.status });
+  }
+  for (const s of outline.loose) placed.set(s.file, { chapter: null, title: s.title, synopsis: s.synopsis, status: s.status });
   for (const file of project.scenes()) {
     const text = project.readScene(file) ?? '';
     const where = placed.get(file);
-    const scene: ManuscriptScene = { file, title: where?.title ?? sceneHeading(text, file), chapter: where?.chapter ?? null, words: countWords(text) };
+    const scene: ManuscriptScene = {
+      file,
+      title: where?.title ?? sceneHeading(text, file),
+      chapter: where?.chapter ?? null,
+      words: countWords(text),
+      synopsis: where?.synopsis ?? null,
+      status: where?.status ?? 'draft',
+    };
     if (withText) {
       const size = Buffer.byteLength(text);
       if (sent + size <= cap) {
@@ -63,5 +78,5 @@ export function manuscriptView(project: Project, options: { withText?: boolean; 
     }
     scenes.push(scene);
   }
-  return { title: project.title(), scenes, total_words: scenes.reduce((n, s) => n + s.words, 0), truncated };
+  return { title: project.title(), version: outline.version, scenes, total_words: scenes.reduce((n, s) => n + s.words, 0), truncated };
 }

@@ -8,6 +8,10 @@
 
 export const MANIFEST_VERSION = 1;
 export const MAX_TITLE_CHARS = 120;
+export const MAX_SYNOPSIS_CHARS = 600;
+
+export type SceneStatus = 'draft' | 'revised' | 'final';
+export const SCENE_STATUSES: readonly SceneStatus[] = ['draft', 'revised', 'final'] as const;
 
 export interface ManifestChapter {
   id: string;
@@ -26,12 +30,20 @@ export interface BookManifest {
   titles: Record<string, string>;
   /** Scenes taken out of the book without deleting them. */
   archived: string[];
+  /** Optional synopsis per scene path. At most 600 characters, single paragraph. */
+  synopses?: Record<string, string>;
+  /** Optional status per scene path ('draft' | 'revised' | 'final'). Missing means 'draft'. */
+  statuses?: Record<string, SceneStatus>;
 }
 
 export interface OutlineScene {
   file: string;
   /** The display title stored in the manifest, or null when the scene has none. */
   title: string | null;
+  /** The synopsis stored in the manifest, or null when the scene has none. */
+  synopsis: string | null;
+  /** The status stored in the manifest, defaulting to 'draft' when absent. */
+  status: SceneStatus;
 }
 export interface OutlineChapter {
   id: string;
@@ -60,7 +72,9 @@ export type StructureOp =
   | { op: 'retitle_chapter'; chapter: string; title: string }
   | { op: 'remove_chapter'; chapter: string }
   | { op: 'move_scene'; file: string; chapter: string | null; position?: number }
-  | { op: 'move_chapter'; chapter: string; position: number };
+  | { op: 'move_chapter'; chapter: string; position: number }
+  | { op: 'set_synopsis'; file: string; synopsis: string }
+  | { op: 'set_status'; file: string; status: SceneStatus };
 
 export type StructureErrorKind = 'invalid' | 'not_found';
 
@@ -77,6 +91,7 @@ export class BookStructureError extends Error {
 const SCENE_PATH = /^scenes\/[^/]+\.md$/;
 // C0/C1 controls, line and paragraph separators, and bidirectional overrides.
 const FORBIDDEN_IN_TITLE = /[\p{Cc}\u2028\u2029\u202a-\u202e\u2066-\u2069]/u;
+const FORBIDDEN_IN_SYNOPSIS = /[\p{Cc}\u2028\u2029\u202a-\u202e\u2066-\u2069]/u;
 
 /** The trimmed title, or throws when it is empty, too long or has control characters. */
 export function checkTitle(raw: unknown): string {
@@ -90,6 +105,30 @@ export function checkTitle(raw: unknown): string {
     throw new BookStructureError('invalid', `El título no puede pasar de ${MAX_TITLE_CHARS} caracteres.`);
   }
   return title;
+}
+
+/** The trimmed synopsis, or throws when not string, multi-paragraph, too long or has control characters. */
+export function checkSynopsis(raw: unknown): string {
+  if (typeof raw !== 'string') throw new BookStructureError('invalid', 'La sinopsis debe ser texto.');
+  if (!raw.isWellFormed() || FORBIDDEN_IN_SYNOPSIS.test(raw)) {
+    throw new BookStructureError('invalid', 'La sinopsis tiene caracteres de control no permitidos.');
+  }
+  if (/[\r\n]/.test(raw)) {
+    throw new BookStructureError('invalid', 'La sinopsis debe ser de un solo párrafo.');
+  }
+  const synopsis = raw.trim();
+  if ([...synopsis].length > MAX_SYNOPSIS_CHARS) {
+    throw new BookStructureError('invalid', `La sinopsis no puede pasar de ${MAX_SYNOPSIS_CHARS} caracteres.`);
+  }
+  return synopsis;
+}
+
+/** Validates status to be one of draft, revised, final. */
+export function checkStatus(raw: unknown): SceneStatus {
+  if (raw !== 'draft' && raw !== 'revised' && raw !== 'final') {
+    throw new BookStructureError('invalid', 'El estado debe ser borrador (draft), revisado (revised) o terminado (final).');
+  }
+  return raw;
 }
 
 /** A file name stem from a title: lowercase, no accents, letters, digits and dashes. Never empty. */
@@ -129,11 +168,25 @@ export function parseManifest(value: unknown): BookManifest | null {
       if (SCENE_PATH.test(file) && typeof title === 'string') titles[file] = title;
     }
   }
-  return { version: MANIFEST_VERSION, chapters, loose: files(raw.loose), titles, archived: files(raw.archived) };
+  const synopses: Record<string, string> = {};
+  if (raw.synopses && typeof raw.synopses === 'object') {
+    for (const [file, syn] of Object.entries(raw.synopses as Record<string, unknown>)) {
+      if (SCENE_PATH.test(file) && typeof syn === 'string') synopses[file] = syn;
+    }
+  }
+  const statuses: Record<string, SceneStatus> = {};
+  if (raw.statuses && typeof raw.statuses === 'object') {
+    for (const [file, st] of Object.entries(raw.statuses as Record<string, unknown>)) {
+      if (SCENE_PATH.test(file) && (st === 'draft' || st === 'revised' || st === 'final')) {
+        statuses[file] = st;
+      }
+    }
+  }
+  return { version: MANIFEST_VERSION, chapters, loose: files(raw.loose), titles, archived: files(raw.archived), synopses, statuses };
 }
 
 export function emptyManifest(): BookManifest {
-  return { version: MANIFEST_VERSION, chapters: [], loose: [], titles: {}, archived: [] };
+  return { version: MANIFEST_VERSION, chapters: [], loose: [], titles: {}, archived: [], synopses: {}, statuses: {} };
 }
 
 /**
@@ -266,6 +319,24 @@ export function applyOperation(current: BookManifest, op: StructureOp, existing:
       manifest.chapters = manifest.chapters.filter((c) => c.id !== chapter.id);
       insertAt(manifest.chapters, chapter, op.position);
       return { manifest, summary: `move chapter ${chapter.id}` };
+    }
+    case 'set_synopsis': {
+      const file = knownScene(manifest, op.file);
+      const synopsis = checkSynopsis(op.synopsis);
+      if (!manifest.synopses) manifest.synopses = {};
+      if (synopsis) {
+        manifest.synopses[file] = synopsis;
+      } else {
+        delete manifest.synopses[file];
+      }
+      return { manifest, summary: `set synopsis for scene ${file}` };
+    }
+    case 'set_status': {
+      const file = knownScene(manifest, op.file);
+      const status = checkStatus(op.status);
+      if (!manifest.statuses) manifest.statuses = {};
+      manifest.statuses[file] = status;
+      return { manifest, summary: `set status for scene ${file}` };
     }
     default:
       throw new BookStructureError('invalid', 'Operación desconocida.');

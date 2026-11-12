@@ -16,7 +16,9 @@ versions. Reorganising the book only edits `.rewrite/book.json`.
   ],
   "loose": ["scenes/epilogo.md"],
   "titles": { "scenes/puerta.md": "La puerta" },
-  "archived": ["scenes/borrador-viejo.md"]
+  "archived": ["scenes/borrador-viejo.md"],
+  "synopses": { "scenes/puerta.md": "Elena vigila el puente de Sal." },
+  "statuses": { "scenes/puerta.md": "revised" }
 }
 ```
 
@@ -24,8 +26,14 @@ versions. Reorganising the book only edits `.rewrite/book.json`.
   scene paths in reading order.
 - `loose`: scenes outside any chapter, in reading order. They come after every chapter.
 - `titles`: display title by scene path. A scene without one shows its first Markdown heading, else its file name.
-- `archived`: scenes taken out of the book. They are not in `Project.scenes()`, the graph, exports or the MCP scene
-  list, but the files stay, and their findings, claims and proposals keep working and can be opened by path.
+- `archived`: scenes taken out of the book. Archive only hides a scene from the book and its exports.
+  Archived scenes are still editable through scene save, their files stay, and their findings, claims and
+  proposals keep working and can be opened by path.
+- `synopses`: optional short synopsis per scene path (free text, at most 600 characters, single paragraph,
+  no control characters). Absent means no synopsis (`null`).
+- `statuses`: optional status per scene path, one of `draft`, `revised`, `final` (displayed in Spanish as
+  **Borrador**, **Revisado**, **Terminado**). Absent status defaults to `draft`. A manifest without these
+  fields reads exactly as before.
 
 ## Reading order
 
@@ -37,7 +45,7 @@ working unchanged. A manifest that is not valid JSON is treated as absent, and s
 until it is fixed.
 
 `Project.outline()` returns the structure for display and export: `{ version, chapters: [{ id, title, scenes:
-[{ file, title }] }], loose, archived }`. `title` is the manifest title or null. Reading order is the chapters'
+[{ file, title, synopsis, status }] }], loose, archived }`. `title` is the manifest title or null. Reading order is the chapters'
 scenes followed by `loose`, i.e. exactly `scenes()`. `Project.archivedScenes()` lists the archived files.
 
 ## Changing the structure
@@ -53,16 +61,20 @@ before the first write) and `op`:
 | --- | --- |
 | `create_scene` | `title`, `chapter` (id, or omitted for the end of the book), `position`, `heading` (write `# title`) |
 | `retitle_scene` | `file`, `title` |
-| `archive_scene`, `unarchive_scene` | `file` (restoring puts the scene at the end) |
+| `archive_scene`, `unarchive_scene` | `file` (restoring puts the scene at the end; calling `unarchive_scene` on a non-archived scene changes nothing and makes no commit) |
 | `create_chapter` | `title`, `position` |
 | `retitle_chapter` | `chapter`, `title` |
 | `remove_chapter` | `chapter` (only when empty) |
 | `move_scene` | `file`, `chapter` (id or null), `position` |
 | `move_chapter` | `chapter`, `position` |
+| `set_synopsis` | `file`, `synopsis` |
+| `set_status` | `file`, `status` (`draft` / `revised` / `final`) |
 
 A different `version` than the current one is refused with 409 and the current tree; nothing is written. Titles
-are trimmed, 1 to 120 characters, without control characters. A new scene's path is `scenes/<slug>.md` from the
-title (lowercase, no accents), numbered when taken; it never replaces a file. Nothing deletes a scene.
+are trimmed, 1 to 120 characters, without control characters. Synopses are trimmed, up to 600 characters, single
+paragraph, without control characters. Statuses must be one of `draft`, `revised`, or `final`.
+A `position` larger than the list length is clamped silently to the end of the list.
+A new scene's path is `scenes/<slug>.md` from the title (lowercase, no accents), numbered when taken; it never replaces a file. Nothing deletes a scene.
 
-`GET /review/api/books/:id/tree` returns the tree with display titles and word counts (per scene, per chapter,
-and the total of active scenes).
+`GET /review/api/books/:id/tree` returns the tree with display titles, word counts (per scene, per chapter,
+and the total of active scenes), synopsis and status per scene.
