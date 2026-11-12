@@ -198,3 +198,11 @@ Tests pin every formatting rule on the raw Markdown (`editor/test/format.test.mj
 - [ ] Mac: Cmd+B and Cmd+I format (the tests use Ctrl on Linux).
 - [ ] With a screen reader: the **Formato** group, each button's name and pressed state, **Analizar** with `aria-expanded`, the **Qué analizar** group and the **Se analizará: …** line are announced.
 - [ ] **Analizar** with a real ChatGPT account: the answer names the scene or the selection asked about; for **El libro** it says which scenes it read.
+
+## 15. Search and Replace in the Scene (#101)
+
+Tests pin the Spanish phrases of the panel against the installed `@codemirror/search` (`editor/test/search.test.mjs`) and, in Chromium, Ctrl+F, **Reemplazar**, **Reemplazar todo**, **Distinguir mayúsculas**, **Palabra completa**, **Expresión regular** with a group, one undo step per replacement, the exact saved bytes, and the phone layout at 360x740 and 390x844 with a simulated keyboard (`browser-tests/tests/search.spec.ts`, screenshots on desktop and on a phone, light and dark). These need a real device:
+
+- [ ] iOS Safari and Android Chrome: tap **Buscar**, type in the search field with the keyboard open. The panel stays at the top of what is visible, the current match is scrolled into view between the panel and the keyboard, and the dock is gone until the keyboard closes.
+- [ ] Mac: Cmd+F opens the panel and Cmd+G goes to the next match.
+- [ ] With a screen reader: **Buscar** announces `aria-expanded`; moving to a match reads **Coincidencia actual** and its line; **Reemplazar todo** reads how many were replaced.

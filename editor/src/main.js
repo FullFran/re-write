@@ -4,6 +4,7 @@
 // every line break as \n: the three views are ways of looking at it, never a conversion.
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { closeSearchPanel, searchPanelOpen } from '@codemirror/search';
 import { Annotation, Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
@@ -11,6 +12,7 @@ import { formatKeymap, formatToolbar } from './format.js';
 import { livePreview } from './live-preview.js';
 import { markdown } from './markdown.js';
 import { renderReading } from './reading.js';
+import { sceneSearch, searchButton } from './search.js';
 import { setNotes, wikilinkPreview, wikilinks } from './wikilinks.js';
 
 // The page resolves a followed link with the same rules the editor styles it by.
@@ -85,8 +87,8 @@ const editability = (editable) => [EditorView.editable.of(editable), EditorState
  * when the person follows a link; `margins()` ({ top, bottom } in px) is what covers the window
  * around the text, which scrolling the caret into view keeps clear. Returns the same small surface as the page's plain text
  * field: dom, getValue, setValue, setEditable, isEditable, getSelection, select, focus, destroy,
- * plus setNotes, caretRect and toolbar (the formatting toolbar of format.js, which the page
- * may move). New behaviour belongs in its own extension module added to the list below, as
+ * plus setNotes, caretRect and toolbar (the formatting toolbar of format.js with the Buscar
+ * button and the search panel of search.js under it, which the page may move). New behaviour belongs in its own extension module added to the list below, as
  * live-preview.js and wikilinks.js are.
  */
 export function createSceneEditor({ text, label, view = 'live', notes = [], onChange = () => {}, onSave = () => {}, onViewChange = () => {}, onOpenNote = () => {}, margins = () => null }) {
@@ -107,6 +109,10 @@ export function createSceneEditor({ text, label, view = 'live', notes = [], onCh
   const modeSlot = new Compartment();
   // Set right after the view exists; the first updates happen before it.
   let format = null;
+  let find = null;
+  // The search panel's place, under the formatting toolbar (search.js).
+  const searchHost = doc.createElement('div');
+  searchHost.className = 'scene-search';
   const editSlot = new Compartment();
 
   const cm = new EditorView({
@@ -128,6 +134,7 @@ export function createSceneEditor({ text, label, view = 'live', notes = [], onCh
         EditorView.contentAttributes.of({ 'aria-label': label, spellcheck: 'true', autocorrect: 'on', autocapitalize: 'sentences' }),
         EditorView.updateListener.of((update) => {
           if ((update.docChanged || update.selectionSet) && format) format.refresh(update.state);
+          if (find) find.refresh(update.state);
           if (update.docChanged && !update.transactions.some((tr) => tr.annotation(fromPage))) onChange();
         }),
         theme,
@@ -135,6 +142,7 @@ export function createSceneEditor({ text, label, view = 'live', notes = [], onCh
         // the caret is never scrolled under it.
         EditorView.scrollMargins.of(() => margins()),
         wikilinks({ notes, onOpen: (target) => onOpenNote(target) }),
+        sceneSearch(searchHost),
         modeSlot.of(viewExtension(current)),
         editSlot.of(editability(true)),
       ],
@@ -157,7 +165,12 @@ export function createSceneEditor({ text, label, view = 'live', notes = [], onCh
   // The formatting toolbar (format.js) edits the same text; Lectura has nothing to format.
   format = formatToolbar(cm, doc);
   format.refresh(cm.state);
-  root.append(bar, format.dom, host, reading);
+  find = searchButton(cm, doc);
+  format.dom.append(find.dom);
+  const tools = doc.createElement('div');
+  tools.className = 'scene-tools';
+  tools.append(format.dom, searchHost);
+  root.append(bar, tools, host, reading);
 
   function show(id) {
     current = id;
@@ -169,14 +182,17 @@ export function createSceneEditor({ text, label, view = 'live', notes = [], onCh
     reading.hidden = !isReading;
     host.hidden = isReading;
     format.dom.hidden = isReading;
+    // Lectura shows no selection to land a match on, so the search closes with it.
+    if (isReading && searchPanelOpen(cm.state)) closeSearchPanel(cm);
     cm.dispatch({ effects: modeSlot.reconfigure(viewExtension(id)) });
   }
   show(current);
 
   return {
     dom: root,
-    // The formatting toolbar, inside dom until the page places it elsewhere (its sticky head).
-    toolbar: format.dom,
+    // The formatting toolbar and the search panel, inside dom until the page places them
+    // elsewhere (its sticky head).
+    toolbar: tools,
     getValue: () => cm.state.doc.toString(),
     setValue(value) {
       cm.dispatch({ changes: { from: 0, to: cm.state.doc.length, insert: value }, annotations: fromPage.of(true) });

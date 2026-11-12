@@ -9,7 +9,8 @@ import { codeRanges, parseWikilinks } from '../src/domain/wikilink.ts';
 /**
  * One member's hostile text must not block the single-threaded server for everyone. Each case took
  * seconds or minutes at 1 MB when a pass was quadratic. By default the inputs are 64 KB, and growing
- * one four times must cost well under sixteen times as much (quadratic) time. With
+ * one four times must cost well under sixteen times as much (quadratic) time: under 8, halfway
+ * between linear (4) and quadratic (16) on a log scale. With
  * REWRITE_SCALE_FULL=1 (run on a CI machine, never on a shared laptop) the inputs are 1 MB and each
  * must also finish within a second. Checks compare counts, never whole results, so a failure cannot
  * print a huge diff.
@@ -18,15 +19,29 @@ const FULL = process.env.REWRITE_SCALE_FULL === '1';
 const SIZE = FULL ? 1_000_000 : 65_536;
 const BOUND_MS = 1000;
 const MAX_RATIO = 8;
+const ROUNDS = 5;
 
-function fastest(run: () => unknown): number {
-  let best = Infinity;
-  for (let i = 0; i < 3; i += 1) {
-    const start = performance.now();
-    run();
-    best = Math.min(best, performance.now() - start);
+function time(run: () => unknown): number {
+  const start = performance.now();
+  run();
+  return performance.now() - start;
+}
+
+/**
+ * The growth ratio of `run` from `small` to `large`: the median of ROUNDS rounds, each timing the
+ * small input right before the large one. A burst of load from other processes (or a collection
+ * of the large input's garbage) then slows one round, which the median ignores, instead of only
+ * the large side of a comparison of best times: that once read 8.3 for a linear pass on a busy CI
+ * machine. A quadratic pass is slow in every round, so its median stays near 16 and still fails.
+ */
+function growth<T>(run: (input: T) => unknown, small: T, large: T): number {
+  const ratios: number[] = [];
+  for (let i = 0; i < ROUNDS; i += 1) {
+    const a = time(() => run(small));
+    const b = time(() => run(large));
+    ratios.push((b + 1) / (a + 1));
   }
-  return best;
+  return ratios.sort((x, y) => x - y)[Math.floor(ROUNDS / 2)];
 }
 
 /** `make(size)` builds an input of about `size` characters; `run` processes it. */
@@ -34,7 +49,7 @@ function linear<T>(name: string, make: (size: number) => T, run: (input: T) => u
   const small = make(SIZE / 4);
   const large = make(SIZE);
   run(small); // warm up the JIT
-  const ratio = (fastest(() => run(large)) + 1) / (fastest(() => run(small)) + 1);
+  const ratio = growth(run, small, large);
   assert.ok(ratio < MAX_RATIO, `${name}: four times the input took ${ratio.toFixed(1)} times as long`);
   if (FULL) {
     const start = performance.now();

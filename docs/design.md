@@ -148,6 +148,20 @@ the selected rating has `aria-pressed`.
   `--tap` high, and are disabled while the text is read-only. Hidden in **Lectura**. Below
   40em it folds behind one **Formato** button (`aria-expanded`); open, its buttons scroll
   sideways in one row inside the toolbar, never the page.
+- **Search and replace** (`editor/src/search.js`, on `@codemirror/search`): Ctrl/Cmd+F in the
+  text, or the toolbar's **Buscar** button (always shown, also on phones, which have no Ctrl+F;
+  `aria-expanded`), opens a panel right under the toolbar, inside the sticky head, so it stays in
+  sight above a phone keyboard. Three rows: the **Buscar** field with **Anterior**, **Siguiente**
+  and **Cerrar búsqueda** (×); the **Reemplazar** field with **Reemplazar** and **Reemplazar
+  todo** (Ctrl/Cmd+Enter in the field); **Distinguir mayúsculas**, **Palabra completa** and
+  **Expresión regular**, which scroll sideways on a narrow screen. With a phone keyboard open the
+  formatting row hides while the panel is open, so the text keeps its room. Enter, F3 and Ctrl/Cmd+G go to the
+  next match (with Shift, the previous), Escape closes it and returns to the text. The search
+  follows every input, so pasted or dictated words search as typed ones do. Matches are
+  marked with `--mark`, the current one also outlined. Every control is `--tap` high with 16 px
+  fields. A replacement edits the Markdown as typing would, one undo step per press (**Reemplazar
+  todo** included), so saving is unchanged. Read-only text can be searched, not replaced.
+  **Lectura** closes the panel.
 - **The editor's head** (`.scene-head`): **Guardar**, **Cerrar editor**, the save status and
   the toolbar stick together above the text. The editor's scroll margins (`margins()`) leave
   that head, the phone dock and the part of the window under a phone keyboard out, so the

@@ -27,5 +27,8 @@
     "graphology-shortest-path": "2.1.0",
     "graphology-types": "0.24.8",
     "sigma": "4.0.6"
+  },
+  "dependencies": {
+    "@codemirror/search": "6.7.2"
   }
 }

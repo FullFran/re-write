@@ -196,6 +196,8 @@ body[data-mode=focus] .toolbar, body[data-mode=help] .toolbar { margin-bottom: v
 .format-buttons > button { padding: var(--space-1) var(--space-2); font-size: var(--text-sm); }
 .format-buttons > [data-format=bold] { font-weight: 700; }
 .format-buttons > [data-format=italic] { font-style: italic; }
+/* Buscar opens the search panel (editor/src/search.js), drawn right under the toolbar. */
+.scene-format > .format-search { flex: none; margin-left: auto; padding: var(--space-1) var(--space-2); font-size: var(--text-sm); }
 .desk-help h2 { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-lg); }
 .desk-help h3 { margin-top: var(--space-5); }
 .desk-help .ask-scene { width: 100%; }
@@ -340,6 +342,8 @@ main:has(> [role=alert]) .notice:not([hidden]) { position: static; width: auto; 
   /* With the keyboard open the dock and the floating button give the room to the text. */
   body.keyboard-open .mode-switch, body.keyboard-open .assistant-fab { display: none; }
   body.keyboard-open::after { height: 0; }
+  /* Searching with the keyboard open, the formatting row gives its room to the text too. */
+  body.keyboard-open .scene-tools:has(.cm-search) > .scene-format { display: none; }
   .desk-scenes > button > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
 /* Phones and tablets in Ayuda: the text and the help are two panes, one tap apart. */
