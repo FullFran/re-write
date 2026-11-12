@@ -56,7 +56,7 @@ The rule: **what defines truth or decides is host core; what analyses, suggests 
 | Manuscript versions, narrative entities, events, timeline | core | Shared model every package reads; one definition |
 | Access: people to books | core | Composed with package grants in one decision point (section 5) |
 | Claim extractors (fixture annotations today, agent-driven later) | package, kind `x-rewrite-extractor` | Several can exist; output goes through the same literal-quote check |
-| Continuity rules (knowledge order today) and craft diagnostics | package, kind `x-rewrite-check` | Heuristics that produce findings, never verdicts |
+| Continuity rules (knowledge order; ages, durations, dates and places) and craft diagnostics | package, kind `x-rewrite-check` | Heuristics that produce findings, never verdicts |
 | Importers and exporters (for example a notes workspace) | package, kind `x-rewrite-importer` | Bring outside material in as proposals only |
 | Procedures for agents (how to extract, how to propose, onboarding now in `/llms.txt`) | package, kind `skill` | Agent Skills as is |
 | Standing instructions for agents (the untrusted-text rules) | host-owned instructions, plus packages of kind `x-rewrite-instructions` that may only narrow | AGENTS.md convention; extension kind until HCS promotes it |
@@ -68,6 +68,32 @@ See [contribution kinds and module classification](contributions.md) for the per
 - `x-rewrite-check`: rules that, given claims and the narrative model, return findings with alternatives. Requests `com.fullfran.rewrite.book.read` and `com.fullfran.rewrite.findings.propose`.
 - `x-rewrite-importer`: maps outside records to proposals; never writes canon. Requests `com.fullfran.rewrite.book.import`.
 - `x-rewrite-instructions`: Markdown in the AGENTS.md convention; may only add restrictions.
+
+### Continuity rules
+
+`inspectContinuity` (`src/domain/continuity.ts`, MCP `inspect_continuity`, the review page's "Posibles problemas") runs deterministic rules over claims; no language model runs. Every finding cites the literal quotes it compares, says what contradicts what, and lists other readings (a mistake, a time jump, an unreliable narrator). It is a possible problem, not a verdict. Rejected claims and orphaned quotes are ignored; a stale quote lowers a finding to `insufficient_evidence`.
+
+- `knowledge_order` (`rule:knowledge-order`): a character shows a fact before learning it, by story time, from claims with `knowledge`.
+- `age`, `duration` (`rule:attribute-growth`): claims with `attribute.name` `edad` or `años_en` about the same subject (and `about`, and unit) may grow as story time moves forward, never shrink, and must agree at the same story time. Without story time the order is unknown, so a difference is `insufficient_evidence`. Growth is not checked against elapsed story time, because story time has no unit.
+- `date` (`rule:date-order`): `fecha` values about the same subject keep the order story time gives them. Partial dates compare on the parts both have, so `1888` and `1888-03-04` do not conflict.
+- `place` (`rule:attribute-fixed`): a `lugar` about the same subject (for things that do not move, such as a building) has one value, compared without case or accents.
+
+Only narrated facts are compared: a belief, rumor, lie or inference that disagrees with a narrated fact may be the point, and is not reported. Each group is sorted by story time once and swept, so the work is n log n per subject.
+
+The optional claim field `attribute` carries what these rules read; claims without it are not checked:
+
+```json
+{ "attribute": { "name": "años_en", "value": "once", "unit": "años", "about": "puente de Sal" } }
+```
+
+| Field | Meaning |
+| --- | --- |
+| `name` | `edad` (an age), `años_en` (how long something has lasted), `lugar` (where a thing that does not move is), `fecha` (when it happens) |
+| `value` | `edad`, `años_en`: digits or simple Spanish number words up to 199 (`"once"`, `11`, `"cuarenta y dos"`); `fecha`: `YYYY`, `YYYY-MM`, `YYYY-MM-DD` or a number; `lugar`: a stable key, the same across claims |
+| `unit` | `edad`, `años_en` only: `años` (default), `meses`, `semanas` or `días`; values in different units are not compared |
+| `about` | optional stable key for what the value is about, for example the place of `años_en` |
+
+`propose_claims` and annotation files (`rewrite extract --from`) accept it; a value that cannot be read rejects that candidate with a reason, and nothing about it is stored.
 
 ## 3. Identifiers
 

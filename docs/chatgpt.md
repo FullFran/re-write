@@ -75,6 +75,10 @@ lists Business, Enterprise and Edu. Check it on the writer's own plan.
   `list_findings` show `anchor_suggestion`, the passage the scene most likely means now (or
   `null`), on items still pending. `propose_anchor` proposes a new literal quote that appears once
   now; it never changes the item, and the person accepts it at the review URL.
+- **Continuity.** `inspect_continuity` reports knowledge-order problems and ages, durations,
+  dates or places that contradict across narrated facts. These need claims proposed with the
+  optional `attribute` (`edad`, `años_en`, `lugar` or `fecha`); see
+  [architecture: continuity rules](architecture.md#continuity-rules).
 - **Scene lengths.** `list_scenes` adds `chars`, the length of each scene, so the assistant can plan
   `read_scene` pages of up to 20,000 characters.
 

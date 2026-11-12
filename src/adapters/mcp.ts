@@ -300,7 +300,7 @@ export function buildMcpServer(library: Library, subject: string, capabilities: 
 
   register('inspect_continuity', {
     title: 'Revisar continuidad',
-    description: `Use this when the person asks about continuity or about who knows what, and when. Looks for knowledge-order problems among the proposed claims (it needs claims with knowledge and story_time). Results are heuristics with other possible readings, not verdicts. ${UNTRUSTED}`,
+    description: `Use this when the person asks about continuity or about who knows what, and when. Looks for knowledge-order problems among the proposed claims (it needs claims with knowledge and story_time). It also compares ages, durations, dates and places across narrated facts (claims with attribute). Results are heuristics with other possible readings, not verdicts. ${UNTRUSTED}`,
     inputSchema: { book, ...page },
     outputSchema: resultSchema(paged('findings')),
     annotations: reading,
